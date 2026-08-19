@@ -1,0 +1,18 @@
+# Vercel Ignore Configuration
+.venv
+.venv/
+venv/
+node_modules
+node_modules/
+.next
+.next/
+.vercel
+.vercel/
+download/
+.zscripts/
+__pycache__/
+*.pyc
+*.log
+*.tsbuildinfo
+.git/
+.cache/
