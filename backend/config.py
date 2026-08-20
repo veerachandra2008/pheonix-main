@@ -14,22 +14,13 @@ class Config:
     PORT = int(os.getenv('PORT', 5000))
     ENV = os.getenv('FLASK_ENV', 'development')
     
-    # Supabase Configuration (supports all environment variable names with live fallback)
-    SUPABASE_URL = (
-        os.getenv('SUPABASE_URL') or
-        os.getenv('NEXT_PUBLIC_SUPABASE_URL') or
-        'https://icgqikmzhtynpatntglw.supabase.co'
-    ).strip()
-    
-    SUPABASE_KEY = (
-        os.getenv('SUPABASE_KEY') or
-        os.getenv('NEXT_PUBLIC_SUPABASE_ANON_KEY') or
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImljZ3Fpa216aHR5bnBhdG50Z2x3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NjE3MTA2MSwiZXhwIjoyMTAxNzQ3MDYxfQ._D0eCpjbdsr7GlZhy2cFgwZqX5oWp1bVAi-5MmEQd9w'
-    ).strip()
+    # Supabase Configuration
+    SUPABASE_URL = os.getenv('SUPABASE_URL', '').strip()
+    SUPABASE_KEY = os.getenv('SUPABASE_KEY', '').strip() # Service role key or anon key
     
     # Razorpay Configuration
-    RAZORPAY_KEY_ID = (os.getenv('RAZORPAY_KEY_ID') or 'rzp_test_TRdHzutgi9plG4').strip()
-    RAZORPAY_KEY_SECRET = (os.getenv('RAZORPAY_KEY_SECRET') or 'civBvz4NqzcHO9RSBxO88ccp').strip()
+    RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '').strip()
+    RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '').strip()
     RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '').strip()
 
 import requests

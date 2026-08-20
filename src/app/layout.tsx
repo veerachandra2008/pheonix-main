@@ -42,7 +42,6 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700&family=Bebas+Neue&family=Orbitron:wght@700&family=Russo+One&family=Rajdhani:wght@500;700&family=Exo+2:wght@400;700&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
       </head>
       <body className="antialiased bg-[#070B14] text-white">
-        <RoutePrewarmer />
         <SmoothScroll>
           <Navbar />
           {children}

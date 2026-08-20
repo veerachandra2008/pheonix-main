@@ -54,45 +54,83 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
 
   useEffect(() => {
     async function fetchTicket() {
-      if (!ticketPassId) {
-        // Check session storage if passId was set during current checkout session
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+      let resolvedPassId = ticketPassId;
+
+      // 1. If no passId in URL search params, check sessionStorage
+      if (!resolvedPassId) {
         try {
           const rawSession = sessionStorage.getItem('reg_selection');
           if (rawSession) {
             const data = JSON.parse(rawSession);
             if (data.passId) {
-              // Fetch details from backend using session passId
-              const apiBase =
-                typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-                  ? '/api'
-                  : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+              resolvedPassId = data.passId;
+            }
+          }
+        } catch {}
+      }
 
-              const res = await fetch(`${apiBase}/registrations/${data.passId}`);
+      // 2. If still no passId, check logged in user session and lookup registered pass
+      if (!resolvedPassId) {
+        try {
+          const rawUser = localStorage.getItem('xenova_session');
+          if (rawUser) {
+            const user = JSON.parse(rawUser);
+            if (user?.email) {
+              const res = await fetch(`${apiBase}/registrations?email=${encodeURIComponent(user.email.trim().toLowerCase())}`, { cache: 'no-store' });
               if (res.ok) {
                 const result = await res.json();
-                if (result.success && result.data) {
-                  setTicketData(result.data);
-                  setLoading(false);
-                  return;
+                if (result.success && Array.isArray(result.data) && result.data.length > 0) {
+                  // Find registration matching this tournament slug, or get latest
+                  const match = result.data.find((r: any) => {
+                    const rSlug = (r.tournament_slug || r.tournamentSlug || '').toLowerCase();
+                    return rSlug === slug.toLowerCase();
+                  }) || result.data[0];
+
+                  if (match) {
+                    resolvedPassId = match.pass_id || match.passId;
+                    setTicketData({
+                      passId: match.pass_id || match.passId,
+                      pass_id: match.pass_id || match.passId,
+                      tournamentSlug: match.tournament_slug || match.tournamentSlug || slug,
+                      tournamentTitle: match.tournament_title || match.tournamentTitle || 'Tournament Pass',
+                      teamName: match.team_name || match.teamName || 'Squad Entry',
+                      college: match.college || 'Varsity Club',
+                      captainName: match.captain_name || match.captainName || 'Team Captain',
+                      email: match.email || user.email,
+                      paymentStatus: match.payment_status || match.paymentStatus || 'SUCCESS',
+                      tournamentGame: match.tournament_game || match.tournamentGame || 'Esports',
+                      tournamentDate: match.tournament_date || match.tournamentDate || 'Scheduled',
+                      tournamentFormat: match.tournament_format || match.tournamentFormat || 'Tournament',
+                      tournamentRegion: match.tournament_region || match.tournamentRegion || 'Pan India',
+                      tournamentFee: match.tournament_fee || match.tournamentFee || 'Verified',
+                      registeredAt: match.registered_at || match.registeredAt || new Date().toISOString()
+                    });
+                    setLoading(false);
+                    return;
+                  }
                 }
               }
             }
           }
-        } catch {}
+        } catch (e) {
+          console.warn('User session registration lookup notice:', e);
+        }
+      }
 
+      if (!resolvedPassId) {
         setErrorMsg('No pass ID provided. Please complete registration to view your ticket.');
         setLoading(false);
         return;
       }
 
-      // Fetch from Backend API (/api/registrations/:passId)
+      // 3. Fetch from Backend API (/api/registrations/:passId)
       try {
-        const apiBase =
-          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-            ? '/api'
-            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
-        const res = await fetch(`${apiBase}/registrations/${ticketPassId}`);
+        const res = await fetch(`${apiBase}/registrations/${resolvedPassId}`, { cache: 'no-store' });
         if (res.ok) {
           const result = await res.json();
           if (result.success && result.data) {
@@ -101,13 +139,41 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             return;
           }
         }
-        setErrorMsg(`No authentic registration found in the database for Pass ID: ${ticketPassId}`);
-        setLoading(false);
       } catch (err) {
-        console.warn('Backend API pass lookup error:', err);
-        setErrorMsg('Could not connect to database server to retrieve your ticket.');
-        setLoading(false);
+        console.warn('Backend API pass lookup warning:', err);
       }
+
+      // 4. Supabase Direct Query Fallback
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        const { data, error } = await supabase
+          .from('registrations')
+          .select('*')
+          .eq('pass_id', resolvedPassId);
+
+        if (!error && data && data.length > 0) {
+          const item = data[0];
+          setTicketData({
+            passId: item.pass_id,
+            pass_id: item.pass_id,
+            tournamentSlug: item.tournament_slug || slug,
+            tournamentTitle: item.tournament_title || 'Esports Championship',
+            teamName: item.team_name,
+            college: item.college,
+            captainName: item.captain_name,
+            email: item.email,
+            paymentStatus: item.payment_status || 'SUCCESS',
+            registeredAt: item.registered_at || new Date().toISOString()
+          });
+          setLoading(false);
+          return;
+        }
+      } catch (sbErr) {
+        console.warn('Direct Supabase pass query notice:', sbErr);
+      }
+
+      setErrorMsg(`No authentic registration found for Pass ID: ${resolvedPassId}`);
+      setLoading(false);
     }
 
     fetchTicket();

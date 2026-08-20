@@ -252,7 +252,7 @@ export default function DashboardPage() {
                     <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between">
                       <span className="text-[11px] text-zinc-400">Captain: <strong className="text-white">{reg.captainName}</strong></span>
                       <Link
-                        href={`/registration/${reg.tournamentSlug}/pass`}
+                        href={`/registration/${reg.tournamentSlug}/pass?passId=${reg.passId}`}
                         className="inline-flex items-center gap-1 text-xs font-black text-emerald-400 hover:underline"
                       >
                         View Pass →

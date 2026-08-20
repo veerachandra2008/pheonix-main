@@ -19,9 +19,12 @@ import {
   Building2,
   Users,
   Check,
-  Share2
+  Share2,
+  Ticket,
+  ExternalLink
 } from 'lucide-react';
 import { playerStandings, type LeaderboardEntry } from '../../leaderboards/data';
+import { getUserRegistrations, TournamentRegistrationRecord } from '@/lib/tournaments-db';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
 type Props = {
@@ -52,33 +55,48 @@ export default function PlayerProfilePage({ params }: Props) {
   const [currentUser, setCurrentUser] = useState<Player | null>(null);
   const [targetUser, setTargetUser] = useState<Player | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [userPasses, setUserPasses] = useState<TournamentRegistrationRecord[]>([]);
 
   useEffect(() => {
+    let sessionUser: Player | null = null;
     const rawSession = localStorage.getItem('xenova_session');
     if (rawSession) {
       try {
-        setCurrentUser(JSON.parse(rawSession));
+        sessionUser = JSON.parse(rawSession);
+        setCurrentUser(sessionUser);
       } catch (e) {
         console.error(e);
       }
     }
 
+    let foundTarget: Player | null = null;
     const rawUsers = localStorage.getItem('xenova_users');
     if (rawUsers) {
       try {
         const users = JSON.parse(rawUsers);
         const match = users.find((u: Player) => u.id === id || slugify(u.name || '') === id || u.tag?.toLowerCase() === id.toLowerCase());
-        if (match) setTargetUser(match);
+        if (match) {
+          foundTarget = match;
+          setTargetUser(match);
+        }
       } catch (e) {
         console.error(e);
       }
     }
+
+    // Load registered passes for this athlete
+    const emailToLookup = foundTarget?.email || (sessionUser && (slugify(sessionUser.name || '') === id || sessionUser.tag?.toLowerCase() === id.toLowerCase() || sessionUser.id === id) ? sessionUser.email : undefined) || sessionUser?.email;
+    if (emailToLookup) {
+      getUserRegistrations(emailToLookup).then((regs) => {
+        setUserPasses(regs || []);
+      });
+    }
   }, [id]);
 
-  const playerName = targetUser?.name || id.replace(/-/g, ' ').toUpperCase();
-  const playerTag = targetUser?.tag || `@${id.toLowerCase()}`;
-  const playerCollege = targetUser?.college || 'Nexus Institute of Technology';
-  const playerTeam = targetUser?.team || 'Team Titans';
+  const playerName = targetUser?.name || (currentUser && (slugify(currentUser.name || '') === id || currentUser.tag?.toLowerCase() === id.toLowerCase() || currentUser.id === id) ? currentUser.name : id.replace(/-/g, ' ').toUpperCase()) || 'ATHLETE';
+  const playerTag = targetUser?.tag || (currentUser && (slugify(currentUser.name || '') === id || currentUser.tag?.toLowerCase() === id.toLowerCase() || currentUser.id === id) ? `@${currentUser.tag}` : `@${id.toLowerCase()}`);
+  const playerCollege = targetUser?.college || (currentUser && (slugify(currentUser.name || '') === id || currentUser.tag?.toLowerCase() === id.toLowerCase() || currentUser.id === id) ? currentUser.college : 'Nexus Institute of Technology');
+  const playerTeam = targetUser?.team || (currentUser && (slugify(currentUser.name || '') === id || currentUser.tag?.toLowerCase() === id.toLowerCase() || currentUser.id === id) ? currentUser.team : 'Team Titans');
 
   const handleShare = () => {
     if (typeof window !== 'undefined') {
@@ -104,28 +122,26 @@ export default function PlayerProfilePage({ params }: Props) {
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-transparent" />
         </div>
 
-        {/* Back Button */}
-        <div className="absolute top-8 left-0 right-0 z-20 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-          <Link
-            href="/players"
-            className="inline-flex items-center gap-2.5 rounded-full border border-white/20 bg-black/70 backdrop-blur-2xl px-4 py-2 text-xs font-black uppercase tracking-wider text-zinc-300 transition hover:bg-white/10 hover:text-white shadow-2xl"
-          >
-            <ArrowLeft className="h-4 w-4" /> Back to Athletes
-          </Link>
+        <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-12 w-full">
+          
+          <div className="flex items-center justify-between gap-4 mb-8">
+            <Link
+              href="/players"
+              className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-zinc-400 hover:text-emerald-400 transition"
+            >
+              <ArrowLeft className="h-4 w-4" /> Back to Players
+            </Link>
 
-          <button
-            type="button"
-            onClick={handleShare}
-            className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/70 backdrop-blur-2xl px-4 py-2 text-xs font-black uppercase tracking-wider text-zinc-300 transition hover:bg-white/10 hover:text-white shadow-2xl cursor-pointer"
-          >
-            {copiedLink ? <Check className="h-4 w-4 text-emerald-400" /> : <Share2 className="h-4 w-4" />}
-            {copiedLink ? 'Link Copied!' : 'Share Profile'}
-          </button>
-        </div>
+            <button
+              onClick={handleShare}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-bold uppercase tracking-wider text-white transition active:scale-95"
+            >
+              {copiedLink ? <Check className="h-4 w-4 text-emerald-400" /> : <Share2 className="h-4 w-4" />}
+              {copiedLink ? 'Link Copied!' : 'Share Profile'}
+            </button>
+          </div>
 
-        {/* Player Identity */}
-        <div className="relative z-10 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 pb-12 pt-28">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-6">
+          <div className="flex flex-col sm:flex-row sm:items-end gap-6 sm:gap-8">
             
             {/* Avatar Crest */}
             <div className="relative grid place-items-center h-28 w-28 sm:h-36 sm:w-36 rounded-3xl border-2 border-emerald-500/50 bg-emerald-500/10 font-black text-emerald-400 text-3xl sm:text-4xl shadow-2xl shrink-0">
@@ -185,6 +201,55 @@ export default function PlayerProfilePage({ params }: Props) {
               <p className="text-3xl font-black text-white mt-1">{targetUser?.followers?.length || 142}</p>
             </div>
           </div>
+
+          {/* Registered Tournament Passes */}
+          {userPasses.length > 0 && (
+            <div className="rounded-3xl border border-emerald-500/20 bg-[#09090b] p-6 sm:p-8 space-y-6 shadow-2xl">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 flex items-center gap-1.5">
+                    <Ticket className="h-3.5 w-3.5" /> Authenticated Passes
+                  </span>
+                  <h3 className="text-xl font-black uppercase tracking-tight text-white mt-1">
+                    Active Tournament Passes ({userPasses.length})
+                  </h3>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {userPasses.map((pass, idx) => (
+                  <div
+                    key={pass.passId ? `${pass.passId}-${idx}` : `pass-${idx}`}
+                    className="p-5 rounded-2xl bg-black border border-white/10 hover:border-emerald-500/50 transition space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono font-bold">
+                        {pass.passId}
+                      </span>
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase">
+                        {pass.tournamentFormat || 'Tournament'}
+                      </span>
+                    </div>
+
+                    <h4 className="text-base font-black text-white truncate">{pass.tournamentTitle}</h4>
+                    <p className="text-xs text-zinc-400 truncate">Squad: <span className="text-emerald-400 font-bold">{pass.teamName}</span> • {pass.college}</p>
+
+                    <div className="pt-2 border-t border-white/5 flex items-center justify-between">
+                      <span className="text-[11px] text-zinc-500">
+                        {new Date(pass.registeredAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </span>
+                      <Link
+                        href={`/registration/${pass.tournamentSlug}/pass?passId=${pass.passId}`}
+                        className="inline-flex items-center gap-1 text-xs font-black text-emerald-400 hover:text-emerald-300 transition uppercase tracking-wider"
+                      >
+                        View Pass <ExternalLink className="h-3 w-3" />
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="rounded-3xl border border-white/10 bg-[#09090b] p-8 space-y-4 shadow-2xl">
             <h3 className="text-lg font-black uppercase tracking-tight text-white">Athlete Bio & Competition Specialty</h3>

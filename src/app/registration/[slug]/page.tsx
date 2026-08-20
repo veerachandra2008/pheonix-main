@@ -63,11 +63,6 @@ export default function RegistrationStep1({ params: paramsPromise }: PageProps) 
   const [createError, setCreateError] = useState('');
 
   useEffect(() => {
-    // Pre-warm the next confirmation step in Next.js router
-    if (slug) {
-      router.prefetch(`/registration/${slug}/confirm`);
-    }
-
     const rawSession = localStorage.getItem('xenova_session');
     if (!rawSession) { router.replace('/login'); return; }
     const user = JSON.parse(rawSession);

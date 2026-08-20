@@ -16,6 +16,7 @@ export default function TournamentsPage() {
   const [selectedGame, setSelectedGame] = useState('All');
   const [tournamentsList, setTournamentsList] = useState<any[]>([]);
   const [registeredSlugs, setRegisteredSlugs] = useState<Set<string>>(new Set());
+  const [registeredPasses, setRegisteredPasses] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     async function loadData() {
@@ -29,7 +30,14 @@ export default function TournamentsPage() {
         const email = rawSession ? JSON.parse(rawSession).email : undefined;
         const regs = await getUserRegistrations(email);
         const slugs = new Set(regs.map((r) => r.tournamentSlug));
+        const passMap = new Map<string, string>();
+        for (const r of regs) {
+          if (r.tournamentSlug && r.passId) {
+            passMap.set(r.tournamentSlug, r.passId);
+          }
+        }
         setRegisteredSlugs(slugs);
+        setRegisteredPasses(passMap);
       } catch (err) {
         console.warn('Failed to load user registrations', err);
       }
@@ -211,14 +219,6 @@ export default function TournamentsPage() {
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
                   transition={{ duration: 0.4, delay: index * 0.05 }}
-                  onMouseEnter={() => {
-                    router.prefetch(`/tournaments/${tournament.slug}`);
-                    router.prefetch(`/registration/${tournament.slug}`);
-                  }}
-                  onTouchStart={() => {
-                    router.prefetch(`/tournaments/${tournament.slug}`);
-                    router.prefetch(`/registration/${tournament.slug}`);
-                  }}
                   className="group relative flex flex-col justify-between overflow-hidden rounded-3xl border border-white/15 bg-[#09090b] p-6 shadow-2xl transition-all duration-500 hover:scale-[1.02] hover:border-emerald-500/50 hover:shadow-[0_0_35px_rgba(16,185,129,0.2)]"
                 >
                   {/* Uneven Slanted Accent Edge Overlay */}
@@ -335,7 +335,7 @@ export default function TournamentsPage() {
                     </Link>
                     {registeredSlugs.has(tournament.slug) ? (
                       <Link
-                        href={`/registration/${tournament.slug}/pass`}
+                        href={`/registration/${tournament.slug}/pass${registeredPasses.get(tournament.slug) ? `?passId=${registeredPasses.get(tournament.slug)}` : ''}`}
                         prefetch={true}
                         className="flex-1 inline-flex items-center justify-center rounded-xl bg-emerald-500 text-black border border-emerald-400 px-4 py-3 text-xs font-black uppercase tracking-wider transition shadow-lg shadow-emerald-500/25 hover:bg-emerald-400 cursor-pointer active:scale-95"
                       >

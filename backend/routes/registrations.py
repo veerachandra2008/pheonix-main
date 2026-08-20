@@ -95,26 +95,55 @@ def create_registration():
 
 @registrations_bp.route('/', methods=['GET'])
 def get_all_registrations():
-    """Fetch all registrations"""
+    """Fetch all registrations with case-insensitive email filtering"""
     try:
         email = request.args.get('email')
         supabase_records = []
         try:
             supabase = get_supabase_client()
-            q = supabase.table('registrations').select('*')
-            if email:
-                q = q.eq('email', email)
-            res = q.execute()
+            res = supabase.table('registrations').select('*').execute()
             supabase_records = res.data or []
         except Exception as sb_err:
             print(f"Supabase all registrations warning: {sb_err}")
             
         memory_records = list(IN_MEMORY_REGISTRATIONS.values())
+        
+        combined_dict = {}
+        for r in (supabase_records + memory_records):
+            pid = r.get('pass_id') or r.get('passId')
+            if not pid:
+                continue
+            normalized = {
+                'id': r.get('id') or pid,
+                'pass_id': pid,
+                'passId': pid,
+                'tournament_slug': r.get('tournament_slug') or r.get('tournamentSlug'),
+                'tournamentSlug': r.get('tournament_slug') or r.get('tournamentSlug'),
+                'tournament_title': r.get('tournament_title') or r.get('tournamentTitle'),
+                'tournamentTitle': r.get('tournament_title') or r.get('tournamentTitle'),
+                'team_id': r.get('team_id') or r.get('teamId'),
+                'teamId': r.get('team_id') or r.get('teamId'),
+                'team_name': r.get('team_name') or r.get('teamName'),
+                'teamName': r.get('team_name') or r.get('teamName'),
+                'college': r.get('college'),
+                'captain_name': r.get('captain_name') or r.get('captainName'),
+                'captainName': r.get('captain_name') or r.get('captainName'),
+                'email': (r.get('email') or '').strip().lower(),
+                'payment_status': r.get('payment_status') or r.get('paymentStatus', 'SUCCESS'),
+                'paymentStatus': r.get('payment_status') or r.get('paymentStatus', 'SUCCESS'),
+                'order_id': r.get('order_id') or r.get('orderId', ''),
+                'payment_id': r.get('payment_id') or r.get('paymentId', ''),
+                'registered_at': r.get('registered_at') or r.get('registeredAt', ''),
+                'registeredAt': r.get('registered_at') or r.get('registeredAt', ''),
+            }
+            combined_dict[pid] = normalized
+
+        all_records = list(combined_dict.values())
         if email:
-            memory_records = [r for r in memory_records if r.get('email', '').lower() == email.lower()]
-            
-        combined = {r.get('pass_id') or r.get('passId'): r for r in (supabase_records + memory_records)}
-        return jsonify({'success': True, 'data': list(combined.values())}), 200
+            clean_email = email.strip().lower()
+            all_records = [r for r in all_records if r.get('email') == clean_email]
+
+        return jsonify({'success': True, 'data': all_records}), 200
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -126,7 +155,23 @@ def get_registration_by_pass_id(pass_id):
     try:
         # Check in-memory store first
         if pass_id in IN_MEMORY_REGISTRATIONS:
-            return jsonify({'success': True, 'data': IN_MEMORY_REGISTRATIONS[pass_id]}), 200
+            item = IN_MEMORY_REGISTRATIONS[pass_id]
+            return jsonify({
+                'success': True,
+                'data': {
+                    'passId': item.get('pass_id') or item.get('passId'),
+                    'pass_id': item.get('pass_id') or item.get('passId'),
+                    'tournamentSlug': item.get('tournament_slug') or item.get('tournamentSlug'),
+                    'tournament_slug': item.get('tournament_slug') or item.get('tournamentSlug'),
+                    'tournamentTitle': item.get('tournament_title') or item.get('tournamentTitle'),
+                    'teamName': item.get('team_name') or item.get('teamName'),
+                    'college': item.get('college'),
+                    'captainName': item.get('captain_name') or item.get('captainName'),
+                    'email': item.get('email'),
+                    'paymentStatus': item.get('payment_status', 'SUCCESS'),
+                    'registeredAt': item.get('registered_at', '')
+                }
+            }), 200
 
         # Query Supabase registrations
         try:
@@ -138,6 +183,7 @@ def get_registration_by_pass_id(pass_id):
                     'passId': item.get('pass_id'),
                     'pass_id': item.get('pass_id'),
                     'tournamentSlug': item.get('tournament_slug'),
+                    'tournament_slug': item.get('tournament_slug'),
                     'tournamentTitle': item.get('tournament_title'),
                     'teamName': item.get('team_name'),
                     'college': item.get('college'),
