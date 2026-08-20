@@ -80,6 +80,11 @@ export default function DashboardPage() {
   const [userRegistrations, setUserRegistrations] = useState<TournamentRegistrationRecord[]>([]);
 
   useEffect(() => {
+    // Remove any stale local storage mock registration tickets
+    try {
+      localStorage.removeItem('xenova_registrations');
+    } catch {}
+
     const rawSession = localStorage.getItem('xenova_session');
     if (!rawSession) {
       router.replace('/login');
@@ -89,9 +94,9 @@ export default function DashboardPage() {
       const user = JSON.parse(rawSession);
       setSession(user);
       
-      // Load user registrations from DB / Storage
+      // Load user registrations strictly from Backend / Supabase
       getUserRegistrations(user.email).then((regs) => {
-        setUserRegistrations(regs);
+        setUserRegistrations(regs || []);
       });
     } catch (e) {
       router.replace('/login');

@@ -35,9 +35,10 @@ export default function VerifyPassPage({ params }: PageProps) {
       // 1. Try Backend API
       try {
         setLoading(true);
-        const apiBase = (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
-          ? '/api'
-          : (process.env.NEXT_PUBLIC_FLASK_API_URL || '/api');
+        const apiBase =
+          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+            ? '/api'
+            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
 
         const res = await fetch(`${apiBase}/registrations/verify/${passId}`);
         if (res.ok) {
@@ -52,56 +53,7 @@ export default function VerifyPassPage({ params }: PageProps) {
         console.warn('Verification API notice:', err);
       }
 
-      // 2. Check local storage registrations
-      try {
-        const rawLocal = localStorage.getItem('xenova_registrations');
-        if (rawLocal) {
-          const list: any[] = JSON.parse(rawLocal);
-          const found = list.find((r) => r.passId === passId);
-          if (found) {
-            setResult({
-              valid: true,
-              status: 'VERIFIED',
-              passId: found.passId,
-              data: {
-                passId: found.passId,
-                tournamentTitle: found.tournamentTitle,
-                teamName: found.teamName,
-                captainName: found.captainName,
-                college: found.college,
-                email: found.email,
-                paymentStatus: 'VERIFIED',
-                paymentId: found.paymentId || 'pay_verified',
-              },
-            });
-            setLoading(false);
-            return;
-          }
-        }
-      } catch {}
-
-      // 3. If passId is standard XPH format (e.g. XPH-XXXXXXXX), authenticate it
-      if (passId.startsWith('XPH-')) {
-        setResult({
-          valid: true,
-          status: 'VERIFIED',
-          passId: passId,
-          data: {
-            passId: passId,
-            tournamentTitle: 'Official University Esports Tournament',
-            teamName: 'Verified Collegiate Team',
-            captainName: 'Team Captain',
-            college: 'Registered University',
-            email: 'verified@university.edu',
-            paymentStatus: 'VERIFIED',
-            paymentId: 'pay_verified_secure',
-          },
-        });
-        setLoading(false);
-        return;
-      }
-
-      setResult({ valid: false, message: 'Invalid or expired pass ID.' });
+      setResult({ valid: false, message: 'Invalid or expired pass ID. No authentic record found on server.' });
       setLoading(false);
     }
 

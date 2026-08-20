@@ -128,12 +128,44 @@ def get_teams():
     try:
         supabase = get_supabase_client()
         res = supabase.table('teams').select('*').execute()
-        if res.data and len(res.data) > 0:
-            return jsonify({'success': True, 'data': res.data}), 200
+        if res.data is not None:
+            if len(res.data) == 0 and len(IN_MEMORY_TEAMS) > 0:
+                try:
+                    supabase.table('teams').insert(IN_MEMORY_TEAMS).execute()
+                    res = supabase.table('teams').select('*').execute()
+                except Exception:
+                    pass
+            return jsonify({'success': True, 'data': res.data if res.data is not None else IN_MEMORY_TEAMS}), 200
     except Exception as e:
         print(f"Supabase error fetching teams: {e}")
     
     return jsonify({'success': True, 'data': IN_MEMORY_TEAMS, 'fallback': True}), 200
+
+VALID_TEAM_COLUMNS = {
+    'slug', 'name', 'college', 'game', 'rank', 'win_rate', 'streak',
+    'captain', 'captain_email', 'created_by', 'trophies', 'members',
+    'recent_wins', 'form', 'active_score', 'joined', 'accent', 'verified',
+    'verification_status'
+}
+
+def sanitize_team_payload(data):
+    sanitized = {}
+    for k, v in data.items():
+        if k == 'winRate':
+            sanitized['win_rate'] = v
+        elif k == 'recentWins':
+            sanitized['recent_wins'] = v
+        elif k == 'activeScore':
+            sanitized['active_score'] = v
+        elif k == 'verificationStatus':
+            sanitized['verification_status'] = v
+        elif k == 'captainEmail':
+            sanitized['captain_email'] = v
+        elif k == 'createdBy':
+            sanitized['created_by'] = v
+        elif k in VALID_TEAM_COLUMNS:
+            sanitized[k] = v
+    return sanitized
 
 @teams_bp.route('/', methods=['POST'])
 def create_team():
@@ -142,35 +174,49 @@ def create_team():
     slug = data.get('slug') or data.get('name', '').lower().replace(' ', '-')
     data['slug'] = slug
     
+    clean_data = sanitize_team_payload(data)
+    
     # Store in memory
-    IN_MEMORY_TEAMS.insert(0, data)
+    IN_MEMORY_TEAMS.insert(0, {**data, **clean_data})
     
     try:
         supabase = get_supabase_client()
-        res = supabase.table('teams').insert(data).execute()
+        res = supabase.table('teams').insert(clean_data).execute()
         return jsonify({'success': True, 'data': res.data}), 201
     except Exception as e:
         print(f"Supabase insert warning for team: {e}")
-        return jsonify({'success': True, 'data': [data], 'fallback': True}), 201
+        return jsonify({'success': True, 'data': [clean_data], 'fallback': True}), 201
 
-@teams_bp.route('/seed', methods=['POST'])
-def seed_teams():
-    """Seed default teams into Supabase table"""
+@teams_bp.route('/<slug>', methods=['PATCH', 'PUT'])
+def update_team(slug):
+    """Update team details or verification status"""
+    data = request.get_json() or {}
+    clean_data = sanitize_team_payload(data)
+    
+    # Update in memory
+    for t in IN_MEMORY_TEAMS:
+        if t.get('slug') == slug:
+            t.update(data)
+            
     try:
         supabase = get_supabase_client()
-        existing_res = supabase.table('teams').select('slug').execute()
-        existing_slugs = {item['slug'] for item in (existing_res.data or []) if 'slug' in item}
-        
-        to_insert = [t for t in MOCK_TEAMS if t['slug'] not in existing_slugs]
-        inserted = []
-        if to_insert:
-            res = supabase.table('teams').insert(to_insert).execute()
-            inserted = res.data or []
-        return jsonify({'success': True, 'inserted': len(inserted), 'total': len(MOCK_TEAMS)}), 200
+        res = supabase.table('teams').update(clean_data).eq('slug', slug).execute()
+        return jsonify({'success': True, 'data': res.data}), 200
     except Exception as e:
-        print(f"Supabase teams seeding error: {e}")
-        return jsonify({
-            'success': False,
-            'message': f"Supabase teams seeding failed: {str(e)}. Please check SUPABASE_KEY or run SQL seed script.",
-            'error': str(e)
-        }), 400
+        print(f"Supabase update team warning: {e}")
+        return jsonify({'success': True, 'data': [data], 'fallback': True}), 200
+
+@teams_bp.route('/<slug>', methods=['DELETE'])
+def delete_team(slug):
+    """Delete a team from Supabase and memory"""
+    global IN_MEMORY_TEAMS
+    IN_MEMORY_TEAMS = [t for t in IN_MEMORY_TEAMS if t.get('slug') != slug]
+    
+    try:
+        supabase = get_supabase_client()
+        supabase.table('teams').delete().eq('slug', slug).execute()
+        return jsonify({'success': True, 'message': 'Team deleted from database'}), 200
+    except Exception as e:
+        print(f"Supabase delete team warning: {e}")
+        return jsonify({'success': True, 'message': 'Team removed from memory'}), 200
+

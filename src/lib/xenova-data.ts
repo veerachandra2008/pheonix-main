@@ -15,6 +15,7 @@ export interface XenovaCollege {
   wins: number;
   verified: boolean;
   verificationStatus: VerificationStatus;
+  verification_status?: VerificationStatus | string;
   accent: string;
   website: string;
   submittedBy?: string;
@@ -41,6 +42,7 @@ export interface XenovaTeam {
   roster?: string[];
   verified: boolean;
   verificationStatus: VerificationStatus;
+  verification_status?: VerificationStatus | string;
   createdBy?: string;
   captainEmail?: string;
   isCustom?: boolean;

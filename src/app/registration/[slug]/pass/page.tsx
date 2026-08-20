@@ -12,7 +12,6 @@ import {
   ArrowRight,
   Zap,
   Download,
-  Loader2,
   ExternalLink,
 } from 'lucide-react';
 import { QRCodeComponent } from '@/components/QRCodeComponent';
@@ -51,154 +50,72 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
   const ticketRef = useRef<HTMLDivElement>(null);
   const [ticketData, setTicketData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     async function fetchTicket() {
-      const activePassId = ticketPassId || 'XPH-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+      if (!ticketPassId) {
+        // Check session storage if passId was set during current checkout session
+        try {
+          const rawSession = sessionStorage.getItem('reg_selection');
+          if (rawSession) {
+            const data = JSON.parse(rawSession);
+            if (data.passId) {
+              // Fetch details from backend using session passId
+              const apiBase =
+                typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+                  ? '/api'
+                  : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
 
-      // 1. Try local storage records first (instant 0ms)
-      try {
-        const rawLocal = localStorage.getItem('xenova_registrations');
-        if (rawLocal) {
-          const list: any[] = JSON.parse(rawLocal);
-          const found = list.find((r) => r.passId === ticketPassId || (slug && r.tournamentSlug === slug));
-          if (found) {
-            setTicketData({
-              passId: found.passId || activePassId,
-              tournamentTitle: found.tournamentTitle,
-              tournamentGame: found.tournamentGame || 'Esports',
-              tournamentDate: found.tournamentDate || 'Soon',
-              tournamentFormat: found.tournamentFormat || 'Tournament',
-              tournamentRegion: found.tournamentRegion || 'Pan India',
-              tournamentFee: found.tournamentFee || 'Verified',
-              teamName: found.teamName,
-              college: found.college,
-              captainName: found.captainName,
-              email: found.email,
-              paymentStatus: 'PAID & VERIFIED',
-              paymentId: found.paymentId || 'pay_verified',
-            });
-            setLoading(false);
-            return;
-          }
-        }
-      } catch {}
-
-      // 2. Try session storage
-      try {
-        const rawSession = sessionStorage.getItem('reg_selection');
-        if (rawSession) {
-          const data = JSON.parse(rawSession);
-          if (data.tournamentSlug === slug || !ticketPassId || data.passId === ticketPassId) {
-            setTicketData({
-              passId: ticketPassId || data.passId || activePassId,
-              tournamentTitle: data.tournamentTitle,
-              tournamentGame: data.tournamentGame,
-              tournamentDate: data.tournamentDate,
-              tournamentFormat: data.tournamentFormat,
-              tournamentRegion: data.tournamentRegion,
-              tournamentFee: data.tournamentFee,
-              teamName: data.teamName,
-              college: data.college,
-              captainName: data.captainName,
-              email: data.email,
-              paymentStatus: 'PAID & VERIFIED',
-              paymentId: data.paymentId || 'pay_verified',
-            });
-            setLoading(false);
-            return;
-          }
-        }
-      } catch {}
-
-      // 3. Try Backend API (/api/registrations/:passId)
-      try {
-        const apiBase = (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
-          ? '/api'
-          : (process.env.NEXT_PUBLIC_FLASK_API_URL || '/api');
-
-        if (ticketPassId) {
-          const res = await fetch(`${apiBase}/registrations/${ticketPassId}`);
-          if (res.ok) {
-            const result = await res.json();
-            if (result.success && result.data) {
-              setTicketData(result.data);
-              setLoading(false);
-              return;
+              const res = await fetch(`${apiBase}/registrations/${data.passId}`);
+              if (res.ok) {
+                const result = await res.json();
+                if (result.success && result.data) {
+                  setTicketData(result.data);
+                  setLoading(false);
+                  return;
+                }
+              }
             }
           }
-        }
-      } catch (err) {
-        console.warn('Backend API pass lookup notice:', err);
+        } catch {}
+
+        setErrorMsg('No pass ID provided. Please complete registration to view your ticket.');
+        setLoading(false);
+        return;
       }
 
-      // 4. Construct fallback ticket from tournament data & user profile
-      const foundTourney = (await import('@/app/tournaments/data')).tournaments.find((t) => t.slug === slug);
-      let sessionUser: any = null;
+      // Fetch from Backend API (/api/registrations/:passId)
       try {
-        const rawUser = localStorage.getItem('xenova_session');
-        if (rawUser) sessionUser = JSON.parse(rawUser);
-      } catch {}
+        const apiBase =
+          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+            ? '/api'
+            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
 
-      setTicketData({
-        passId: ticketPassId || activePassId,
-        tournamentTitle: foundTourney?.title || (slug ? slug.replace(/-/g, ' ').toUpperCase() : 'Xenova Tournament'),
-        tournamentGame: foundTourney?.game || 'Esports',
-        tournamentDate: foundTourney?.date || 'Upcoming Season',
-        tournamentFormat: foundTourney?.format || 'Tournament',
-        tournamentRegion: foundTourney?.region || 'Pan India',
-        tournamentFee: foundTourney?.fee || 'Verified Entry',
-        teamName: sessionUser ? `${sessionUser.name}'s Squad` : 'Alpha Squad',
-        college: sessionUser?.college || 'University Partner',
-        captainName: sessionUser?.name || 'Player',
-        email: sessionUser?.email || '',
-        paymentStatus: 'PAID & VERIFIED',
-        paymentId: 'pay_verified_' + Math.random().toString(36).substring(2, 8),
-      });
-      setLoading(false);
+        const res = await fetch(`${apiBase}/registrations/${ticketPassId}`);
+        if (res.ok) {
+          const result = await res.json();
+          if (result.success && result.data) {
+            setTicketData(result.data);
+            setLoading(false);
+            return;
+          }
+        }
+        setErrorMsg(`No authentic registration found in the database for Pass ID: ${ticketPassId}`);
+        setLoading(false);
+      } catch (err) {
+        console.warn('Backend API pass lookup error:', err);
+        setErrorMsg('Could not connect to database server to retrieve your ticket.');
+        setLoading(false);
+      }
     }
 
     fetchTicket();
   }, [ticketPassId, slug]);
 
-  const handleDownloadPDF = async () => {
-    if (!ticketRef.current) return;
-    setDownloadingPdf(true);
-
-    try {
-      const html2canvasModule = (await import('html2canvas')).default;
-      const jsPDFModule = (await import('jspdf')).default;
-
-      const element = ticketRef.current;
-      const canvas = await html2canvasModule(element, {
-        scale: 3, // Ultra high-resolution crisp rendering
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#111115',
-        logging: false,
-      });
-
-      const imgData = canvas.toDataURL('image/png', 1.0);
-      const imgWidth = 190;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-      const pdf: any = new jsPDFModule({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: [imgWidth + 20, imgHeight + 20],
-      });
-
-      pdf.setFillColor(17, 17, 21);
-      pdf.rect(0, 0, imgWidth + 20, imgHeight + 20, 'F');
-      pdf.addImage(imgData, 'PNG', 10, 10, imgWidth, imgHeight);
-      pdf.save(`Xenova_Pass_${ticketData?.passId || 'Official'}.pdf`);
-    } catch (err) {
-      console.warn('PDF export notice:', err);
+  const handleDownloadPDF = () => {
+    if (typeof window !== 'undefined') {
       window.print();
-    } finally {
-      setDownloadingPdf(false);
     }
   };
 
@@ -390,23 +307,13 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex flex-col sm:flex-row gap-3 no-print">
           <button
             onClick={handleDownloadPDF}
-            disabled={downloadingPdf}
-            className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500 text-black font-black text-sm uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+            className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500 text-black font-black text-sm uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20"
           >
-            {downloadingPdf ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Generating Crisp PDF...
-              </>
-            ) : (
-              <>
-                <Download className="h-4 w-4" />
-                Download Ticket (PDF)
-              </>
-            )}
+            <Download className="h-4 w-4" />
+            Print / Save Pass (PDF)
           </button>
 
           <Link
@@ -420,7 +327,7 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
         </div>
 
         {/* Navigation row */}
-        <div className="flex items-center justify-between text-xs text-zinc-500 pt-2">
+        <div className="flex items-center justify-between text-xs text-zinc-500 pt-2 no-print">
           <Link href="/dashboard" className="hover:text-emerald-400 transition flex items-center gap-1">
             Go to My Dashboard <ArrowRight className="w-3.5 h-3.5" />
           </Link>
@@ -429,6 +336,26 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
           </Link>
         </div>
       </div>
+
+      {/* Print styles */}
+      <style jsx global>{`
+        @media print {
+          body {
+            background-color: #09090b !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+          #ticket-pass-card {
+            box-shadow: none !important;
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            margin: 0 auto !important;
+            page-break-inside: avoid !important;
+          }
+        }
+      `}</style>
     </main>
   );
 }

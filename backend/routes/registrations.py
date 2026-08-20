@@ -207,3 +207,18 @@ def verify_registration_pass(pass_id):
         return jsonify({'valid': False, 'status': 'INVALID_PASS', 'message': 'Pass ID not found or unverified'}), 404
     except Exception as e:
         return jsonify({'valid': False, 'message': str(e)}), 500
+
+@registrations_bp.route('/<pass_id>', methods=['DELETE'])
+def delete_registration(pass_id):
+    """Delete a tournament registration from Supabase and memory"""
+    global IN_MEMORY_REGISTRATIONS
+    if pass_id in IN_MEMORY_REGISTRATIONS:
+        del IN_MEMORY_REGISTRATIONS[pass_id]
+        
+    try:
+        supabase = get_supabase_client()
+        supabase.table('registrations').delete().eq('pass_id', pass_id).execute()
+        return jsonify({'success': True, 'message': f'Registration {pass_id} deleted successfully.'}), 200
+    except Exception as e:
+        print(f"Supabase delete registration warning: {e}")
+        return jsonify({'success': True, 'message': f'Registration {pass_id} removed from memory.'}), 200

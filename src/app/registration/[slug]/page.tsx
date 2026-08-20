@@ -73,29 +73,48 @@ export default function RegistrationStep1({ params: paramsPromise }: PageProps) 
     const user = JSON.parse(rawSession);
     setSession(user);
 
-    // Resolve tournament from slug
-    try {
-      const rawCustom = localStorage.getItem('xenova_tournaments');
-      const custom = rawCustom ? JSON.parse(rawCustom) : [];
-      const all = [...custom, ...tournaments];
-      const found = all.find((t) => t.slug === slug) || tournaments.find((t) => t.slug === slug);
-      setTournament(found || null);
-      if (found?.game) setNewTeamGame(found.game);
-    } catch {
-      const found = tournaments.find((t) => t.slug === slug);
-      setTournament(found || null);
-      if (found?.game) setNewTeamGame(found.game);
+    async function loadData() {
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+      // 1. Fetch tournament
+      try {
+        const tournRes = await fetch(`${apiBase}/tournaments/`);
+        const tournData = await tournRes.json();
+        if (tournData.success && Array.isArray(tournData.data)) {
+          const found = tournData.data.find((t: any) => t.slug === slug);
+          if (found) {
+            setTournament(found);
+            if (found.game) setNewTeamGame(found.game);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load tournament from database:', e);
+      }
+
+      // 2. Fetch teams
+      try {
+        const teamsRes = await fetch(`${apiBase}/teams/`);
+        const teamsData = await teamsRes.json();
+        if (teamsData.success && Array.isArray(teamsData.data)) {
+          const userEmail = (user.email || '').toLowerCase().trim();
+          const userTeams = teamsData.data.filter((t: any) => {
+            const created = (t.created_by || t.createdBy || '').toLowerCase().trim();
+            const cap = (t.captain_email || t.captainEmail || '').toLowerCase().trim();
+            return created === userEmail || cap === userEmail || t.captain === user.name;
+          });
+          const list = userTeams.length > 0 ? userTeams : teamsData.data;
+          setMyTeams(list);
+          if (list.length > 0) setSelectedTeam(list[0]);
+        }
+      } catch (e) {
+        console.error('Failed to load teams from database:', e);
+      }
     }
 
-    // Resolve user's teams
-    try {
-      const teams = getAllTeams({ includePending: true }).filter((t: any) => {
-        if (!t.isCustom) return true;
-        return t.createdBy === user.email || t.captainEmail === user.email || t.roster?.includes(user.name);
-      });
-      setMyTeams(teams);
-      if (teams.length > 0) setSelectedTeam(teams[0]);
-    } catch {}
+    loadData();
   }, [slug, router]);
 
   const handleCreateTeamSubmit = async (e: React.FormEvent) => {
@@ -114,42 +133,36 @@ export default function RegistrationStep1({ params: paramsPromise }: PageProps) 
       college: collegeName,
       game: newTeamGame || tournament?.game || 'Valorant',
       rank: 10,
-      winRate: 100,
+      win_rate: 100,
       streak: 'W1',
       captain: session?.name || 'Captain',
-      captainEmail: session?.email || '',
-      createdBy: session?.email || '',
+      captain_email: session?.email || '',
+      created_by: session?.email || '',
       trophies: 0,
       members: 1 + validRoster.length,
-      recentWins: 0,
+      recent_wins: 0,
       form: ['W'],
-      activeScore: 100,
+      active_score: 100,
       joined: 2026,
       accent: '#22c55e',
       roster: validRoster,
       verified: true,
-      verificationStatus: 'approved' as const,
-      isCustom: true,
+      verification_status: 'approved',
     };
 
     try {
-      // 1. Save locally
-      const customTeams = getCustomTeams();
-      saveCustomTeams([newTeamObj, ...customTeams]);
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
 
-      // 2. Post to backend DB
-      try {
-        const apiBase = process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-        await fetch(`${apiBase}/teams`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newTeamObj),
-        });
-      } catch (err) {
-        console.warn('Backend team sync offline, saved locally.');
-      }
+      await fetch(`${apiBase}/teams/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTeamObj),
+      });
 
-      // 3. Update state & auto select
+      // Update state & auto select
       const updatedList = [newTeamObj, ...myTeams];
       setMyTeams(updatedList);
       setSelectedTeam(newTeamObj);
@@ -197,7 +210,7 @@ export default function RegistrationStep1({ params: paramsPromise }: PageProps) 
     );
   }
 
-  const gameImage = GAME_IMAGES[tournament.game] || GAME_IMAGES.default;
+  const gameImage = tournament.image || GAME_IMAGES[tournament.game] || GAME_IMAGES.default;
   const slotsLeft = tournament.teams
     ? (() => { const parts = tournament.teams.split('/'); return parseInt(parts[1]) - parseInt(parts[0]); })()
     : null;

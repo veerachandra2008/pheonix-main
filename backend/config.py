@@ -1,7 +1,13 @@
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables from backend/.env, root .env, and root .env.local
+_backend_dir = os.path.dirname(os.path.abspath(__file__))
+_root_dir = os.path.dirname(_backend_dir)
+
+load_dotenv(os.path.join(_backend_dir, '.env'))
+load_dotenv(os.path.join(_root_dir, '.env'))
+load_dotenv(os.path.join(_root_dir, '.env.local'))
 load_dotenv()
 
 class Config:
@@ -9,13 +15,13 @@ class Config:
     ENV = os.getenv('FLASK_ENV', 'development')
     
     # Supabase Configuration
-    SUPABASE_URL = os.getenv('SUPABASE_URL', '')
-    SUPABASE_KEY = os.getenv('SUPABASE_KEY', '') # Service role key or anon key
+    SUPABASE_URL = os.getenv('SUPABASE_URL', '').strip()
+    SUPABASE_KEY = os.getenv('SUPABASE_KEY', '').strip() # Service role key or anon key
     
     # Razorpay Configuration
-    RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '')
-    RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '')
-    RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '')
+    RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '').strip()
+    RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '').strip()
+    RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '').strip()
 
 import requests
 
@@ -97,6 +103,28 @@ class SupabaseQueryBuilder:
                 except Exception:
                     return SupabaseResponse([self.payload])
         return UpdateExecutor(self.url, self.headers, dict(self.params), data)
+
+    def delete(self):
+        class DeleteExecutor:
+            def __init__(self, url, headers, params):
+                self.url = url
+                self.headers = headers
+                self.params = params
+            def eq(self, column, value):
+                self.params[column] = f"eq.{value}"
+                return self
+            def neq(self, column, value):
+                self.params[column] = f"neq.{value}"
+                return self
+            def execute(self):
+                r = requests.delete(self.url, headers=self.headers, params=self.params)
+                if not r.ok:
+                    raise Exception(f"PostgREST delete error ({r.status_code}): {r.text}")
+                try:
+                    return SupabaseResponse(r.json())
+                except Exception:
+                    return SupabaseResponse([])
+        return DeleteExecutor(self.url, self.headers, dict(self.params))
 
 class SupabaseRestClient:
     def __init__(self, url, key):

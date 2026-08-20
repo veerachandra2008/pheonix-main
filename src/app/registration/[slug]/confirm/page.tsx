@@ -59,47 +59,96 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
       setSelection(data);
       setEmail(data.email || '');
     } else {
-      // Fallback: Resolve tournament data from slug and user session
-      const found = tournaments.find((t) => t.slug === resolvedSlug);
-      let sessionUser: any = null;
-      try {
-        const rawSession = localStorage.getItem('xenova_session');
-        if (rawSession) sessionUser = JSON.parse(rawSession);
-      } catch {}
+      async function resolveTournament() {
+        let found: any = tournaments.find((t) => t.slug === resolvedSlug);
+        if (!found) {
+          try {
+            const apiBase =
+              typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+                ? '/api'
+                : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+            const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
+            const data = await res.json();
+            if (data.success && Array.isArray(data.data)) {
+              found = data.data.find((t: any) => t.slug === resolvedSlug);
+            }
+          } catch {}
+        }
 
-      if (found) {
-        const fallbackSelection = {
-          tournamentSlug: found.slug,
-          tournamentTitle: found.title || (found as any).name,
-          tournamentGame: found.game,
-          tournamentPrize: found.prize,
-          tournamentDate: found.date,
-          tournamentFormat: found.format,
-          tournamentRegion: found.region,
-          tournamentFee: found.fee,
-          tournamentImage: found.image,
-          teamId: 'team-1',
-          teamName: sessionUser ? `${sessionUser.name}'s Squad` : 'Alpha Squad',
-          college: sessionUser?.college || 'University',
-          captainName: sessionUser?.name || 'Captain',
-          email: sessionUser?.email || '',
-        };
-        setSelection(fallbackSelection);
-        setEmail(fallbackSelection.email);
-      } else {
-        router.replace(`/registration/${resolvedSlug}`);
-        return;
+        let sessionUser: any = null;
+        try {
+          const rawSession = localStorage.getItem('xenova_session');
+          if (rawSession) sessionUser = JSON.parse(rawSession);
+        } catch {}
+
+        if (found) {
+          const fallbackSelection = {
+            tournamentSlug: found.slug,
+            tournamentTitle: found.title || found.name,
+            tournamentGame: found.game || 'Esports',
+            tournamentPrize: found.prize || '₹50,000',
+            tournamentDate: found.date || 'Upcoming',
+            tournamentFormat: found.format || 'Tournament',
+            tournamentRegion: found.region || 'Pan India',
+            tournamentFee: found.fee || 'Free',
+            tournamentImage: found.image || '/hero-arena.jpg',
+            teamId: 'team-1',
+            teamName: sessionUser ? `${sessionUser.name}'s Squad` : 'Alpha Squad',
+            college: sessionUser?.college || 'University',
+            captainName: sessionUser?.name || 'Captain',
+            email: sessionUser?.email || '',
+          };
+          setSelection(fallbackSelection);
+          setEmail(fallbackSelection.email);
+        } else {
+          router.replace(`/registration/${resolvedSlug}`);
+        }
       }
+      resolveTournament();
     }
 
-    // Dynamically load Razorpay SDK script if not present
+    // Preload Razorpay SDK script if not already present
     if (typeof window !== 'undefined' && !window.Razorpay) {
+      const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+      if (!existingScript) {
+        const script = document.createElement('script');
+        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        script.async = true;
+        document.body.appendChild(script);
+      }
+    }
+  }, [rawSlug, paramsPromise, router]);
+
+  const loadRazorpayScript = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (typeof window === 'undefined') {
+        resolve(false);
+        return;
+      }
+      if (window.Razorpay) {
+        resolve(true);
+        return;
+      }
+      const existingScript = document.querySelector(
+        'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+      ) as HTMLScriptElement;
+      if (existingScript) {
+        if (window.Razorpay) {
+          resolve(true);
+          return;
+        }
+        existingScript.addEventListener('load', () => resolve(true));
+        existingScript.addEventListener('error', () => resolve(false));
+        return;
+      }
       const script = document.createElement('script');
       script.src = 'https://checkout.razorpay.com/v1/checkout.js';
       script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
       document.body.appendChild(script);
-    }
-  }, [rawSlug, paramsPromise, router]);
+    });
+  };
 
   const validateEmail = (v: string) => {
     if (!v) return 'Email is required';
@@ -127,10 +176,8 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
 
     setErrorMessage('');
     const numericAmount = parseFeeAmount(selection.tournamentFee);
-    const apiBase =
-      typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-        ? '/api'
-        : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+    const envUrl = process.env.NEXT_PUBLIC_FLASK_API_URL;
+    const apiBase = envUrl ? (envUrl.endsWith('/') ? envUrl.slice(0, -1) : envUrl) : '/api';
 
     // ─── CASE A: FREE TOURNAMENT (Amount = 0) ───
     if (numericAmount === 0) {
@@ -166,7 +213,6 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
         console.warn('Backend pass generation notice:', err);
       }
 
-      // Fallback pass generation if backend endpoint was unreachable or returned an error
       if (!createdPassId) {
         createdPassId = `XPH-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
       }
@@ -208,12 +254,12 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
 
     // ─── CASE B: PAID TOURNAMENT (Amount > 0) ───
     try {
-      // Step 1: Create Razorpay Order
+      // Step 1: Request real Razorpay order from backend
       setPaymentStep('creating_order');
-      let orderData: any = null;
+      let orderRes: Response;
 
       try {
-        const orderRes = await fetch(`${apiBase}/payments/create-order`, {
+        orderRes = await fetch(`${apiBase}/payments/create-order`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -225,136 +271,38 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
             college: selection.college,
           }),
         });
+      } catch (fetchErr: any) {
+        setErrorMessage('Could not connect to payment backend server. Please verify the Flask server is running.');
+        setPaymentStep('idle');
+        return;
+      }
+
+      let orderData: any = null;
+      try {
         orderData = await orderRes.json();
-      } catch (fetchErr) {
-        console.warn('Backend API create-order unreachable, creating dev fallback order:', fetchErr);
-        orderData = {
-          success: true,
-          order_id: `order_dev_${Math.random().toString(36).substring(2, 10)}`,
-          key_id: 'rzp_test_placeholder',
-          amount: numericAmount * 100,
-          currency: 'INR',
-        };
-      }
-
-      if (!orderData || !orderData.success || !orderData.order_id) {
-        setErrorMessage(orderData?.message || 'Failed to initialize payment order.');
+      } catch (parseErr) {
+        setErrorMessage(`Invalid response from payment server (status ${orderRes.status}).`);
         setPaymentStep('idle');
         return;
       }
 
-      // Step 2: Handle Dev / Mock Order Bypasses (when Razorpay live order creation isn't available)
-      if (orderData.order_id.startsWith('order_dev_') || orderData.order_id.startsWith('order_free_')) {
-        setPaymentStep('verifying_payment');
-        const mockPassId = `XPH-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-
-        try {
-          const verifyRes = await fetch(`${apiBase}/payments/verify-payment`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              razorpay_order_id: orderData.order_id,
-              razorpay_payment_id: `pay_dev_${Math.random().toString(36).substring(2, 10)}`,
-              razorpay_signature: 'dev_mock_signature',
-              tournamentSlug: selection.tournamentSlug,
-              tournamentTitle: selection.tournamentTitle,
-              tournamentGame: selection.tournamentGame,
-              tournamentDate: selection.tournamentDate,
-              tournamentFormat: selection.tournamentFormat,
-              tournamentRegion: selection.tournamentRegion,
-              tournamentFee: selection.tournamentFee,
-              teamName: selection.teamName,
-              college: selection.college,
-              captainName: selection.captainName,
-              email,
-              amount: numericAmount,
-            }),
-          });
-
-          const verifyData = await verifyRes.json();
-          const finalPassId = verifyData.success && verifyData.passId ? verifyData.passId : mockPassId;
-
-          setPaymentStep('generating_pass');
-          try {
-            await saveRegistration({
-              tournamentSlug: selection.tournamentSlug,
-              tournamentTitle: selection.tournamentTitle,
-              tournamentGame: selection.tournamentGame || 'Esports',
-              tournamentPrize: selection.tournamentPrize || 'Verified Entry',
-              tournamentDate: selection.tournamentDate || 'Soon',
-              tournamentFormat: selection.tournamentFormat || 'Tournament',
-              tournamentRegion: selection.tournamentRegion || 'Pan India',
-              tournamentFee: selection.tournamentFee || 'Paid',
-              teamId: selection.teamSlug || 'team-1',
-              teamName: selection.teamName,
-              college: selection.college,
-              captainName: selection.captainName,
-              email,
-              passId: finalPassId,
-              registeredAt: new Date().toISOString(),
-            });
-          } catch {}
-
-          try {
-            sessionStorage.setItem(
-              'reg_selection',
-              JSON.stringify({
-                ...selection,
-                email,
-                passId: finalPassId,
-              })
-            );
-          } catch {}
-
-          router.push(`/registration/${slug}/pass?passId=${finalPassId}`);
-          return;
-        } catch (verifyErr) {
-          // Dev verification offline fallback
-          try {
-            await saveRegistration({
-              tournamentSlug: selection.tournamentSlug,
-              tournamentTitle: selection.tournamentTitle,
-              tournamentGame: selection.tournamentGame || 'Esports',
-              tournamentPrize: selection.tournamentPrize || 'Verified Entry',
-              tournamentDate: selection.tournamentDate || 'Soon',
-              tournamentFormat: selection.tournamentFormat || 'Tournament',
-              tournamentRegion: selection.tournamentRegion || 'Pan India',
-              tournamentFee: selection.tournamentFee || 'Paid',
-              teamId: selection.teamSlug || 'team-1',
-              teamName: selection.teamName,
-              college: selection.college,
-              captainName: selection.captainName,
-              email,
-              passId: mockPassId,
-              registeredAt: new Date().toISOString(),
-            });
-          } catch {}
-
-          try {
-            sessionStorage.setItem(
-              'reg_selection',
-              JSON.stringify({
-                ...selection,
-                email,
-                passId: mockPassId,
-              })
-            );
-          } catch {}
-
-          router.push(`/registration/${slug}/pass?passId=${mockPassId}`);
-          return;
-        }
+      if (!orderRes.ok || !orderData || !orderData.success || !orderData.order_id || !orderData.key_id) {
+        setErrorMessage(orderData?.message || 'Failed to initialize payment order on Razorpay.');
+        setPaymentStep('idle');
+        return;
       }
 
-      // Step 3: Launch real Razorpay Checkout Modal
+      // Step 2: Ensure Razorpay SDK is fully loaded before opening checkout
       setPaymentStep('opening_razorpay');
+      const isLoaded = await loadRazorpayScript();
 
-      if (!window.Razorpay) {
-        setErrorMessage('Razorpay SDK failed to load. Please check your internet connection.');
+      if (!isLoaded || !window.Razorpay) {
+        setErrorMessage('Razorpay SDK failed to load. Please check your internet connection and try again.');
         setPaymentStep('idle');
         return;
       }
 
+      // Step 3: Launch Razorpay Checkout Modal
       const options = {
         key: orderData.key_id,
         amount: orderData.amount,
@@ -370,16 +318,21 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
           color: '#10B981', // Emerald 500 theme accent
         },
         handler: async function (response: any) {
-          // Step 4: Payment Verification
+          if (!response.razorpay_payment_id || !response.razorpay_signature) {
+            setErrorMessage('Payment completed on gateway but verification details were missing.');
+            setPaymentStep('idle');
+            return;
+          }
+
+          // Step 4: Backend HMAC-SHA256 Payment Verification
           setPaymentStep('verifying_payment');
-          const fallbackPassId = `XPH-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
 
           try {
             const verifyRes = await fetch(`${apiBase}/payments/verify-payment`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
+                razorpay_order_id: response.razorpay_order_id || orderData.order_id,
                 razorpay_payment_id: response.razorpay_payment_id,
                 razorpay_signature: response.razorpay_signature,
                 tournamentSlug: selection.tournamentSlug,
@@ -397,14 +350,26 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
               }),
             });
 
-            let finalPassId = fallbackPassId;
-            if (verifyRes.ok) {
-              const verifyData = await verifyRes.json();
-              if (verifyData.success && verifyData.passId) {
-                finalPassId = verifyData.passId;
-              }
+            let verifyData: any = null;
+            try {
+              verifyData = await verifyRes.json();
+            } catch (err) {
+              setErrorMessage('Failed to parse payment verification response from server.');
+              setPaymentStep('idle');
+              return;
             }
 
+            if (!verifyRes.ok || !verifyData || !verifyData.success || !verifyData.passId) {
+              setErrorMessage(
+                verifyData?.message || 'Payment signature verification failed. No pass was generated.'
+              );
+              setPaymentStep('idle');
+              return;
+            }
+
+            const verifiedPassId = verifyData.passId;
+
+            // Step 5: Save verified registration ONLY AFTER backend verification succeeds
             setPaymentStep('generating_pass');
             try {
               await saveRegistration({
@@ -421,10 +386,12 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
                 college: selection.college,
                 captainName: selection.captainName,
                 email,
-                passId: finalPassId,
+                passId: verifiedPassId,
                 registeredAt: new Date().toISOString(),
               });
-            } catch {}
+            } catch (saveErr) {
+              console.warn('Local registration cache update notice:', saveErr);
+            }
 
             try {
               sessionStorage.setItem(
@@ -432,46 +399,16 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
                 JSON.stringify({
                   ...selection,
                   email,
-                  passId: finalPassId,
+                  passId: verifiedPassId,
+                  paymentId: response.razorpay_payment_id,
                 })
               );
             } catch {}
 
-            router.push(`/registration/${slug}/pass?passId=${finalPassId}`);
-          } catch (verifyErr) {
-            setPaymentStep('generating_pass');
-            try {
-              await saveRegistration({
-                tournamentSlug: selection.tournamentSlug,
-                tournamentTitle: selection.tournamentTitle,
-                tournamentGame: selection.tournamentGame || 'Esports',
-                tournamentPrize: selection.tournamentPrize || 'Verified Entry',
-                tournamentDate: selection.tournamentDate || 'Soon',
-                tournamentFormat: selection.tournamentFormat || 'Tournament',
-                tournamentRegion: selection.tournamentRegion || 'Pan India',
-                tournamentFee: selection.tournamentFee || 'Paid',
-                teamId: selection.teamSlug || 'team-1',
-                teamName: selection.teamName,
-                college: selection.college,
-                captainName: selection.captainName,
-                email,
-                passId: fallbackPassId,
-                registeredAt: new Date().toISOString(),
-              });
-            } catch {}
-
-            try {
-              sessionStorage.setItem(
-                'reg_selection',
-                JSON.stringify({
-                  ...selection,
-                  email,
-                  passId: fallbackPassId,
-                })
-              );
-            } catch {}
-
-            router.push(`/registration/${slug}/pass?passId=${fallbackPassId}`);
+            router.push(`/registration/${slug}/pass?passId=${verifiedPassId}`);
+          } catch (verifyErr: any) {
+            setErrorMessage(verifyErr.message || 'Error occurred while verifying payment signature.');
+            setPaymentStep('idle');
           }
         },
         modal: {

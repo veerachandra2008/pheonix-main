@@ -17,7 +17,7 @@ def generate_pass_id():
 @payments_bp.route('/create-order', methods=['POST'])
 def create_order():
     """
-    1. Create Razorpay Order securely
+    1. Create Razorpay Order securely using real Test/Live credentials
     2. Save initial PENDING registration to Supabase
     """
     try:
@@ -40,10 +40,21 @@ def create_order():
         # Razorpay amount is in paise (1 INR = 100 paise)
         amount_in_paise = int(round(amount_val * 100))
 
+        if amount_in_paise <= 0:
+            return jsonify({'success': False, 'message': 'Payment amount must be greater than 0 for paid checkout.'}), 400
+
+        if not Config.RAZORPAY_KEY_ID or not Config.RAZORPAY_KEY_SECRET:
+            return jsonify({
+                'success': False,
+                'message': 'Razorpay API credentials (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET) are missing on the backend.'
+            }), 500
+
+        receipt_id = f"rcpt_{uuid.uuid4().hex[:8]}_{int(time.time())}"[:40]
+
         order_data = {
             'amount': amount_in_paise,
             'currency': 'INR',
-            'receipt': f"receipt_{int(time.time())}",
+            'receipt': receipt_id,
             'notes': {
                 'name': name,
                 'email': email,
@@ -52,29 +63,21 @@ def create_order():
             }
         }
 
-        order_id = None
-        order_amount = amount_in_paise
-        order_currency = 'INR'
-        key_id = Config.RAZORPAY_KEY_ID or 'rzp_test_placeholder'
+        # Safely create real Razorpay Order
+        try:
+            razorpay_client = get_razorpay_client()
+            order = razorpay_client.order.create(data=order_data)
+            order_id = order['id']
+            order_amount = order['amount']
+            order_currency = order.get('currency', 'INR')
+        except Exception as rz_err:
+            print(f"Razorpay Order Error: {rz_err}")
+            return jsonify({
+                'success': False,
+                'message': f"Razorpay Order Creation Failed: {str(rz_err)}"
+            }), 400
 
-        if amount_in_paise == 0:
-            order_id = f"order_free_{uuid.uuid4().hex[:12]}"
-        else:
-            # Safely get Razorpay Client instance
-            try:
-                razorpay_client = get_razorpay_client()
-                order = razorpay_client.order.create(data=order_data)
-                order_id = order['id']
-                order_amount = order['amount']
-                order_currency = order.get('currency', 'INR')
-            except Exception as rz_err:
-                print(f"Razorpay Order Error: {rz_err}")
-                if Config.ENV == 'development':
-                    order_id = f"order_dev_{uuid.uuid4().hex[:12]}"
-                else:
-                    return jsonify({'success': False, 'message': f"Razorpay Error: {str(rz_err)}"}), 400
-
-        # Save record to Supabase as PENDING
+        # Save record to Supabase as PENDING if Supabase is reachable
         try:
             supabase = get_supabase_client()
             registration_payload = {
@@ -95,7 +98,7 @@ def create_order():
             'order_id': order_id,
             'amount': order_amount,
             'currency': order_currency,
-            'key_id': key_id
+            'key_id': Config.RAZORPAY_KEY_ID
         }), 200
 
     except Exception as e:
@@ -119,23 +122,18 @@ def verify_payment():
         if not razorpay_order_id or not razorpay_payment_id or not razorpay_signature:
             return jsonify({'success': False, 'message': 'Missing payment verification credentials.'}), 400
 
-        is_dev_or_free = razorpay_order_id.startswith('order_free_') or razorpay_order_id.startswith('order_dev_')
+        if not Config.RAZORPAY_KEY_SECRET:
+            return jsonify({'success': False, 'message': 'RAZORPAY_KEY_SECRET is missing in server environment.'}), 500
 
-        if not is_dev_or_free:
-            if not Config.RAZORPAY_KEY_SECRET:
-                return jsonify({'success': False, 'message': 'RAZORPAY_KEY_SECRET is missing in server environment.'}), 400
+        # Calculate HMAC SHA-256 Signature
+        generated_signature = hmac.new(
+            bytes(Config.RAZORPAY_KEY_SECRET, 'utf-8'),
+            bytes(f"{razorpay_order_id}|{razorpay_payment_id}", 'utf-8'),
+            hashlib.sha256
+        ).hexdigest()
 
-            # Calculate HMAC SHA-256 Signature
-            generated_signature = hmac.new(
-                bytes(Config.RAZORPAY_KEY_SECRET, 'utf-8'),
-                bytes(f"{razorpay_order_id}|{razorpay_payment_id}", 'utf-8'),
-                hashlib.sha256
-            ).hexdigest()
-
-            is_valid = (generated_signature == razorpay_signature)
-
-            if not is_valid:
-                return jsonify({'success': False, 'message': 'Invalid signature. Payment verification failed.'}), 400
+        if not hmac.compare_digest(generated_signature, razorpay_signature):
+            return jsonify({'success': False, 'message': 'Invalid signature. Payment verification failed.'}), 400
 
         # Generate unique Pass ID
         pass_id = generate_pass_id()

@@ -2,7 +2,7 @@
 
 import React, { use, useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
-import { motion, useInView } from 'framer-motion';
+import { motion, useInView, type Variants } from 'framer-motion';
 import {
   ArrowLeft,
   ShieldCheck,
@@ -207,24 +207,24 @@ const teamAchievements = [
    ANIMATION VARIANTS
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const stagger = {
+const stagger: Variants = {
   hidden: {},
   visible: { transition: { staggerChildren: 0.08, delayChildren: 0.15 } },
 };
 
-const fadeUp = {
+const fadeUp: Variants = {
   hidden: { opacity: 0, y: 24 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] } },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] } },
 };
 
-const fadeIn = {
+const fadeIn: Variants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { duration: 0.6 } },
 };
 
-const scaleIn = {
+const scaleIn: Variants = {
   hidden: { opacity: 0, scale: 0.85 },
-  visible: { opacity: 1, scale: 1, transition: { duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] } },
+  visible: { opacity: 1, scale: 1, transition: { duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] } },
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -305,7 +305,7 @@ function AnimatedSection({ children, className = '', delay = 0 }: { children: Re
       ref={ref}
       initial={{ opacity: 0, y: 40 }}
       animate={isInView ? { opacity: 1, y: 0 } : {}}
-      transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94], delay }}
+      transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number], delay }}
       className={className}
     >
       {children}
@@ -323,18 +323,42 @@ interface Props {
 
 export default function TeamProfilePage({ params }: Props) {
   const { id } = use(params);
-  const [customTeams, setCustomTeams] = useState<XenovaTeam[]>([]);
+  const [customTeams, setCustomTeams] = useState<TeamWithRoster[]>([]);
   const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
-    const loadLocalData = () => {
-      setCustomTeams(getCustomTeams());
+    const loadBackendData = async () => {
+      try {
+        const apiBase =
+          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+            ? '/api'
+            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+        const res = await fetch(`${apiBase}/teams/`);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) {
+          setCustomTeams(data.data.map((t: any) => ({
+            ...t,
+            slug: t.slug || slugify(t.name),
+            winRate: t.win_rate || t.winRate || 50,
+            recentWins: t.recent_wins || t.recentWins || 0,
+            activeScore: t.active_score || t.activeScore || 75,
+            verificationStatus: t.verification_status || t.verificationStatus || (t.verified ? 'approved' : 'pending'),
+            roster: t.roster || [
+              `${t.captain || 'Captain'} (Captain)`,
+              'Active Assaulter',
+              'Support / Medic',
+              'Entry Fragger',
+              'IGL Tactician',
+            ],
+          })));
+        }
+      } catch (err) {
+        console.error('Failed to load team from backend:', err);
+      }
     };
-    loadLocalData();
-    window.addEventListener('xenova-teams-change', loadLocalData);
-    return () => {
-      window.removeEventListener('xenova-teams-change', loadLocalData);
-    };
+
+    loadBackendData();
   }, []);
 
   const generatedTeam = useMemo((): TeamWithRoster => {
@@ -367,7 +391,7 @@ export default function TeamProfilePage({ params }: Props) {
   }, [id]);
 
   const team: TeamWithRoster = useMemo(() => {
-    const allTeams: TeamWithRoster[] = [...customTeams, ...defaultTeamsList];
+    const allTeams: TeamWithRoster[] = customTeams;
     const cleanId = decodeURIComponent(id || '').trim().toLowerCase();
     return (
       allTeams.find(
@@ -380,8 +404,8 @@ export default function TeamProfilePage({ params }: Props) {
   }, [customTeams, generatedTeam, id]);
 
   const similarTeams = useMemo(() => {
-    return defaultTeamsList.filter((t) => t.slug !== team.slug).slice(0, 4);
-  }, [team.slug]);
+    return customTeams.filter((t) => t.slug !== team.slug).slice(0, 4);
+  }, [customTeams, team.slug]);
 
   const initials = (name: string) =>
     name

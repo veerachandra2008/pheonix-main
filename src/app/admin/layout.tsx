@@ -12,7 +12,8 @@ import {
   LayoutDashboard, 
   LogOut, 
   Users,
-  ShieldCheck
+  ShieldCheck,
+  Ticket
 } from 'lucide-react';
 
 export default function AdminLayout({
@@ -77,6 +78,7 @@ export default function AdminLayout({
     { href: '/admin/colleges', label: 'Colleges', icon: Building2 },
     { href: '/admin/teams', label: 'Teams', icon: ShieldCheck },
     { href: '/admin/event-management', label: 'Event Control', icon: CalendarDays },
+    { href: '/admin/registrations', label: 'Registrations', icon: Ticket },
     { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
   ];
 

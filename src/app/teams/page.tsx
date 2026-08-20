@@ -27,7 +27,7 @@ import {
   MapPin,
   ArrowRight
 } from 'lucide-react';
-import { getCustomTeams, getVerifiedCollegeNames, saveCustomTeams, slugify, type XenovaTeam } from '@/lib/xenova-data';
+import { slugify, type XenovaTeam } from '@/lib/xenova-data';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
 const gameFilters = ['All Games', 'BGMI', 'Valorant', 'Free Fire', 'CS2', 'FC24'];
@@ -193,25 +193,43 @@ export default function TeamsPage() {
       }
     }
 
-    const loadTeams = () => setCustomTeams(getCustomTeams());
+    const loadTeams = async () => {
+      try {
+        const apiBase =
+          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+            ? '/api'
+            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+        const res = await fetch(`${apiBase}/teams/`);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) {
+          const mapped = data.data.map((t: any) => ({
+            ...t,
+            slug: t.slug || slugify(t.name),
+            winRate: t.win_rate || t.winRate || 50,
+            recentWins: t.recent_wins || t.recentWins || 0,
+            activeScore: t.active_score || t.activeScore || 75,
+            verificationStatus: t.verification_status || t.verificationStatus || (t.verified ? 'approved' : 'pending'),
+          }));
+          setCustomTeams(mapped);
+        }
+      } catch (err) {
+        console.error('Failed to load teams from backend:', err);
+      }
+    };
+
     loadTeams();
-    window.addEventListener('xenova-teams-change', loadTeams);
-    return () => window.removeEventListener('xenova-teams-change', loadTeams);
   }, []);
 
   const allTeams = useMemo(() => {
-    const combined = [...customTeams, ...defaultTeamsList];
-    const seen = new Set<string>();
-    return combined.filter((t) => {
-      const key = (t.slug || slugify(t.name)).toLowerCase().trim();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    return customTeams;
   }, [customTeams]);
 
   const filteredTeams = useMemo(() => {
     const visible = allTeams.filter((team) => {
+      const isApproved = team.verificationStatus === 'approved' || team.verification_status === 'approved' || team.verified;
+      if (!isApproved) return false;
+
       const matchesSearch = [team.name, team.college, team.game, team.captain]
         .join(' ')
         .toLowerCase()
@@ -222,17 +240,18 @@ export default function TeamsPage() {
     });
 
     return [...visible].sort((a, b) => {
-      if (selectedSort === 'Win Rate') return b.winRate - a.winRate;
-      if (selectedSort === 'Most Trophies') return b.trophies - a.trophies;
-      return a.rank - b.rank;
+      if (selectedSort === 'Win Rate') return (b.winRate || 0) - (a.winRate || 0);
+      if (selectedSort === 'Most Trophies') return (b.trophies || 0) - (a.trophies || 0);
+      return (a.rank || 99) - (b.rank || 99);
     });
   }, [allTeams, searchTerm, selectedGame, selectedSort]);
 
   const topPodiumTeams = useMemo(() => {
-    return [...allTeams].sort((a, b) => a.rank - b.rank).slice(0, 3);
+    const verifiedOnly = allTeams.filter(t => t.verificationStatus === 'approved' || t.verification_status === 'approved' || t.verified);
+    return [...verifiedOnly].sort((a, b) => (a.rank || 99) - (b.rank || 99)).slice(0, 3);
   }, [allTeams]);
 
-  const handleRegisterTeam = (e: React.FormEvent) => {
+  const handleRegisterTeam = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) {
       alert('Please log in first to submit a team roster.');
@@ -252,36 +271,61 @@ export default function TeamsPage() {
       return;
     }
 
-    const pendingTeam: XenovaTeam = {
+    const pendingTeam = {
       slug,
       name: cleanName,
       college: newCollegeName,
       game: newGame,
       rank: allTeams.length + 1,
-      winRate: 70,
+      win_rate: 70,
       streak: 'W1',
       captain: newCaptain.trim(),
       trophies: 0,
       members: 5,
-      recentWins: 1,
+      recent_wins: 1,
       form: ['W'],
-      activeScore: 75,
+      active_score: 75,
       joined: 2026,
       accent: '#10b981',
       verified: false,
-      verificationStatus: 'pending',
-      createdBy: currentUser.email,
-      captainEmail: currentUser.email,
-      isCustom: true,
+      verification_status: 'pending',
+      created_by: currentUser.email,
+      captain_email: currentUser.email,
     };
 
-    const next = [pendingTeam, ...customTeams];
-    saveCustomTeams(next);
-    setCustomTeams(next);
+    try {
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+      await fetch(`${apiBase}/teams/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pendingTeam),
+      });
+
+      // Reload fresh list from backend database
+      const res = await fetch(`${apiBase}/teams/`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        setCustomTeams(data.data.map((t: any) => ({
+          ...t,
+          slug: t.slug || slugify(t.name),
+          winRate: t.win_rate || t.winRate || 50,
+          recentWins: t.recent_wins || t.recentWins || 0,
+          activeScore: t.active_score || t.activeScore || 75,
+          verificationStatus: t.verification_status || t.verificationStatus || (t.verified ? 'approved' : 'pending'),
+        })));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+
     setNewTeamName('');
     setNewCaptain('');
     setIsAddModalOpen(false);
-    alert('Team roster submitted successfully. It will appear on the leaderboards upon admin approval.');
+    alert('Team roster submitted successfully to the database! It will appear on the leaderboard upon Admin approval.');
   };
 
   return (

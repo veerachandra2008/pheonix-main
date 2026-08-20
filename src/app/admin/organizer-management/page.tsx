@@ -10,24 +10,31 @@ import {
   Mail,
   Building2,
   Edit3,
-  Eye
+  Eye,
+  RefreshCw,
+  ShieldCheck,
+  Award
 } from 'lucide-react';
 
 import { flaskApi } from '@/lib/flask-api';
 
 interface Organizer {
+  id?: string | number;
   email: string;
   name: string;
+  college?: string;
   role: string;
-  tag: string;
+  tag?: string;
 }
 
 interface Tournament {
-  id: string;
-  name: string;
+  id?: string | number;
+  title?: string;
+  name?: string;
   game: string;
   slug: string;
-  createdBy: string;
+  host?: string;
+  createdBy?: string;
   status: string;
 }
 
@@ -35,66 +42,89 @@ export default function AdminOrganizerManagementPage() {
   const [organizers, setOrganizers] = useState<Organizer[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [selectedOrganizer, setSelectedOrganizer] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const loadOrganizers = () => {
+  const loadData = async () => {
+    setLoading(true);
     try {
-      const rawUsers = localStorage.getItem('xenova_users');
-      const users = rawUsers ? JSON.parse(rawUsers) : [];
-      const org = users.filter((u: Organizer) => u.role === 'organizer');
-      setOrganizers(org);
+      // 1. Fetch organizers from backend API
+      const orgRes = await flaskApi.getOrganizers();
+      let orgList: Organizer[] = [];
+      if (orgRes.success && Array.isArray(orgRes.data)) {
+        orgList = orgRes.data;
+      }
 
-      // Load tournaments
-      const rawTournaments = localStorage.getItem('xenova_tournaments');
-      const tourn = rawTournaments ? JSON.parse(rawTournaments) : [];
-      setTournaments(tourn);
+      // Also check applications that were approved
+      const appsRes = await flaskApi.getApplications();
+      if (appsRes.success && appsRes.data?.organizers) {
+        const approvedApps = appsRes.data.organizers.filter((a: any) => a.status === 'approved');
+        const seen = new Set(orgList.map(o => o.email.toLowerCase()));
+        for (const app of approvedApps) {
+          if (app.email && !seen.has(app.email.toLowerCase())) {
+            seen.add(app.email.toLowerCase());
+            orgList.push({
+              email: app.email,
+              name: app.hostName || app.host_name || 'Verified Host',
+              college: app.college,
+              role: 'ORGANIZER',
+              tag: 'ORGANIZER#1337',
+            });
+          }
+        }
+      }
+
+      setOrganizers(orgList);
+
+      // 2. Fetch tournaments from backend
+      const tournRes = await flaskApi.getTournaments();
+      if (tournRes.success && Array.isArray(tournRes.data)) {
+        setTournaments(tournRes.data);
+      }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load organizer data from server:', e);
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadOrganizers();
+    loadData();
   }, []);
 
   const removeOrganizer = async (email: string) => {
-    if (!confirm(`Remove ${email} as organizer? They will no longer be able to create tournaments.`)) return;
+    if (!confirm(`Revoke organizer privileges from ${email}? They will be converted to a regular player.`)) return;
 
     try {
-      // 1. Demote user in Supabase to 'PLAYER'
+      // 1. Demote user in backend database
       await flaskApi.updateUserRole(email, 'PLAYER');
+      await flaskApi.handleOrganizerAction(email, 'reject');
 
-      // 2. Update local state
-      const rawUsers = localStorage.getItem('xenova_users');
-      const users = rawUsers ? JSON.parse(rawUsers) : [];
-      const updated = users.map((u: Organizer) => {
-        if (u.email === email) {
-          return { ...u, role: 'player' };
+      // 2. Demote session if currently active
+      try {
+        const rawSession = localStorage.getItem('xenova_session');
+        if (rawSession) {
+          const session = JSON.parse(rawSession);
+          if (session.email?.toLowerCase() === email.toLowerCase() && session.role === 'organizer') {
+            session.role = 'player';
+            localStorage.setItem('xenova_session', JSON.stringify(session));
+            window.dispatchEvent(new Event('xenova-auth-change'));
+          }
         }
-        return u;
-      });
-      localStorage.setItem('xenova_users', JSON.stringify(updated));
+      } catch {}
 
-      // 3. Demote session if active
-      const rawSession = localStorage.getItem('xenova_session');
-      if (rawSession) {
-        const session = JSON.parse(rawSession);
-        if (session.email === email && session.role === 'organizer') {
-          session.role = 'player';
-          localStorage.setItem('xenova_session', JSON.stringify(session));
-          window.dispatchEvent(new Event('xenova-auth-change'));
-        }
-      }
-
-      loadOrganizers();
-      alert('Organizer status removed');
+      await loadData();
+      alert(`Organizer privileges revoked for ${email}.`);
     } catch (e) {
       console.error(e);
-      alert('Failed to remove organizer');
+      alert('Failed to remove organizer privileges.');
     }
   };
 
   const getOrganizerTournaments = (email: string) => {
-    return tournaments.filter((t: Tournament) => t.createdBy === email);
+    return tournaments.filter((t: Tournament) => 
+      (t.createdBy && t.createdBy.toLowerCase() === email.toLowerCase()) ||
+      (t.host && t.host.toLowerCase().includes(email.toLowerCase()))
+    );
   };
 
   return (
@@ -110,66 +140,88 @@ export default function AdminOrganizerManagementPage() {
             Organizer Control Panel
           </h1>
           <p className="text-slate-400 text-sm mt-2">
-            Manage approved organizers, view tournaments, and remove host privileges as needed.
+            Audit approved platform organizers, monitor hosted event lobbies, and manage hosting clearance.
           </p>
         </div>
+
+        <button
+          onClick={loadData}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-xs font-bold uppercase tracking-wider text-slate-300 transition shrink-0"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin text-indigo-400' : ''}`} />
+          Refresh List
+        </button>
       </header>
 
-      {/* Organizers Grid */}
-      {organizers.length === 0 ? (
-        <div className="border border-dashed border-white/10 rounded-2xl p-12 text-center text-slate-500">
-          <Users className="h-10 w-10 mx-auto text-slate-600 mb-4" />
-          <p className="text-sm font-bold uppercase tracking-wider">No approved organizers yet</p>
+      {/* Organizers List */}
+      {loading ? (
+        <div className="border border-dashed border-white/10 rounded-2xl p-16 text-center text-slate-500">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent mx-auto mb-4" />
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Loading approved organizers from database...</p>
+        </div>
+      ) : organizers.length === 0 ? (
+        <div className="border border-dashed border-white/10 rounded-2xl p-12 text-center text-slate-500 space-y-3">
+          <Users className="h-10 w-10 mx-auto text-slate-600 mb-2" />
+          <p className="text-sm font-bold uppercase tracking-wider text-slate-400">No approved organizers yet</p>
+          <p className="text-xs text-slate-600">Go to the Applications tab to approve pending organizer submissions.</p>
         </div>
       ) : (
         <div className="space-y-4">
           <AnimatePresence mode="popLayout">
-            {organizers.map((org, idx) => {
+            {organizers.map((org) => {
               const orgTournaments = getOrganizerTournaments(org.email);
               const isExpanded = selectedOrganizer === org.email;
 
               return (
                 <motion.div
                   key={org.email}
-                  initial={{ opacity: 0, y: 15 }}
+                  initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.3 }}
-                  className="border border-white/10 bg-[#0C111D] rounded-2xl overflow-hidden"
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ duration: 0.25 }}
+                  className="border border-white/10 bg-[#0C111D] rounded-2xl overflow-hidden hover:border-white/20 transition-all"
                 >
                   {/* Main Card */}
                   <div
                     onClick={() => setSelectedOrganizer(isExpanded ? null : org.email)}
                     className="w-full text-left p-6 hover:bg-white/[0.02] transition cursor-pointer"
                   >
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex-1">
-                        <h3 className="text-2xl font-black italic uppercase tracking-tight text-white">{org.name || 'Unknown'}</h3>
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                      <div className="flex-1 min-w-[240px]">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-2xl font-black italic uppercase tracking-tight text-white">{org.name || 'Verified Organizer'}</h3>
+                          <span className="text-indigo-400 font-bold uppercase tracking-widest text-[9px] bg-indigo-500/10 border border-indigo-500/30 px-2 py-0.5 rounded-md inline-flex items-center gap-1">
+                            <ShieldCheck className="h-3 w-3" />
+                            {org.role.toUpperCase()}
+                          </span>
+                        </div>
                         <div className="grid gap-2 sm:grid-cols-3 text-xs font-semibold text-slate-400 mt-3">
-                          <span className="flex items-center gap-2">
+                          <span className="flex items-center gap-2 truncate">
                             <Mail className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
                             {org.email}
                           </span>
+                          <span className="flex items-center gap-2 truncate">
+                            <Building2 className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                            {org.college || 'Collegiate Host'}
+                          </span>
                           <span className="flex items-center gap-2">
                             <Trophy className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                            {orgTournaments.length} Tournament{orgTournaments.length !== 1 ? 's' : ''}
-                          </span>
-                          <span className="text-indigo-400 font-bold uppercase tracking-widest text-[10px] bg-indigo-500/10 border border-indigo-500/30 px-2.5 py-1 rounded-md w-fit">
-                            ORGANIZER
+                            {orgTournaments.length} Event Lobbies
                           </span>
                         </div>
                       </div>
 
-                      <div className="flex gap-3 flex-wrap lg:flex-col lg:items-end">
+                      <div className="flex gap-3 items-center">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             removeOrganizer(org.email);
                           }}
-                          className="inline-flex items-center gap-2 px-4 py-2 border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500 hover:text-white transition text-xs font-bold uppercase tracking-widest text-rose-400 rounded-lg"
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500 hover:text-white transition text-xs font-bold uppercase tracking-widest text-rose-400 rounded-xl"
                         >
                           <Trash2 className="h-4 w-4" />
-                          Remove
+                          Revoke
                         </button>
                       </div>
                     </div>
@@ -183,37 +235,38 @@ export default function AdminOrganizerManagementPage() {
                       exit={{ height: 0, opacity: 0 }}
                       className="border-t border-white/10 bg-white/[0.02] p-6"
                     >
-                      <h4 className="text-lg font-black italic uppercase tracking-tight mb-4 flex items-center gap-2">
-                        <Trophy className="h-5 w-5 text-indigo-400" />
-                        Tournaments ({orgTournaments.length})
+                      <h4 className="text-sm font-black uppercase tracking-wider text-indigo-300 mb-4 flex items-center gap-2">
+                        <Trophy className="h-4 w-4 text-indigo-400" />
+                        Tournaments Linked to Host ({orgTournaments.length})
                       </h4>
 
                       {orgTournaments.length === 0 ? (
-                        <p className="text-sm text-slate-500 font-bold uppercase tracking-wider">No tournaments created</p>
+                        <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">No tournaments published yet.</p>
                       ) : (
-                        <div className="space-y-3">
-                          {orgTournaments.map((tourn: Tournament) => (
+                        <div className="space-y-2">
+                          {orgTournaments.map((tourn: Tournament, idx: number) => (
                             <div
-                              key={tourn.id}
-                              className="flex items-center justify-between p-4 border border-white/5 bg-white/[0.02] rounded-lg hover:border-white/10 transition"
+                              key={tourn.slug || idx}
+                              className="flex items-center justify-between p-3.5 border border-white/5 bg-white/[0.02] rounded-xl hover:border-white/10 transition"
                             >
                               <div className="flex-1 min-w-0">
-                                <h5 className="font-bold text-white truncate">{tourn.name}</h5>
-                                <div className="text-xs text-slate-400 mt-1 flex gap-3 flex-wrap">
+                                <h5 className="font-bold text-sm text-white truncate">{tourn.title || tourn.name}</h5>
+                                <div className="text-[10px] text-slate-400 mt-1 flex gap-3 flex-wrap font-semibold">
                                   <span>{tourn.game}</span>
-                                  <span className={`px-2 py-1 rounded text-[9px] font-bold uppercase tracking-widest ${tourn.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' :
-                                      tourn.status === 'completed' ? 'bg-slate-500/20 text-slate-400' :
-                                        'bg-amber-500/20 text-amber-400'
-                                    }`}>
+                                  <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-widest ${
+                                    (tourn.status || '').toLowerCase() === 'live' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' :
+                                    (tourn.status || '').toLowerCase() === 'registering' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                                    'bg-sky-500/20 text-sky-400 border border-sky-500/30'
+                                  }`}>
                                     {tourn.status}
                                   </span>
                                 </div>
                               </div>
                               <Link
                                 href={`/tournaments/${tourn.slug}`}
-                                className="ml-4 inline-flex items-center gap-2 px-3 py-2 border border-white/10 hover:border-indigo-500/50 hover:bg-white/5 transition text-xs font-bold uppercase tracking-widest text-white rounded-lg whitespace-nowrap"
+                                className="ml-4 inline-flex items-center gap-1.5 px-3 py-1.5 border border-white/10 hover:border-indigo-500/50 hover:bg-white/5 transition text-xs font-bold uppercase tracking-widest text-white rounded-lg whitespace-nowrap"
                               >
-                                <Eye className="h-4 w-4" />
+                                <Eye className="h-3.5 w-3.5" />
                                 View
                               </Link>
                             </div>

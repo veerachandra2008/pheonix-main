@@ -14,7 +14,7 @@ export default function TournamentsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<'All' | 'Live' | 'Registering' | 'Upcoming'>('All');
   const [selectedGame, setSelectedGame] = useState('All');
-  const [tournamentsList, setTournamentsList] = useState<any[]>(defaultTournaments);
+  const [tournamentsList, setTournamentsList] = useState<any[]>([]);
   const [registeredSlugs, setRegisteredSlugs] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -234,9 +234,12 @@ export default function TournamentsPage() {
                     {/* Cover Image Header with Zoom Transition */}
                     <div className="relative h-48 w-full overflow-hidden rounded-2xl bg-zinc-950">
                       <img
-                        src={tournament.image}
-                        alt={`${tournament.game} tournament cover`}
+                        src={tournament.image || '/hero-arena.jpg'}
+                        alt={`${tournament.game || 'Esports'} tournament cover`}
                         className="h-full w-full object-cover filter brightness-95 saturate-110 transition duration-700 group-hover:scale-110"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = '/hero-arena.jpg';
+                        }}
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] via-black/40 to-transparent" />
                       

@@ -50,18 +50,48 @@ export default function CollegeProfilePage({ params }: Props) {
   const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
-    const loadLocalData = () => {
-      setCustomColleges(getCustomColleges());
-      setCustomTeams(getCustomTeams());
+    const loadBackendData = async () => {
+      try {
+        const apiBase =
+          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+            ? '/api'
+            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+        const [colRes, teamRes] = await Promise.all([
+          fetch(`${apiBase}/colleges/`),
+          fetch(`${apiBase}/teams/`)
+        ]);
+        const colData = await colRes.json();
+        const teamData = await teamRes.json();
+
+        if (colData.success && Array.isArray(colData.data)) {
+          setCustomColleges(colData.data.map((c: any) => ({
+            ...c,
+            slug: c.slug || slugify(c.name),
+            nationalRank: c.national_rank || c.nationalRank || 99,
+            stateRank: c.state_rank || c.stateRank || 99,
+            teams: c.teams ?? c.teams_count ?? 0,
+            teamsCount: c.teams_count ?? c.teams ?? 0,
+            verificationStatus: c.verification_status || c.verificationStatus || (c.verified ? 'approved' : 'pending'),
+          })));
+        }
+
+        if (teamData.success && Array.isArray(teamData.data)) {
+          setCustomTeams(teamData.data.map((t: any) => ({
+            ...t,
+            slug: t.slug || slugify(t.name),
+            winRate: t.win_rate || t.winRate || 50,
+            recentWins: t.recent_wins || t.recentWins || 0,
+            activeScore: t.active_score || t.activeScore || 75,
+            verificationStatus: t.verification_status || t.verificationStatus || (t.verified ? 'approved' : 'pending'),
+          })));
+        }
+      } catch (err) {
+        console.error('Failed to load college from backend:', err);
+      }
     };
 
-    loadLocalData();
-    window.addEventListener('xenova-colleges-change', loadLocalData);
-    window.addEventListener('xenova-teams-change', loadLocalData);
-    return () => {
-      window.removeEventListener('xenova-colleges-change', loadLocalData);
-      window.removeEventListener('xenova-teams-change', loadLocalData);
-    };
+    loadBackendData();
   }, []);
 
   const generatedCollege = useMemo(() => {
@@ -92,7 +122,7 @@ export default function CollegeProfilePage({ params }: Props) {
   }, [id]);
 
   const college = useMemo(() => {
-    const allColleges = [...customColleges, ...defaultColleges];
+    const allColleges = customColleges;
     const cleanId = decodeURIComponent(id || '').trim().toLowerCase();
     const numId = parseInt(cleanId);
 
@@ -108,7 +138,7 @@ export default function CollegeProfilePage({ params }: Props) {
   }, [customColleges, generatedCollege, id]);
 
   const collegeTeams = useMemo(() => {
-    return [...customTeams, ...defaultTeams, ...fallbackTeams].filter(
+    return customTeams.filter(
       (t) => t.college.toLowerCase() === college.name.toLowerCase()
     );
   }, [customTeams, college.name]);

@@ -29,7 +29,7 @@ import {
   Award,
   ArrowRight
 } from 'lucide-react';
-import { defaultColleges, getCustomColleges, saveCustomColleges, slugify, type XenovaCollege } from '@/lib/xenova-data';
+import { slugify, type XenovaCollege } from '@/lib/xenova-data';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
 const stateFilters = ['All States', 'Karnataka', 'Maharashtra', 'Delhi', 'Tamil Nadu', 'Telangana'];
@@ -77,25 +77,44 @@ export default function CollegesPage() {
       }
     }
 
-    const loadColleges = () => setCustomColleges(getCustomColleges());
+    const loadColleges = async () => {
+      try {
+        const apiBase =
+          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+            ? '/api'
+            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+        const res = await fetch(`${apiBase}/colleges/`);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) {
+          const mapped = data.data.map((c: any) => ({
+            ...c,
+            slug: c.slug || slugify(c.name),
+            nationalRank: c.national_rank || c.nationalRank || 99,
+            stateRank: c.state_rank || c.stateRank || 99,
+            teams: c.teams ?? c.teams_count ?? 0,
+            teamsCount: c.teams_count ?? c.teams ?? 0,
+            verificationStatus: c.verification_status || c.verificationStatus || (c.verified ? 'approved' : 'pending'),
+          }));
+          setCustomColleges(mapped);
+        }
+      } catch (err) {
+        console.error('Failed to load colleges from backend:', err);
+      }
+    };
+
     loadColleges();
-    window.addEventListener('xenova-colleges-change', loadColleges);
-    return () => window.removeEventListener('xenova-colleges-change', loadColleges);
   }, []);
 
   const allColleges = useMemo(() => {
-    const combined = [...customColleges, ...defaultColleges];
-    const seen = new Set<string>();
-    return combined.filter((c) => {
-      const key = (c.slug || slugify(c.name)).toLowerCase().trim();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    return customColleges;
   }, [customColleges]);
 
   const filteredColleges = useMemo(() => {
     const visible = allColleges.filter((college) => {
+      const isApproved = college.verificationStatus === 'approved' || college.verification_status === 'approved' || college.verified;
+      if (!isApproved) return false;
+
       const matchesSearch = [college.name, college.location, college.state, college.type]
         .join(' ')
         .toLowerCase()
@@ -107,14 +126,15 @@ export default function CollegesPage() {
     });
 
     return [...visible].sort((a, b) => {
-      if (selectedSort === 'Most Players') return b.players - a.players;
-      if (selectedSort === 'Most Trophies') return b.trophies - a.trophies;
-      return a.nationalRank - b.nationalRank;
+      if (selectedSort === 'Most Players') return (b.players || 0) - (a.players || 0);
+      if (selectedSort === 'Most Trophies') return (b.trophies || 0) - (a.trophies || 0);
+      return (a.nationalRank || 99) - (b.nationalRank || 99);
     });
   }, [allColleges, searchTerm, selectedState, selectedSort, selectedType]);
 
   const topPodiumColleges = useMemo(() => {
-    return [...allColleges].sort((a, b) => a.nationalRank - b.nationalRank).slice(0, 3);
+    const verifiedOnly = allColleges.filter(c => c.verificationStatus === 'approved' || c.verification_status === 'approved' || c.verified);
+    return [...verifiedOnly].sort((a, b) => (a.nationalRank || 99) - (b.nationalRank || 99)).slice(0, 3);
   }, [allColleges]);
 
   const totalAthletesCount = useMemo(() => {
@@ -125,7 +145,7 @@ export default function CollegesPage() {
     return allColleges.reduce((sum, c) => sum + (c.trophies || 0), 0);
   }, [allColleges]);
 
-  const handleRegisterCollege = (e: React.FormEvent) => {
+  const handleRegisterCollege = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) {
       alert('Please log in first to submit a college program for verification.');
@@ -145,36 +165,61 @@ export default function CollegesPage() {
       return;
     }
 
-    const pendingCollege: XenovaCollege = {
+    const pendingCollege = {
       slug,
       name: cleanName,
       location: newCollegeLocation.trim(),
       state: newCollegeState,
       type: newCollegeType,
-      nationalRank: allColleges.length + 1,
-      stateRank: 1,
+      national_rank: allColleges.length + 1,
+      state_rank: 1,
       players: 0,
       teams: 0,
-      teamsCount: 0,
+      teams_count: 0,
       trophies: 0,
       wins: 0,
       verified: false,
-      verificationStatus: 'pending',
+      verification_status: 'pending',
       accent: '#10b981',
       website: newCollegeWebsite.trim().replace(/^https?:\/\//, ''),
-      submittedBy: currentUser.email,
-      submittedAt: new Date().toISOString(),
-      isCustom: true,
+      submitted_by: currentUser.email,
     };
 
-    const next = [pendingCollege, ...customColleges];
-    saveCustomColleges(next);
-    setCustomColleges(next);
+    try {
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+      await fetch(`${apiBase}/colleges/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pendingCollege),
+      });
+
+      // Reload fresh list from backend database
+      const res = await fetch(`${apiBase}/colleges/`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        setCustomColleges(data.data.map((c: any) => ({
+          ...c,
+          slug: c.slug || slugify(c.name),
+          nationalRank: c.national_rank || c.nationalRank || 99,
+          stateRank: c.state_rank || c.stateRank || 99,
+          teams: c.teams ?? c.teams_count ?? 0,
+          teamsCount: c.teams_count ?? c.teams ?? 0,
+          verificationStatus: c.verification_status || c.verificationStatus || (c.verified ? 'approved' : 'pending'),
+        })));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+
     setNewCollegeName('');
     setNewCollegeLocation('');
     setNewCollegeWebsite('');
     setIsAddModalOpen(false);
-    alert('College program submitted successfully. It will appear on the leaderboard upon admin verification.');
+    alert('College program submitted successfully to the database! It will appear on the leaderboard once approved by the Admin.');
   };
 
   return (

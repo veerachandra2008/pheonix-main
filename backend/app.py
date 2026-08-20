@@ -11,6 +11,7 @@ from routes.teams import teams_bp
 from routes.tournaments import tournaments_bp
 from routes.auth import auth_bp
 from routes.notifications import notifications_bp
+from routes.applications import applications_bp
 
 def create_app():
     app = Flask(__name__)
@@ -27,6 +28,7 @@ def create_app():
     app.register_blueprint(teams_bp, url_prefix='/api/teams')
     app.register_blueprint(tournaments_bp, url_prefix='/api/tournaments')
     app.register_blueprint(notifications_bp, url_prefix='/api/notifications')
+    app.register_blueprint(applications_bp, url_prefix='/api/applications')
 
     @app.route('/api/health', methods=['GET'])
     def health_check():

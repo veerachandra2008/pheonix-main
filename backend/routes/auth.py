@@ -177,3 +177,58 @@ def update_role():
         print(f"Update Role Error: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
+
+@auth_bp.route('/organizers', methods=['GET'])
+def get_organizers():
+    """
+    Fetch all users with role 'ORGANIZER' or 'ADMIN' from Supabase and memory store.
+    """
+    try:
+        organizers = []
+        try:
+            supabase = get_supabase_client()
+            res = supabase.table('users').select('*').in_('role', ['ORGANIZER', 'ADMIN', 'organizer', 'admin']).execute()
+            if res.data and len(res.data) > 0:
+                organizers = res.data
+        except Exception as sb_err:
+            print(f"Supabase organizers fetch warning: {sb_err}")
+
+        # Merge with in-memory users
+        seen_emails = {u.get('email', '').lower() for u in organizers if u.get('email')}
+        for email, user in IN_MEMORY_USERS.items():
+            if user.get('role', '').upper() in ['ORGANIZER', 'ADMIN'] and email.lower() not in seen_emails:
+                organizers.append(user)
+                seen_emails.add(email.lower())
+
+        return jsonify({'success': True, 'data': organizers}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@auth_bp.route('/users', methods=['GET'])
+def get_all_users():
+    """
+    Fetch all registered users from Supabase and memory store.
+    """
+    try:
+        users = []
+        try:
+            supabase = get_supabase_client()
+            res = supabase.table('users').select('*').execute()
+            if res.data and len(res.data) > 0:
+                users = res.data
+        except Exception as sb_err:
+            print(f"Supabase users fetch warning: {sb_err}")
+
+        # Merge with memory store
+        seen_emails = {u.get('email', '').lower() for u in users if u.get('email')}
+        for email, user in IN_MEMORY_USERS.items():
+            if email.lower() not in seen_emails:
+                users.append(user)
+                seen_emails.add(email.lower())
+
+        return jsonify({'success': True, 'data': users, 'total': len(users)}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+

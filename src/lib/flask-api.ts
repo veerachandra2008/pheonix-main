@@ -230,4 +230,141 @@ export const flaskApi = {
     const { data } = await supabase.from('tournaments').select('*');
     return { success: true, data: data || [] };
   },
+
+  // Applications Hub API Methods
+  async getApplications() {
+    try {
+      const res = await fetch(`${FLASK_API_BASE}/applications/`, { cache: 'no-store' });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn('Applications fetch error:', e);
+    }
+    return {
+      success: true,
+      data: {
+        organizers: [],
+        teams: [],
+        colleges: [],
+        tournaments: [],
+        stats: {
+          pending_organizers: 0,
+          pending_teams: 0,
+          pending_colleges: 0,
+          pending_tournaments: 0,
+          total_pending: 0,
+        },
+      },
+    };
+  },
+
+  async submitOrganizerApplication(payload: any) {
+    const res = await fetch(`${FLASK_API_BASE}/applications/organizer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  },
+
+  async handleOrganizerAction(email: string, action: 'approve' | 'reject') {
+    const res = await fetch(`${FLASK_API_BASE}/applications/organizer/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, action }),
+    });
+    return await res.json();
+  },
+
+  async handleTeamAction(identifier: { slug?: string; name?: string }, action: 'approve' | 'reject') {
+    const res = await fetch(`${FLASK_API_BASE}/applications/team/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...identifier, action }),
+    });
+    return await res.json();
+  },
+
+  async handleCollegeAction(identifier: { slug?: string; name?: string }, action: 'approve' | 'reject') {
+    const res = await fetch(`${FLASK_API_BASE}/applications/college/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...identifier, action }),
+    });
+    return await res.json();
+  },
+
+  async handleTournamentAction(slug: string, action: 'approve' | 'reject') {
+    const res = await fetch(`${FLASK_API_BASE}/applications/tournament/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, action }),
+    });
+    return await res.json();
+  },
+
+  async getOrganizers() {
+    try {
+      const res = await fetch(`${FLASK_API_BASE}/auth/organizers`);
+      if (res.ok) return await res.json();
+    } catch {}
+    const { data } = await supabase.from('users').select('*').in('role', ['ORGANIZER', 'ADMIN', 'organizer', 'admin']);
+    return { success: true, data: data || [] };
+  },
+
+  async getAllUsers() {
+    try {
+      const res = await fetch(`${FLASK_API_BASE}/auth/users`);
+      if (res.ok) return await res.json();
+    } catch {}
+    const { data } = await supabase.from('users').select('*');
+    return { success: true, data: data || [] };
+  },
+
+  async updateCollege(slug: string, payload: any) {
+    const res = await fetch(`${FLASK_API_BASE}/colleges/${slug}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  },
+
+  async deleteCollege(slug: string) {
+    const res = await fetch(`${FLASK_API_BASE}/colleges/${slug}`, {
+      method: 'DELETE',
+    });
+    return await res.json();
+  },
+
+  async updateTeam(slug: string, payload: any) {
+    const res = await fetch(`${FLASK_API_BASE}/teams/${slug}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  },
+
+  async deleteTeam(slug: string) {
+    const res = await fetch(`${FLASK_API_BASE}/teams/${slug}`, {
+      method: 'DELETE',
+    });
+    return await res.json();
+  },
+
+  async updateTournament(slug: string, payload: any) {
+    const res = await fetch(`${FLASK_API_BASE}/tournaments/${slug}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  },
+
+  async deleteTournament(slug: string) {
+    const res = await fetch(`${FLASK_API_BASE}/tournaments/${slug}`, {
+      method: 'DELETE',
+    });
+    return await res.json();
+  },
 };

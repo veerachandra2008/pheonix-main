@@ -107,16 +107,30 @@ IN_MEMORY_TOURNAMENTS = list(MOCK_TOURNAMENTS)
 
 @tournaments_bp.route('/', methods=['GET'])
 def get_tournaments():
-    """Fetch all tournaments from Supabase (falls back to memory store if empty/error)"""
+    """Fetch all tournaments from Supabase (falls back to memory store if error)"""
     try:
         supabase = get_supabase_client()
         res = supabase.table('tournaments').select('*').execute()
-        if res.data and len(res.data) > 0:
+        if res.data is not None:
             return jsonify({'success': True, 'data': res.data}), 200
     except Exception as e:
         print(f"Supabase error fetching tournaments: {e}")
     
     return jsonify({'success': True, 'data': IN_MEMORY_TOURNAMENTS, 'fallback': True}), 200
+
+VALID_TOURNAMENT_COLUMNS = {
+    'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
+    'prize', 'date', 'region', 'format', 'teams', 'filled', 'fee'
+}
+
+def sanitize_tournament_payload(data):
+    sanitized = {}
+    for k, v in data.items():
+        if k == 'statusColor':
+            sanitized['status_color'] = v
+        elif k in VALID_TOURNAMENT_COLUMNS:
+            sanitized[k] = v
+    return sanitized
 
 @tournaments_bp.route('/', methods=['POST'])
 def create_tournament():
@@ -125,45 +139,52 @@ def create_tournament():
     slug = data.get('slug') or data.get('title', '').lower().replace(' ', '-')
     data['slug'] = slug
     
+    clean_data = sanitize_tournament_payload(data)
+    
     # Save in memory
-    IN_MEMORY_TOURNAMENTS.insert(0, data)
+    IN_MEMORY_TOURNAMENTS.insert(0, {**data, **clean_data})
     
     try:
         supabase = get_supabase_client()
-        res = supabase.table('tournaments').insert(data).execute()
+        res = supabase.table('tournaments').insert(clean_data).execute()
         return jsonify({'success': True, 'data': res.data}), 201
     except Exception as e:
         print(f"Supabase insert warning for tournament: {e}")
-        return jsonify({'success': True, 'data': [data], 'fallback': True}), 201
+        return jsonify({'success': True, 'data': [clean_data], 'fallback': True}), 201
 
-@tournaments_bp.route('/seed', methods=['POST'])
-def seed_tournaments():
-    """Insert all mock tournament data into Supabase table if not already present"""
+@tournaments_bp.route('/<slug>', methods=['PATCH', 'PUT'])
+def update_tournament(slug):
+    """Update tournament details or status"""
+    data = request.get_json() or {}
+    clean_data = sanitize_tournament_payload(data)
+    
+    # Update in memory
+    for t in IN_MEMORY_TOURNAMENTS:
+        if t.get('slug') == slug:
+            t.update(data)
+            
     try:
         supabase = get_supabase_client()
-        existing_res = supabase.table('tournaments').select('slug').execute()
-        existing_slugs = {item['slug'] for item in (existing_res.data or []) if 'slug' in item}
-        
-        to_insert = [t for t in MOCK_TOURNAMENTS if t['slug'] not in existing_slugs]
-        
-        inserted = []
-        if to_insert:
-            res = supabase.table('tournaments').insert(to_insert).execute()
-            inserted = res.data or []
-            
-        return jsonify({
-            'success': True,
-            'message': f"Seeded {len(inserted)} tournaments.",
-            'inserted': inserted,
-            'total_mock': len(MOCK_TOURNAMENTS)
-        }), 200
+        res = supabase.table('tournaments').update(clean_data).eq('slug', slug).execute()
+        return jsonify({'success': True, 'data': res.data}), 200
     except Exception as e:
-        print(f"Supabase seeding error: {e}")
-        return jsonify({
-            'success': False,
-            'message': f"Supabase seeding failed: {str(e)}. Please check SUPABASE_KEY in backend/.env or run supabase_schema_and_seed.sql in Supabase SQL Editor.",
-            'error': str(e)
-        }), 400
+        print(f"Supabase update tournament warning: {e}")
+        return jsonify({'success': True, 'data': [clean_data], 'fallback': True}), 200
+
+@tournaments_bp.route('/<slug>', methods=['DELETE'])
+def delete_tournament(slug):
+    """Delete a tournament from Supabase and memory"""
+    global IN_MEMORY_TOURNAMENTS
+    IN_MEMORY_TOURNAMENTS = [t for t in IN_MEMORY_TOURNAMENTS if t.get('slug') != slug]
+    
+    try:
+        supabase = get_supabase_client()
+        supabase.table('tournaments').delete().eq('slug', slug).execute()
+        return jsonify({'success': True, 'message': 'Tournament deleted from database'}), 200
+    except Exception as e:
+        print(f"Supabase delete tournament warning: {e}")
+        return jsonify({'success': True, 'message': 'Tournament removed from memory'}), 200
+
 
 @tournaments_bp.route('/register', methods=['POST'])
 def register_tournament():

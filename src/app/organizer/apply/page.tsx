@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Send, Sparkles, Trophy, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { flaskApi } from '@/lib/flask-api';
 
 export default function OrganizerApplyPage() {
   const router = useRouter();
@@ -32,6 +33,26 @@ export default function OrganizerApplyPage() {
       email: user.email || '',
       hostName: user.name ? `${user.name} Gaming Club` : '',
     }));
+
+    // Check if user already has an application in the database
+    async function checkExistingApplication() {
+      try {
+        const res = await flaskApi.getApplications();
+        if (res.success && res.data?.organizers) {
+          const userEmail = (user.email || '').toLowerCase().trim();
+          const existing = res.data.organizers.find(
+            (a: any) => (a.email || '').toLowerCase().trim() === userEmail
+          );
+          if (existing && existing.status === 'pending') {
+            setSubmitted(true);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to verify existing application from database:', err);
+      }
+    }
+
+    checkExistingApplication();
   }, [router]);
 
   if (!session) {
@@ -70,27 +91,14 @@ export default function OrganizerApplyPage() {
     );
   }
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     try {
-      const rawApps = localStorage.getItem('xenova_organizer_applications');
-      const apps = rawApps ? JSON.parse(rawApps) : [];
-
-      // Check if user already has a pending application
-      const alreadyApplied = apps.some((app: any) => app.email?.toLowerCase() === formData.email.toLowerCase());
-      if (alreadyApplied) {
-        alert('You already have a submission in progress. Please await admin clearance.');
-        router.push('/dashboard');
+      const res = await flaskApi.submitOrganizerApplication(formData);
+      if (!res.success) {
+        alert(res.message || 'Failed to submit application.');
         return;
       }
-
-      const newApp = {
-        ...formData,
-        status: 'pending',
-        appliedAt: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-
-      localStorage.setItem('xenova_organizer_applications', JSON.stringify([...apps, newApp]));
       setSubmitted(true);
     } catch (err) {
       console.error(err);

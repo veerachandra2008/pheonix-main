@@ -140,12 +140,40 @@ def get_colleges():
     try:
         supabase = get_supabase_client()
         res = supabase.table('colleges').select('*').execute()
-        if res.data and len(res.data) > 0:
-            return jsonify({'success': True, 'data': res.data}), 200
+        if res.data is not None:
+            if len(res.data) == 0 and len(IN_MEMORY_COLLEGES) > 0:
+                try:
+                    supabase.table('colleges').insert(IN_MEMORY_COLLEGES).execute()
+                    res = supabase.table('colleges').select('*').execute()
+                except Exception:
+                    pass
+            return jsonify({'success': True, 'data': res.data if res.data is not None else IN_MEMORY_COLLEGES}), 200
     except Exception as e:
         print(f"Supabase error fetching colleges: {e}")
     
     return jsonify({'success': True, 'data': IN_MEMORY_COLLEGES, 'fallback': True}), 200
+
+VALID_COLLEGE_COLUMNS = {
+    'slug', 'name', 'location', 'state', 'type', 'national_rank',
+    'state_rank', 'players', 'teams_count', 'teams', 'trophies',
+    'wins', 'verified', 'verification_status', 'accent', 'website'
+}
+
+def sanitize_college_payload(data):
+    sanitized = {}
+    for k, v in data.items():
+        if k == 'nationalRank':
+            sanitized['national_rank'] = v
+        elif k == 'stateRank':
+            sanitized['state_rank'] = v
+        elif k == 'teamsCount':
+            sanitized['teams_count'] = v
+            sanitized['teams'] = v
+        elif k == 'verificationStatus':
+            sanitized['verification_status'] = v
+        elif k in VALID_COLLEGE_COLUMNS:
+            sanitized[k] = v
+    return sanitized
 
 @colleges_bp.route('/', methods=['POST'])
 def create_college():
@@ -154,35 +182,49 @@ def create_college():
     slug = data.get('slug') or data.get('name', '').lower().replace(' ', '-')
     data['slug'] = slug
     
+    clean_data = sanitize_college_payload(data)
+    
     # Store in memory
-    IN_MEMORY_COLLEGES.insert(0, data)
+    IN_MEMORY_COLLEGES.insert(0, {**data, **clean_data})
     
     try:
         supabase = get_supabase_client()
-        res = supabase.table('colleges').insert(data).execute()
+        res = supabase.table('colleges').insert(clean_data).execute()
         return jsonify({'success': True, 'data': res.data}), 201
     except Exception as e:
         print(f"Supabase insert warning for college: {e}")
-        return jsonify({'success': True, 'data': [data], 'fallback': True}), 201
+        return jsonify({'success': True, 'data': [clean_data], 'fallback': True}), 201
 
-@colleges_bp.route('/seed', methods=['POST'])
-def seed_colleges():
-    """Seed default colleges into Supabase table"""
+@colleges_bp.route('/<slug>', methods=['PATCH', 'PUT'])
+def update_college(slug):
+    """Update college details or verification status"""
+    data = request.get_json() or {}
+    clean_data = sanitize_college_payload(data)
+    
+    # Update in memory
+    for c in IN_MEMORY_COLLEGES:
+        if c.get('slug') == slug:
+            c.update(data)
+            
     try:
         supabase = get_supabase_client()
-        existing_res = supabase.table('colleges').select('slug').execute()
-        existing_slugs = {item['slug'] for item in (existing_res.data or []) if 'slug' in item}
-        
-        to_insert = [c for c in MOCK_COLLEGES if c['slug'] not in existing_slugs]
-        inserted = []
-        if to_insert:
-            res = supabase.table('colleges').insert(to_insert).execute()
-            inserted = res.data or []
-        return jsonify({'success': True, 'inserted': len(inserted), 'total': len(MOCK_COLLEGES)}), 200
+        res = supabase.table('colleges').update(clean_data).eq('slug', slug).execute()
+        return jsonify({'success': True, 'data': res.data}), 200
     except Exception as e:
-        print(f"Supabase colleges seeding error: {e}")
-        return jsonify({
-            'success': False,
-            'message': f"Supabase colleges seeding failed: {str(e)}. Please check SUPABASE_KEY or run SQL seed script.",
-            'error': str(e)
-        }), 400
+        print(f"Supabase update college warning: {e}")
+        return jsonify({'success': True, 'data': [data], 'fallback': True}), 200
+
+@colleges_bp.route('/<slug>', methods=['DELETE'])
+def delete_college(slug):
+    """Delete a college from Supabase and memory"""
+    global IN_MEMORY_COLLEGES
+    IN_MEMORY_COLLEGES = [c for c in IN_MEMORY_COLLEGES if c.get('slug') != slug]
+    
+    try:
+        supabase = get_supabase_client()
+        supabase.table('colleges').delete().eq('slug', slug).execute()
+        return jsonify({'success': True, 'message': 'College deleted from database'}), 200
+    except Exception as e:
+        print(f"Supabase delete college warning: {e}")
+        return jsonify({'success': True, 'message': 'College removed from memory'}), 200
+

@@ -24,6 +24,7 @@ import {
   Check
 } from 'lucide-react';
 import { tournaments } from '../data';
+import { getUserRegistrations, saveRegistration } from '@/lib/tournaments-db';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
 interface TournamentPageParams {
@@ -74,36 +75,48 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
   });
 
   useEffect(() => {
-    try {
-      // 1. Check logged-in user session
-      const rawSession = localStorage.getItem('xenova_session');
-      if (rawSession) {
-        const user = JSON.parse(rawSession);
-        setSessionUser(user);
-        setFormValues((prev) => ({
-          ...prev,
-          captainName: user.name || user.tag || '',
-          email: user.email || '',
-          teamName: user.team || '',
-          college: user.college || '',
-        }));
-      }
+    async function loadTournamentData() {
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
 
-      // 2. Load custom tournaments
-      const rawCustom = localStorage.getItem('xenova_tournaments');
-      const loadedCustom = rawCustom ? JSON.parse(rawCustom) : [];
-      setCustomTournaments(loadedCustom);
+      try {
+        // 1. Check logged-in user session
+        const rawSession = localStorage.getItem('xenova_session');
+        if (rawSession) {
+          const user = JSON.parse(rawSession);
+          setSessionUser(user);
+          setFormValues((prev) => ({
+            ...prev,
+            captainName: user.name || user.tag || '',
+            email: user.email || '',
+            teamName: user.team || '',
+            college: user.college || '',
+          }));
 
-      // 3. Check existing registrations
-      const rawRegs = localStorage.getItem('xenova_registrations');
-      const regs: RegistrationRecord[] = rawRegs ? JSON.parse(rawRegs) : [];
-      const userEmail = rawSession ? JSON.parse(rawSession).email?.toLowerCase() : '';
-      if (userEmail && regs.some((r) => r.tournamentSlug === slug && r.email?.toLowerCase() === userEmail)) {
-        setAlreadyRegistered(true);
+          // Check existing registrations via backend database
+          if (user.email) {
+            getUserRegistrations(user.email.toLowerCase()).then((regs) => {
+              if (regs.some((r) => r.tournamentSlug === slug)) {
+                setAlreadyRegistered(true);
+              }
+            }).catch(() => {});
+          }
+        }
+
+        // 2. Load tournament from backend database
+        const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setCustomTournaments(json.data);
+        }
+      } catch (e) {
+        console.error('Failed to load tournament from database:', e);
       }
-    } catch (e) {
-      console.error(e);
     }
+
+    loadTournamentData();
   }, [slug]);
 
   const tournament =
@@ -111,7 +124,7 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
     tournaments.find((item) => item.slug === slug) ||
     tournaments.find((item) => item.slug === rawSlug);
 
-  if (!tournament && typeof window !== 'undefined' && slug) {
+  if (!tournament && typeof window !== 'undefined' && slug && customTournaments.length > 0) {
     notFound();
   }
 
@@ -127,58 +140,41 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
     }
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const slugify = (text: string) => text.toLowerCase().replace(/\s+/g, '-');
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setErrorMsg('');
+    if (!formValues.teamName.trim() || !formValues.captainName.trim() || !formValues.email.trim()) {
+      setErrorMsg('Please fill in all required fields.');
+      return;
+    }
 
     if (!sessionUser) {
       router.push('/login');
       return;
     }
 
-    if (!formValues.teamName.trim() || !formValues.captainName.trim() || !formValues.email.trim()) {
-      setErrorMsg('Team name, captain name, and email are required.');
-      return;
-    }
-
     try {
-      const rawRegs = localStorage.getItem('xenova_registrations');
-      const regs: RegistrationRecord[] = rawRegs ? JSON.parse(rawRegs) : [];
+      const passId = `XPH-${Math.floor(10000000 + Math.random() * 90000000)}`;
 
-      const isDuplicate = regs.some(
-        (r) =>
-          r.tournamentSlug === slug &&
-          (r.email.toLowerCase() === formValues.email.toLowerCase() ||
-            r.teamName.toLowerCase() === formValues.teamName.toLowerCase())
-      );
-
-      if (isDuplicate) {
-        setErrorMsg('Your team or email is already registered for this tournament.');
-        return;
-      }
-
-      const newRecord: RegistrationRecord = {
+      await saveRegistration({
         tournamentSlug: slug,
+        tournamentTitle: tournament?.title || 'Championship Tournament',
+        tournamentGame: tournament?.game || 'Esports',
+        tournamentPrize: tournament?.prize || 'Verified Prize',
+        tournamentDate: tournament?.date || 'Upcoming',
+        tournamentFormat: tournament?.format || 'Double Elimination',
+        tournamentRegion: tournament?.region || 'Pan India',
+        tournamentFee: tournament?.fee || 'Free',
+        tournamentImage: tournament?.image || '/hero-arena.jpg',
+        teamId: slugify(formValues.teamName),
         teamName: formValues.teamName.trim(),
+        college: formValues.college.trim(),
         captainName: formValues.captainName.trim(),
         email: formValues.email.trim(),
-        college: formValues.college.trim(),
-        note: formValues.note.trim(),
+        passId: passId,
         registeredAt: new Date().toISOString(),
-      };
-
-      localStorage.setItem('xenova_registrations', JSON.stringify([...regs, newRecord]));
-
-      const rawCustom = localStorage.getItem('xenova_tournaments');
-      const loadedCustom = rawCustom ? JSON.parse(rawCustom) : [];
-      const updatedCustom = loadedCustom.map((t: any) => {
-        if (t.slug === slug) {
-          const currentCount = parseInt(t.teams || '0') || 0;
-          return { ...t, teams: `${currentCount + 1}/64` };
-        }
-        return t;
       });
-      localStorage.setItem('xenova_tournaments', JSON.stringify(updatedCustom));
 
       setRegistered(true);
       setAlreadyRegistered(true);
@@ -197,9 +193,12 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
         {/* Background Image Layer with Parallax Vignette */}
         <div className="absolute inset-0 z-0 overflow-hidden">
           <img
-            src={tournament.image}
-            alt={tournament.title}
+            src={tournament?.image || '/hero-arena.jpg'}
+            alt={tournament?.title || 'Tournament'}
             className="h-full w-full object-cover filter brightness-75 saturate-125 scale-105"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = '/hero-arena.jpg';
+            }}
           />
           {/* Multi-Layer Deep Vignette Shadows */}
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent" />
