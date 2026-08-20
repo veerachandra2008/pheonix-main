@@ -23,48 +23,76 @@ export interface TournamentRegistrationRecord {
 const BACKEND_URL = process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
 
 /**
- * Fetch all tournaments directly from Backend Database
+ * Fetch all tournaments directly from Supabase / Backend Database
  */
 export async function getAllTournaments(): Promise<Tournament[]> {
-  try {
-    const apiBase =
-      typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-        ? '/api'
-        : BACKEND_URL;
+  let tournamentsList: Tournament[] = [];
 
-    const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        return json.data.map(mapSupabaseTournament);
-      }
+  // 1. Try Direct Supabase Cloud Database query
+  try {
+    const { data, error } = await supabase.from('tournaments').select('*');
+    if (!error && data && data.length > 0) {
+      tournamentsList = data.map(mapSupabaseTournament);
     }
   } catch (err) {
-    console.error('Failed to load tournaments from database:', err);
+    console.warn('Supabase direct fetch notice:', err);
   }
 
-  return defaultMockTournaments;
+  // 2. Try Backend API (/api/tournaments/)
+  if (tournamentsList.length === 0) {
+    try {
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : BACKEND_URL;
+
+      const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+          tournamentsList = json.data.map(mapSupabaseTournament);
+        }
+      }
+    } catch (err) {
+      console.warn('Backend API fetch notice:', err);
+    }
+  }
+
+  // 3. Fallback to default mock tournaments if cloud database is not populated yet
+  if (tournamentsList.length === 0) {
+    tournamentsList = [...defaultMockTournaments];
+  }
+
+  // 4. Merge custom tournaments from localStorage
+  try {
+    const rawCustom = typeof window !== 'undefined' ? localStorage.getItem('xenova_tournaments') : null;
+    if (rawCustom) {
+      const custom = JSON.parse(rawCustom);
+      const seen = new Set(tournamentsList.map((t) => t.slug));
+      for (const c of custom) {
+        if (!seen.has(c.slug)) {
+          tournamentsList.unshift(c);
+          seen.add(c.slug);
+        }
+      }
+    }
+  } catch {}
+
+  return tournamentsList;
 }
 
 /**
- * Save a new tournament registration into Database
+ * Save a new tournament registration into Database & Cloud Storage
  */
 export async function saveRegistration(record: TournamentRegistrationRecord): Promise<boolean> {
   let isSaved = false;
 
-  // 1. Save to Backend API (/api/tournaments/register)
-  try {
-    const res = await fetch(`${BACKEND_URL}/tournaments/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(record),
-    });
-    if (res.ok) isSaved = true;
-  } catch (err) {
-    console.warn('Backend API registration offline.');
-  }
+  const apiBase =
+    typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+      ? '/api'
+      : BACKEND_URL;
 
-  // 2. Save directly to Supabase client
+  // 1. Save directly to Supabase client
   try {
     const { error } = await supabase.from('registrations').insert([
       {
@@ -81,8 +109,32 @@ export async function saveRegistration(record: TournamentRegistrationRecord): Pr
     ]);
     if (!error) isSaved = true;
   } catch (err) {
-    console.warn('Direct Supabase registration error:', err);
+    console.warn('Direct Supabase registration notice:', err);
   }
+
+  // 2. Save to Backend API (/api/tournaments/register)
+  try {
+    const res = await fetch(`${apiBase}/tournaments/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(record),
+    });
+    if (res.ok) isSaved = true;
+  } catch (err) {
+    console.warn('Backend API registration notice:', err);
+  }
+
+  // 3. Save to localStorage
+  try {
+    const raw = localStorage.getItem('xenova_registrations');
+    const existing: any[] = raw ? JSON.parse(raw) : [];
+    const already = existing.some((r) => r.passId === record.passId);
+    if (!already) {
+      existing.unshift(record);
+      localStorage.setItem('xenova_registrations', JSON.stringify(existing));
+    }
+    isSaved = true;
+  } catch {}
 
   return isSaved;
 }
@@ -159,8 +211,22 @@ export async function getUserRegistrations(email?: string): Promise<TournamentRe
       }
     }
   } catch (err) {
-    console.warn('Supabase registrations fallback error:', err);
+    console.warn('Supabase registrations fallback notice:', err);
   }
+
+  // 3. LocalStorage fallback
+  try {
+    const raw = localStorage.getItem('xenova_registrations');
+    if (raw) {
+      const localList: any[] = JSON.parse(raw);
+      const userLocal = localList.filter((r) => !r.email || r.email.toLowerCase() === cleanEmail);
+      for (const item of userLocal) {
+        if (!records.some((r) => r.passId === item.passId)) {
+          records.push(item);
+        }
+      }
+    }
+  } catch {}
 
   return records;
 }

@@ -107,12 +107,22 @@ IN_MEMORY_TOURNAMENTS = list(MOCK_TOURNAMENTS)
 
 @tournaments_bp.route('/', methods=['GET'])
 def get_tournaments():
-    """Fetch all tournaments from Supabase (falls back to memory store if error)"""
+    """Fetch all tournaments from Supabase (falls back to memory store if error, auto-seeds if empty)"""
     try:
         supabase = get_supabase_client()
         res = supabase.table('tournaments').select('*').execute()
-        if res.data is not None:
+        if res.data and len(res.data) > 0:
             return jsonify({'success': True, 'data': res.data}), 200
+        elif res.data is not None and len(res.data) == 0:
+            # Auto-seed default tournaments into Supabase
+            try:
+                for t in MOCK_TOURNAMENTS:
+                    supabase.table('tournaments').insert(t).execute()
+                res2 = supabase.table('tournaments').select('*').execute()
+                if res2.data:
+                    return jsonify({'success': True, 'data': res2.data}), 200
+            except Exception as seed_err:
+                print(f"Auto-seed warning: {seed_err}")
     except Exception as e:
         print(f"Supabase error fetching tournaments: {e}")
     
