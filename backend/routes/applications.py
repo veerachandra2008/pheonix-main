@@ -1,4 +1,5 @@
 import time
+from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, request, jsonify
 from config import get_supabase_client
 from routes.auth import IN_MEMORY_USERS
@@ -20,17 +21,50 @@ def get_all_applications():
     2. Teams
     3. Colleges
     4. Tournaments
+    (Parallelized with ThreadPoolExecutor for ultra-fast response)
     """
     try:
-        # 1. Organizer Applications from Database and Memory
-        supabase_organizer_apps = []
-        try:
-            supabase = get_supabase_client()
-            res = supabase.table('organizer_applications').select('*').execute()
-            if res.data and isinstance(res.data, list):
-                supabase_organizer_apps = res.data
-        except Exception as e:
-            print(f"Supabase organizer_applications fetch notice: {e}")
+        supabase = get_supabase_client()
+
+        def fetch_organizer_apps():
+            try:
+                res = supabase.table('organizer_applications').select('*').execute()
+                return res.data if (res.data and isinstance(res.data, list)) else []
+            except Exception:
+                return []
+
+        def fetch_teams():
+            try:
+                res = supabase.table('teams').select('*').execute()
+                return res.data if (res.data and len(res.data) > 0) else list(IN_MEMORY_TEAMS)
+            except Exception:
+                return list(IN_MEMORY_TEAMS)
+
+        def fetch_colleges():
+            try:
+                res = supabase.table('colleges').select('*').execute()
+                return res.data if (res.data and len(res.data) > 0) else list(IN_MEMORY_COLLEGES)
+            except Exception:
+                return list(IN_MEMORY_COLLEGES)
+
+        def fetch_tournaments():
+            try:
+                res = supabase.table('tournaments').select('*').execute()
+                return res.data if (res.data and len(res.data) > 0) else list(IN_MEMORY_TOURNAMENTS)
+            except Exception:
+                return list(IN_MEMORY_TOURNAMENTS)
+
+        # Run all 4 queries concurrently in parallel threads
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            f_orgs = executor.submit(fetch_organizer_apps)
+            f_teams = executor.submit(fetch_teams)
+            f_colleges = executor.submit(fetch_colleges)
+            f_tourns = executor.submit(fetch_tournaments)
+
+            supabase_organizer_apps = f_orgs.result()
+            team_apps = f_teams.result()
+            college_apps = f_colleges.result()
+            tournament_apps = f_tourns.result()
 
         # Combine memory and Supabase by email
         merged_apps_map = {}
@@ -65,44 +99,8 @@ def get_all_applications():
                 'details': app.get('details') or 'Esports event organizer application.',
                 'status': raw_status,
                 'verification_status': raw_status,
-                'appliedAt': app.get('appliedAt') or app.get('created_at') or app.get('updated_at') or 'Recently'
+                'appliedAt': app.get('applied_at') or app.get('appliedAt') or app.get('created_at') or app.get('updated_at') or 'Recently'
             })
-
-        # 2. Team Applications
-        team_apps = []
-        try:
-            supabase = get_supabase_client()
-            res = supabase.table('teams').select('*').execute()
-            if res.data and len(res.data) > 0:
-                team_apps = res.data
-            else:
-                team_apps = list(IN_MEMORY_TEAMS)
-        except Exception:
-            team_apps = list(IN_MEMORY_TEAMS)
-
-        # 3. College Applications
-        college_apps = []
-        try:
-            supabase = get_supabase_client()
-            res = supabase.table('colleges').select('*').execute()
-            if res.data and len(res.data) > 0:
-                college_apps = res.data
-            else:
-                college_apps = list(IN_MEMORY_COLLEGES)
-        except Exception:
-            college_apps = list(IN_MEMORY_COLLEGES)
-
-        # 4. Tournament Applications
-        tournament_apps = []
-        try:
-            supabase = get_supabase_client()
-            res = supabase.table('tournaments').select('*').execute()
-            if res.data and len(res.data) > 0:
-                tournament_apps = res.data
-            else:
-                tournament_apps = list(IN_MEMORY_TOURNAMENTS)
-        except Exception:
-            tournament_apps = list(IN_MEMORY_TOURNAMENTS)
 
         def is_pending(st):
             if not st: return False
@@ -184,23 +182,48 @@ def submit_organizer_application():
         # Upsert in Supabase organizer_applications table
         try:
             supabase = get_supabase_client()
-            clean_db_payload = {
-                'host_name': host_name,
-                'college': college,
-                'email': email,
-                'preferred_game': preferred_game,
-                'experience': experience,
-                'details': details,
-                'status': 'pending',
-                'verification_status': 'pending'
-            }
-            try:
-                supabase.table('organizer_applications').insert(clean_db_payload).execute()
-            except Exception:
+            payload_candidates = [
+                {
+                    'host_name': host_name,
+                    'email': email,
+                    'college': college,
+                    'preferred_game': preferred_game,
+                    'experience': experience,
+                    'details': details,
+                    'status': 'PENDING'
+                },
+                {
+                    'host_name': host_name,
+                    'email': email,
+                    'college': college,
+                    'preferred_game': preferred_game,
+                    'experience': experience,
+                    'details': details,
+                    'status': 'pending'
+                },
+                {
+                    'host_name': host_name,
+                    'email': email,
+                    'college': college,
+                    'preferred_game': preferred_game,
+                    'experience': experience,
+                    'details': details
+                }
+            ]
+
+            for payload in payload_candidates:
                 try:
-                    supabase.table('organizer_applications').update(clean_db_payload).eq('email', email).execute()
-                except Exception:
-                    pass
+                    # Check if already exists in Supabase
+                    check_res = supabase.table('organizer_applications').select('*').eq('email', email).execute()
+                    if check_res.data and len(check_res.data) > 0:
+                        supabase.table('organizer_applications').update(payload).eq('email', email).execute()
+                        break
+                    else:
+                        supabase.table('organizer_applications').insert(payload).execute()
+                        break
+                except Exception as insert_err:
+                    print(f"Supabase organizer insert candidate notice: {insert_err}")
+                    continue
         except Exception as sb_err:
             print(f"Supabase organizer_applications upsert warning: {sb_err}")
 
@@ -219,7 +242,7 @@ def handle_organizer_application_action():
     """
     Approve or Reject an Organizer Application.
     If Approved:
-    - Update application status to 'approved'
+    - Update application status to 'APPROVED' / 'approved' in organizer_applications table
     - Update user's role to 'ORGANIZER' in users table
     - Send notification
     """
@@ -232,13 +255,15 @@ def handle_organizer_application_action():
             return jsonify({'success': False, 'message': 'Valid email and action (approve/reject) are required.'}), 400
 
         target_status = 'approved' if action == 'approve' else 'rejected'
+        target_status_upper = 'APPROVED' if action == 'approve' else 'REJECTED'
+        target_status_lower = 'approved' if action == 'approve' else 'rejected'
         target_role = 'ORGANIZER' if action == 'approve' else 'PLAYER'
 
         # 1. Update In-Memory Organizer Apps
         for app in IN_MEMORY_ORGANIZER_APPS:
             if app.get('email', '').lower() == email:
-                app['status'] = target_status
-                app['verification_status'] = target_status
+                app['status'] = target_status_lower
+                app['verification_status'] = target_status_lower
 
         # 2. Update In-Memory Users Role
         if email in IN_MEMORY_USERS:
@@ -248,28 +273,22 @@ def handle_organizer_application_action():
         # 3. Update Supabase
         try:
             supabase = get_supabase_client()
-            # Try updating with uppercase and lowercase enum values for verification_status_type
-            status_variants = [
-                {'status': target_status.upper()},
-                {'verification_status': target_status.upper()},
-                {'status': target_status.upper(), 'verification_status': target_status.upper()},
-                {'status': target_status.lower()},
-                {'verification_status': target_status.lower()},
-                {'status': target_status.lower(), 'verification_status': target_status.lower()},
-            ]
-            
-            for variant in status_variants:
+            try:
+                supabase.table('organizer_applications').update({'status': target_status_upper}).eq('email', email).execute()
+            except Exception:
                 try:
-                    supabase.table('organizer_applications').update(variant).eq('email', email).execute()
-                    break
-                except Exception:
-                    continue
+                    supabase.table('organizer_applications').update({'status': target_status_lower}).eq('email', email).execute()
+                except Exception as e:
+                    print(f"Supabase organizer status update notice: {e}")
 
             # Update user role in users table
             try:
                 supabase.table('users').update({'role': target_role}).eq('email', email).execute()
-            except Exception as u_err:
-                print(f"Supabase user role update notice: {u_err}")
+            except Exception:
+                try:
+                    supabase.table('users').update({'role': target_role.lower()}).eq('email', email).execute()
+                except Exception:
+                    pass
         except Exception as sb_err:
             print(f"Supabase organizer action update warning: {sb_err}")
 

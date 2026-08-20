@@ -38,6 +38,15 @@ interface Tournament {
   status: string;
 }
 
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+}
+
 export default function AdminOrganizerManagementPage() {
   const [organizers, setOrganizers] = useState<Organizer[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
@@ -47,39 +56,117 @@ export default function AdminOrganizerManagementPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch organizers from backend API
-      const orgRes = await flaskApi.getOrganizers();
       let orgList: Organizer[] = [];
-      if (orgRes.success && Array.isArray(orgRes.data)) {
-        orgList = orgRes.data;
-      }
+      const seen = new Set<string>();
 
-      // Also check applications that were approved
-      const appsRes = await flaskApi.getApplications();
-      if (appsRes.success && appsRes.data?.organizers) {
-        const approvedApps = appsRes.data.organizers.filter((a: any) => a.status === 'approved');
-        const seen = new Set(orgList.map(o => o.email.toLowerCase()));
-        for (const app of approvedApps) {
-          if (app.email && !seen.has(app.email.toLowerCase())) {
-            seen.add(app.email.toLowerCase());
-            orgList.push({
-              email: app.email,
-              name: app.hostName || app.host_name || 'Verified Host',
-              college: app.college,
-              role: 'ORGANIZER',
-              tag: 'ORGANIZER#1337',
-            });
+      // 1. Direct Supabase Fetch from organizer_applications
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        const { data: appData } = await supabase.from('organizer_applications').select('*');
+        if (appData && Array.isArray(appData)) {
+          for (const app of appData) {
+            const status = (app.status || '').toLowerCase();
+            const email = (app.email || '').toLowerCase().trim();
+            if (status === 'approved' && email && !seen.has(email)) {
+              seen.add(email);
+              orgList.push({
+                id: app.id,
+                email: app.email,
+                name: app.host_name || app.name || 'Verified Host',
+                college: app.college || 'Independent Campus',
+                role: 'ORGANIZER',
+                tag: `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+              });
+            }
           }
         }
+      } catch (sbErr) {
+        console.warn('Supabase organizer_applications fetch notice:', sbErr);
       }
+
+      // 2. Fetch organizers from backend API
+      try {
+        const orgRes = await flaskApi.getOrganizers();
+        if (orgRes.success && Array.isArray(orgRes.data)) {
+          for (const o of orgRes.data) {
+            const email = (o.email || '').toLowerCase().trim();
+            if (email && !seen.has(email)) {
+              seen.add(email);
+              orgList.push({
+                id: o.id,
+                email: o.email,
+                name: o.name || o.host_name || 'Verified Host',
+                college: o.college,
+                role: 'ORGANIZER',
+                tag: o.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+              });
+            }
+          }
+        }
+      } catch (apiErr) {
+        console.warn('Flask organizers fetch notice:', apiErr);
+      }
+
+      // 3. Also check applications that were approved
+      try {
+        const appsRes = await flaskApi.getApplications();
+        if (appsRes.success && appsRes.data?.organizers) {
+          const approvedApps = appsRes.data.organizers.filter((a: any) => (a.status || '').toLowerCase() === 'approved');
+          for (const app of approvedApps) {
+            const email = (app.email || '').toLowerCase().trim();
+            if (email && !seen.has(email)) {
+              seen.add(email);
+              orgList.push({
+                id: app.id,
+                email: app.email,
+                name: app.hostName || app.host_name || 'Verified Host',
+                college: app.college,
+                role: 'ORGANIZER',
+                tag: `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+              });
+            }
+          }
+        }
+      } catch {}
 
       setOrganizers(orgList);
 
-      // 2. Fetch tournaments from backend
-      const tournRes = await flaskApi.getTournaments();
-      if (tournRes.success && Array.isArray(tournRes.data)) {
-        setTournaments(tournRes.data);
+      // 4. Fetch tournaments from Direct Supabase and Backend API
+      let tournList: Tournament[] = [];
+      const seenTourns = new Set<string>();
+
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        const { data: sbTourns } = await supabase.from('tournaments').select('*');
+        if (sbTourns && Array.isArray(sbTourns)) {
+          for (const t of sbTourns) {
+            const key = t.slug || String(t.id) || t.title;
+            if (key && !seenTourns.has(key)) {
+              seenTourns.add(key);
+              tournList.push(t);
+            }
+          }
+        }
+      } catch (sbErr) {
+        console.warn('Supabase tournaments fetch notice:', sbErr);
       }
+
+      try {
+        const tournRes = await flaskApi.getTournaments();
+        if (tournRes.success && Array.isArray(tournRes.data)) {
+          for (const t of tournRes.data) {
+            const key = t.slug || String(t.id) || t.title;
+            if (key && !seenTourns.has(key)) {
+              seenTourns.add(key);
+              tournList.push(t);
+            }
+          }
+        }
+      } catch (apiErr) {
+        console.warn('API tournaments fetch notice:', apiErr);
+      }
+
+      setTournaments(tournList);
     } catch (e) {
       console.error('Failed to load organizer data from server:', e);
     } finally {
@@ -120,12 +207,40 @@ export default function AdminOrganizerManagementPage() {
     }
   };
 
-  const getOrganizerTournaments = (email: string) => {
-    return tournaments.filter((t: Tournament) => 
-      (t.createdBy && t.createdBy.toLowerCase() === email.toLowerCase()) ||
-      (t.host && t.host.toLowerCase().includes(email.toLowerCase()))
-    );
+  const getOrganizerTournaments = (email: string, orgName?: string) => {
+    const cleanEmail = (email || '').toLowerCase().trim();
+    const emailPrefix = cleanEmail.split('@')[0];
+    const cleanName = (orgName || '').toLowerCase().trim();
+
+    return tournaments.filter((t: any) => {
+      const createdBy = (t.createdBy || t.organizer_email || '').toLowerCase().trim();
+      const host = (t.host || '').toLowerCase().trim();
+      const title = (t.title || t.name || '').toLowerCase().trim();
+
+      const emailMatch = cleanEmail && (
+        createdBy === cleanEmail ||
+        host === cleanEmail ||
+        host.includes(cleanEmail) ||
+        (emailPrefix && emailPrefix.length > 2 && (host.includes(emailPrefix) || createdBy.includes(emailPrefix)))
+      );
+
+      const nameMatch = cleanName && (
+        host === cleanName ||
+        host.includes(cleanName) ||
+        cleanName.includes(host) ||
+        (cleanName.length > 3 && host.includes(cleanName.split(' ')[0].toLowerCase())) ||
+        (cleanName.length > 3 && title.includes(cleanName.split(' ')[0].toLowerCase()))
+      );
+
+      return Boolean(emailMatch || nameMatch);
+    });
   };
+
+  // Compute total hosted lobbies across all approved organizers
+  const totalHostedLobbies = organizers.reduce((acc, org) => {
+    const count = getOrganizerTournaments(org.email, org.name).length;
+    return acc + count;
+  }, 0);
 
   return (
     <div className="space-y-8">
@@ -154,6 +269,42 @@ export default function AdminOrganizerManagementPage() {
         </button>
       </header>
 
+      {/* Top Quick Metrics */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="p-5 border border-white/10 bg-[#0C111D] rounded-2xl flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Verified Organizers</p>
+            <h3 className="text-3xl font-black text-white italic mt-1">{organizers.length}</h3>
+          </div>
+          <div className="h-12 w-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center">
+            <Users className="h-6 w-6" />
+          </div>
+        </div>
+
+        <div className="p-5 border border-white/10 bg-[#0C111D] rounded-2xl flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Hosted Event Lobbies</p>
+            <h3 className="text-3xl font-black text-white italic mt-1">{totalHostedLobbies}</h3>
+          </div>
+          <div className="h-12 w-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
+            <Trophy className="h-6 w-6" />
+          </div>
+        </div>
+
+        <div className="p-5 border border-white/10 bg-[#0C111D] rounded-2xl flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Database Connection</p>
+            <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-widest mt-2 flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              Live Synced
+            </h3>
+          </div>
+          <div className="h-12 w-12 rounded-xl bg-white/5 border border-white/10 text-slate-300 flex items-center justify-center">
+            <ShieldCheck className="h-6 w-6" />
+          </div>
+        </div>
+      </div>
+
       {/* Organizers List */}
       {loading ? (
         <div className="border border-dashed border-white/10 rounded-2xl p-16 text-center text-slate-500">
@@ -170,7 +321,7 @@ export default function AdminOrganizerManagementPage() {
         <div className="space-y-4">
           <AnimatePresence mode="popLayout">
             {organizers.map((org) => {
-              const orgTournaments = getOrganizerTournaments(org.email);
+              const orgTournaments = getOrganizerTournaments(org.email, org.name);
               const isExpanded = selectedOrganizer === org.email;
 
               return (

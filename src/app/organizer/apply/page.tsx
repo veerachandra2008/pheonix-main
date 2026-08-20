@@ -36,15 +36,49 @@ export default function OrganizerApplyPage() {
 
     // Check if user already has an application in the database
     async function checkExistingApplication() {
+      const userEmail = (user.email || '').toLowerCase().trim();
+      if (!userEmail) return;
+
+      // 1. Direct Supabase Query
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        const { data } = await supabase
+          .from('organizer_applications')
+          .select('*')
+          .eq('email', userEmail);
+
+        if (data && data.length > 0) {
+          const status = (data[0].status || '').toUpperCase();
+          if (status === 'APPROVED') {
+            const updated = { ...user, role: 'organizer', hostName: data[0].host_name || user.name };
+            localStorage.setItem('xenova_session', JSON.stringify(updated));
+            setSession(updated);
+            return;
+          } else if (status === 'PENDING') {
+            setSubmitted(true);
+            return;
+          }
+        }
+      } catch (sbErr) {
+        console.warn('Supabase application check notice:', sbErr);
+      }
+
+      // 2. Flask API Check
       try {
         const res = await flaskApi.getApplications();
         if (res.success && res.data?.organizers) {
-          const userEmail = (user.email || '').toLowerCase().trim();
           const existing = res.data.organizers.find(
             (a: any) => (a.email || '').toLowerCase().trim() === userEmail
           );
-          if (existing && existing.status === 'pending') {
-            setSubmitted(true);
+          if (existing) {
+            const status = (existing.status || '').toUpperCase();
+            if (status === 'APPROVED') {
+              const updated = { ...user, role: 'organizer', hostName: existing.hostName || existing.host_name || user.name };
+              localStorage.setItem('xenova_session', JSON.stringify(updated));
+              setSession(updated);
+            } else if (status === 'PENDING') {
+              setSubmitted(true);
+            }
           }
         }
       } catch (err) {
@@ -94,7 +128,32 @@ export default function OrganizerApplyPage() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     try {
+      // 1. Submit to Backend API
       const res = await flaskApi.submitOrganizerApplication(formData);
+      
+      // 2. Dual-sync directly to Supabase
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        const dbPayload = {
+          host_name: formData.hostName || 'Organizer Candidate',
+          college: formData.college || 'Independent Campus',
+          email: formData.email.trim().toLowerCase(),
+          preferred_game: formData.preferredGame || 'Valorant',
+          experience: formData.experience || 'Intermediate',
+          details: formData.details || '',
+        };
+
+        let sbRes = await supabase.from('organizer_applications').upsert([{ ...dbPayload, status: 'PENDING' }], { onConflict: 'email' });
+        if (sbRes.error) {
+          sbRes = await supabase.from('organizer_applications').upsert([{ ...dbPayload, status: 'pending' }], { onConflict: 'email' });
+        }
+        if (sbRes.error) {
+          await supabase.from('organizer_applications').upsert([dbPayload], { onConflict: 'email' });
+        }
+      } catch (sbErr) {
+        console.warn('Direct Supabase organizer apply notice:', sbErr);
+      }
+
       if (!res.success) {
         alert(res.message || 'Failed to submit application.');
         return;

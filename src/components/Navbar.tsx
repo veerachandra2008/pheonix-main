@@ -188,6 +188,16 @@ export const Navbar = () => {
           </AnimatePresence>
         </div>
 
+        {/* Admin Button beside Sign In / Profile */}
+        <Link
+          href="/admin/login"
+          className="inline-flex items-center gap-1.5 border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 backdrop-blur-2xl px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-bold uppercase tracking-wider text-amber-400 rounded-full transition shadow-lg cursor-pointer shrink-0"
+          title="Admin Portal"
+        >
+          <ShieldCheck className="h-4 w-4 text-amber-400" />
+          <span>Admin</span>
+        </Link>
+
         {isLogin ? (
           <button
             onClick={() => router.push('/')}
@@ -255,15 +265,6 @@ export const Navbar = () => {
                     >
                       <User className="h-4 w-4 text-emerald-400" />
                       Gamer Profile
-                    </Link>
-
-                    <Link
-                      href="/admin/login"
-                      className="flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-amber-400 hover:bg-amber-500/10 rounded-xl transition"
-                      onClick={() => setDropdownOpen(false)}
-                    >
-                      <ShieldCheck className="h-4 w-4 text-amber-400" />
-                      Admin Portal
                     </Link>
 
                     <div className="border-t border-white/10 my-1" />

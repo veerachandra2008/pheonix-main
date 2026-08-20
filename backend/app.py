@@ -43,5 +43,5 @@ def create_app():
 app = create_app()
 
 if __name__ == '__main__':
-    print(f"🚀 Starting Flask Server on port {Config.PORT}...")
-    app.run(host='0.0.0.0', port=Config.PORT, debug=(Config.ENV == 'development'))
+    print(f"🚀 Starting High-Performance Flask Server on port {Config.PORT}...")
+    app.run(host='0.0.0.0', port=Config.PORT, debug=False, threaded=True)

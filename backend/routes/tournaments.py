@@ -107,20 +107,32 @@ IN_MEMORY_TOURNAMENTS = list(MOCK_TOURNAMENTS)
 
 @tournaments_bp.route('/', methods=['GET'])
 def get_tournaments():
-    """Fetch all tournaments from Supabase (falls back to memory store if error)"""
+    """Fetch all tournaments from Supabase and memory fallback"""
+    tournaments = []
+    seen_slugs = set()
     try:
         supabase = get_supabase_client()
         res = supabase.table('tournaments').select('*').execute()
-        if res.data is not None:
-            return jsonify({'success': True, 'data': res.data}), 200
+        if res.data and isinstance(res.data, list):
+            for t in res.data:
+                slug = t.get('slug')
+                if slug:
+                    tournaments.append(t)
+                    seen_slugs.add(slug)
     except Exception as e:
         print(f"Supabase error fetching tournaments: {e}")
     
-    return jsonify({'success': True, 'data': IN_MEMORY_TOURNAMENTS, 'fallback': True}), 200
+    for t in IN_MEMORY_TOURNAMENTS:
+        slug = t.get('slug')
+        if slug and slug not in seen_slugs:
+            tournaments.append(t)
+            seen_slugs.add(slug)
+            
+    return jsonify({'success': True, 'data': tournaments}), 200
 
 VALID_TOURNAMENT_COLUMNS = {
     'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
-    'prize', 'date', 'region', 'format', 'teams', 'filled', 'fee'
+    'prize', 'date', 'region', 'format', 'teams', 'filled', 'fee', 'organizer_email'
 }
 
 def sanitize_tournament_payload(data):
@@ -134,10 +146,16 @@ def sanitize_tournament_payload(data):
 
 @tournaments_bp.route('/', methods=['POST'])
 def create_tournament():
-    """Create a new tournament in Supabase & memory fallback"""
+    """Create a new tournament in Supabase & memory fallback with organizer tracking"""
     data = request.get_json() or {}
     slug = data.get('slug') or data.get('title', '').lower().replace(' ', '-')
     data['slug'] = slug
+    
+    organizer_email = (data.get('organizer_email') or data.get('createdBy') or data.get('email') or '').strip().lower()
+    host = (data.get('host') or data.get('hostName') or data.get('host_name') or 'Verified Organizer').strip()
+    data['host'] = host
+    data['organizer_email'] = organizer_email
+    data['createdBy'] = organizer_email
     
     clean_data = sanitize_tournament_payload(data)
     
@@ -146,8 +164,15 @@ def create_tournament():
     
     try:
         supabase = get_supabase_client()
-        res = supabase.table('tournaments').insert(clean_data).execute()
-        return jsonify({'success': True, 'data': res.data}), 201
+        # Try inserting with organizer_email column
+        try:
+            res = supabase.table('tournaments').insert(clean_data).execute()
+            return jsonify({'success': True, 'data': res.data}), 201
+        except Exception:
+            # Fallback without organizer_email if schema cache does not have the column yet
+            fallback_clean = {k: v for k, v in clean_data.items() if k != 'organizer_email'}
+            res = supabase.table('tournaments').insert(fallback_clean).execute()
+            return jsonify({'success': True, 'data': res.data}), 201
     except Exception as e:
         print(f"Supabase insert warning for tournament: {e}")
         return jsonify({'success': True, 'data': [clean_data], 'fallback': True}), 201

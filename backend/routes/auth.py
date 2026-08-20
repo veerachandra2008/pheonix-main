@@ -1,4 +1,5 @@
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, request, jsonify
 from config import get_supabase_client
 
@@ -181,24 +182,94 @@ def update_role():
 @auth_bp.route('/organizers', methods=['GET'])
 def get_organizers():
     """
-    Fetch all users with role 'ORGANIZER' or 'ADMIN' from Supabase and memory store.
+    Fetch all approved organizers directly from Supabase organizer_applications table and users table in parallel.
     """
     try:
         organizers = []
+        seen_emails = set()
+
         try:
             supabase = get_supabase_client()
-            res = supabase.table('users').select('*').in_('role', ['ORGANIZER', 'ADMIN', 'organizer', 'admin']).execute()
-            if res.data and len(res.data) > 0:
-                organizers = res.data
+
+            def fetch_apps():
+                try:
+                    res = supabase.table('organizer_applications').select('*').execute()
+                    return res.data if res.data else []
+                except Exception:
+                    return []
+
+            def fetch_users():
+                try:
+                    res = supabase.table('users').select('*').execute()
+                    return res.data if res.data else []
+                except Exception:
+                    return []
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                f_apps = executor.submit(fetch_apps)
+                f_users = executor.submit(fetch_users)
+
+                apps_data = f_apps.result()
+                users_data = f_users.result()
+
+            for app in apps_data:
+                status = (app.get('status') or '').strip().upper()
+                email = (app.get('email') or '').strip().lower()
+                if status in ['APPROVED', 'PENDING'] and email:
+                    organizers.append({
+                        'id': app.get('id'),
+                        'email': email,
+                        'name': app.get('host_name') or app.get('name') or email.split('@')[0].capitalize(),
+                        'host_name': app.get('host_name') or app.get('name'),
+                        'college': app.get('college') or 'Independent Campus',
+                        'role': 'ORGANIZER' if status == 'APPROVED' else 'PENDING_ORGANIZER',
+                        'preferred_game': app.get('preferred_game') or 'Valorant',
+                        'experience': app.get('experience') or 'Intermediate',
+                        'details': app.get('details') or '',
+                        'status': status.lower(),
+                        'applied_at': app.get('applied_at'),
+                        'tag': f"HOST#{abs(hash(email)) % 9000 + 1000}"
+                    })
+                    seen_emails.add(email)
+
+            for u in users_data:
+                role = (u.get('role') or '').upper()
+                if role in ['ORGANIZER', 'ADMIN']:
+                    email = (u.get('email') or '').strip().lower()
+                    if email and email not in seen_emails:
+                        organizers.append({
+                            'id': u.get('id'),
+                            'email': email,
+                            'name': u.get('name') or email.split('@')[0].capitalize(),
+                            'college': u.get('college') or 'Nexus Institute of Technology',
+                            'role': role,
+                            'tag': u.get('tag') or f"USER#{abs(hash(email)) % 9000 + 1000}"
+                        })
+                        seen_emails.add(email)
         except Exception as sb_err:
             print(f"Supabase organizers fetch warning: {sb_err}")
 
-        # Merge with in-memory users
-        seen_emails = {u.get('email', '').lower() for u in organizers if u.get('email')}
+        # 3. Merge with in-memory users & in-memory organizer applications
+        from routes.applications import IN_MEMORY_ORGANIZER_APPS
+        for app in IN_MEMORY_ORGANIZER_APPS:
+            email = (app.get('email') or '').strip().lower()
+            if email and email not in seen_emails:
+                organizers.append({
+                    'id': app.get('id'),
+                    'email': email,
+                    'name': app.get('host_name') or app.get('hostName') or email.split('@')[0].capitalize(),
+                    'college': app.get('college') or 'Independent Campus',
+                    'role': 'ORGANIZER' if (app.get('status') or '').upper() == 'APPROVED' else 'PENDING_ORGANIZER',
+                    'preferred_game': app.get('preferred_game') or 'Valorant',
+                    'tag': f"HOST#{abs(hash(email)) % 9000 + 1000}"
+                })
+                seen_emails.add(email)
+
         for email, user in IN_MEMORY_USERS.items():
-            if user.get('role', '').upper() in ['ORGANIZER', 'ADMIN'] and email.lower() not in seen_emails:
+            clean_email = email.strip().lower()
+            if user.get('role', '').upper() in ['ORGANIZER', 'ADMIN'] and clean_email not in seen_emails:
                 organizers.append(user)
-                seen_emails.add(email.lower())
+                seen_emails.add(clean_email)
 
         return jsonify({'success': True, 'data': organizers}), 200
     except Exception as e:

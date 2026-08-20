@@ -32,37 +32,73 @@ export default function OrganizerDashboard() {
   const loadData = async (userEmail: string, userRole: string, userName?: string) => {
     setLoading(true);
     try {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
-      const [tournRes, regRes] = await Promise.all([
-        fetch(`${apiBase}/tournaments/`, { cache: 'no-store' }),
-        fetch(`${apiBase}/registrations`, { cache: 'no-store' }),
-      ]);
-
-      const tournData = await tournRes.json();
-      const regData = await regRes.json();
-
       let allTournaments: any[] = [];
-      if (tournData.success && Array.isArray(tournData.data)) {
-        allTournaments = tournData.data;
+      let allRegistrations: any[] = [];
+
+      // 1. Direct Supabase Query
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        const [sbTournRes, sbRegRes] = await Promise.all([
+          supabase.from('tournaments').select('*'),
+          supabase.from('registrations').select('*'),
+        ]);
+        if (sbTournRes.data && Array.isArray(sbTournRes.data)) {
+          allTournaments = sbTournRes.data;
+        }
+        if (sbRegRes.data && Array.isArray(sbRegRes.data)) {
+          allRegistrations = sbRegRes.data;
+        }
+      } catch (sbErr) {
+        console.warn('Dashboard Supabase fetch notice:', sbErr);
       }
 
-      let allRegistrations: any[] = [];
-      if (regData.success && Array.isArray(regData.data)) {
-        allRegistrations = regData.data;
+      // 2. Fetch from API
+      try {
+        const apiBase =
+          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+            ? '/api'
+            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+        const [tournRes, regRes] = await Promise.all([
+          fetch(`${apiBase}/tournaments/`, { cache: 'no-store' }),
+          fetch(`${apiBase}/registrations`, { cache: 'no-store' }),
+        ]);
+
+        if (tournRes.ok) {
+          const tournData = await tournRes.json();
+          if (tournData.success && Array.isArray(tournData.data) && tournData.data.length > 0) {
+            // Merge unique
+            const seenSlugs = new Set(allTournaments.map((t: any) => t.slug));
+            for (const t of tournData.data) {
+              if (!seenSlugs.has(t.slug)) {
+                allTournaments.push(t);
+                seenSlugs.add(t.slug);
+              }
+            }
+          }
+        }
+
+        if (regRes.ok) {
+          const regData = await regRes.json();
+          if (regData.success && Array.isArray(regData.data)) {
+            allRegistrations = regData.data;
+          }
+        }
+      } catch (apiErr) {
+        console.warn('Dashboard API fetch notice:', apiErr);
       }
+
       setRegistrations(allRegistrations);
 
       // Filter: Show only tournaments hosted / created by this organizer
       if (userRole !== 'admin') {
+        const cleanEmail = (userEmail || '').trim().toLowerCase();
+        const cleanName = (userName || '').trim().toLowerCase();
         allTournaments = allTournaments.filter((t: any) => {
-          const createdBy = (t.createdBy || t.organizer_email || '').toLowerCase();
-          const host = (t.host || '').toLowerCase();
-          const emailMatch = userEmail && createdBy === userEmail.toLowerCase();
-          const nameMatch = userName && host === userName.toLowerCase();
+          const createdBy = (t.createdBy || t.organizer_email || '').trim().toLowerCase();
+          const host = (t.host || '').trim().toLowerCase();
+          const emailMatch = cleanEmail && (createdBy === cleanEmail || host.includes(cleanEmail));
+          const nameMatch = cleanName && (host === cleanName || host.includes(cleanName));
           return emailMatch || nameMatch;
         });
       }
@@ -76,20 +112,54 @@ export default function OrganizerDashboard() {
   };
 
   useEffect(() => {
-    const rawSession = localStorage.getItem('xenova_session');
-    if (!rawSession) {
-      router.replace('/login');
-      return;
+    async function verifyAndLoad() {
+      const rawSession = localStorage.getItem('xenova_session');
+      if (!rawSession) {
+        router.replace('/login');
+        return;
+      }
+
+      try {
+        const user = JSON.parse(rawSession);
+        const email = (user.email || '').trim().toLowerCase();
+        let isAuthorized = user.role === 'organizer' || user.role === 'admin';
+
+        // If not marked organizer in local storage, check database
+        if (!isAuthorized && email) {
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data } = await supabase
+              .from('organizer_applications')
+              .select('*')
+              .eq('email', email);
+
+            if (data && data.length > 0) {
+              const status = (data[0].status || '').toUpperCase();
+              if (status === 'APPROVED') {
+                isAuthorized = true;
+                user.role = 'organizer';
+                user.hostName = data[0].host_name || user.name;
+                localStorage.setItem('xenova_session', JSON.stringify(user));
+              }
+            }
+          } catch (sbErr) {
+            console.warn('Dashboard organizer verification notice:', sbErr);
+          }
+        }
+
+        if (!isAuthorized) {
+          router.replace('/organizer/apply');
+          return;
+        }
+
+        setSession(user);
+        loadData(user.email, user.role, user.name);
+      } catch {
+        router.replace('/login');
+      }
     }
 
-    const user = JSON.parse(rawSession);
-    if (user.role !== 'organizer' && user.role !== 'admin') {
-      router.replace('/dashboard');
-      return;
-    }
-
-    setSession(user);
-    loadData(user.email, user.role, user.name);
+    verifyAndLoad();
   }, [router]);
 
   const handleDeleteTournament = async (slug: string, title: string) => {

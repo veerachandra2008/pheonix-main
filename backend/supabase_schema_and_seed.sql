@@ -112,6 +112,20 @@ CREATE TABLE IF NOT EXISTS tournament_registrations (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 7. ORGANIZER APPLICATIONS TABLE
+CREATE TABLE IF NOT EXISTS organizer_applications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    host_name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    college TEXT NOT NULL,
+    preferred_game TEXT NOT NULL DEFAULT 'Valorant',
+    experience TEXT NOT NULL DEFAULT 'Intermediate',
+    details TEXT,
+    status TEXT DEFAULT 'PENDING',
+    applied_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Disable RLS for public table operations or enable public read/write
 ALTER TABLE colleges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
@@ -119,6 +133,7 @@ ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tournaments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE registrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tournament_registrations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE organizer_applications ENABLE ROW LEVEL SECURITY;
 
 -- Allow public read and write policies
 CREATE POLICY "Allow public read colleges" ON colleges FOR SELECT USING (true);
@@ -140,6 +155,11 @@ CREATE POLICY "Allow public insert registrations" ON registrations FOR INSERT WI
 CREATE POLICY "Allow public read tournament_registrations" ON tournament_registrations FOR SELECT USING (true);
 CREATE POLICY "Allow public insert tournament_registrations" ON tournament_registrations FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update tournament_registrations" ON tournament_registrations FOR UPDATE USING (true);
+
+CREATE POLICY "Allow public read organizer_applications" ON organizer_applications FOR SELECT USING (true);
+CREATE POLICY "Allow public insert organizer_applications" ON organizer_applications FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update organizer_applications" ON organizer_applications FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete organizer_applications" ON organizer_applications FOR DELETE USING (true);
 
 -- ====================================================================
 -- SEED DATA

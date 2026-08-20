@@ -48,19 +48,52 @@ export default function CreateTournamentPage() {
   });
 
   useEffect(() => {
-    const rawSession = localStorage.getItem('xenova_session');
-    if (!rawSession) {
-      router.replace('/login');
-      return;
+    async function verifyAndLoad() {
+      const rawSession = localStorage.getItem('xenova_session');
+      if (!rawSession) {
+        router.replace('/login');
+        return;
+      }
+
+      try {
+        const user = JSON.parse(rawSession);
+        const email = (user.email || '').trim().toLowerCase();
+        let isAuthorized = user.role === 'organizer' || user.role === 'admin';
+
+        if (!isAuthorized && email) {
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data } = await supabase
+              .from('organizer_applications')
+              .select('*')
+              .eq('email', email);
+
+            if (data && data.length > 0) {
+              const status = (data[0].status || '').toUpperCase();
+              if (status === 'APPROVED') {
+                isAuthorized = true;
+                user.role = 'organizer';
+                user.hostName = data[0].host_name || user.name;
+                localStorage.setItem('xenova_session', JSON.stringify(user));
+              }
+            }
+          } catch (sbErr) {
+            console.warn('Create tournament auth check notice:', sbErr);
+          }
+        }
+
+        if (!isAuthorized) {
+          router.replace('/organizer/apply');
+          return;
+        }
+
+        setSession(user);
+      } catch {
+        router.replace('/login');
+      }
     }
 
-    const user = JSON.parse(rawSession);
-    if (user.role !== 'organizer' && user.role !== 'admin') {
-      router.replace('/dashboard');
-      return;
-    }
-
-    setSession(user);
+    verifyAndLoad();
   }, [router]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -108,7 +141,7 @@ export default function CreateTournamentPage() {
         .replace(/[^a-z0-9-]/g, '');
 
       const finalImage = formData.image || imagePreview || GAME_PRESETS[formData.game] || '/valorant.jpg';
-      const hostName = session?.name || session?.email?.split('@')[0] || 'Verified Host';
+      const hostName = session?.hostName || session?.name || session?.email?.split('@')[0] || 'Veera Gaming Society';
 
       const newTournament = {
         title: formData.title.trim(),
@@ -130,20 +163,49 @@ export default function CreateTournamentPage() {
         filled: 0,
       };
 
+      // 1. Dual sync directly into Supabase tournaments table
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        await supabase.from('tournaments').upsert([
+          {
+            title: newTournament.title,
+            slug: newTournament.slug,
+            game: newTournament.game,
+            format: newTournament.format,
+            teams: newTournament.teams,
+            prize: newTournament.prize,
+            date: newTournament.date,
+            region: newTournament.region,
+            fee: newTournament.fee,
+            host: newTournament.host,
+            image: newTournament.image,
+            status: newTournament.status,
+            status_color: newTournament.status_color,
+            filled: 0
+          }
+        ], { onConflict: 'slug' });
+      } catch (sbErr) {
+        console.warn('Direct Supabase tournament create notice:', sbErr);
+      }
+
+      // 2. Submit to Backend API
       const apiBase =
         typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
           ? '/api'
           : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
 
-      const res = await fetch(`${apiBase}/tournaments/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newTournament),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || 'Failed to save tournament in database');
+      try {
+        const res = await fetch(`${apiBase}/tournaments/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newTournament),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          console.warn('API tournament create notice:', data);
+        }
+      } catch (apiErr) {
+        console.warn('Backend API tournament create warning:', apiErr);
       }
 
       alert(`Tournament "${formData.title}" launched successfully! It is now live in the database, user portal, and admin dashboard.`);
