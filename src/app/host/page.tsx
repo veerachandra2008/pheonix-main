@@ -18,14 +18,18 @@ export default function HostPage() {
       try {
         const user = JSON.parse(rawSession);
         const email = (user.email || '').trim().toLowerCase();
+        const role = (user.role || '').toLowerCase();
 
-        // 1. If user is already marked admin or organizer in session
-        if (user.role === 'admin' || user.role === 'organizer') {
+        // 1. Root Platform Admin always has full access
+        if (role === 'admin' || email === 'admin@xenova.gg') {
           router.replace('/organizer/dashboard');
           return;
         }
 
-        // 2. Direct Supabase Query on organizer_applications
+        let isApprovedOrganizer = false;
+        let hostName = user.name || 'Verified Host';
+
+        // 2. Real-time Supabase Check on organizer_applications
         try {
           const { supabase } = await import('@/lib/supabase');
           const { data } = await supabase
@@ -37,51 +41,54 @@ export default function HostPage() {
             const app = data[0];
             const status = (app.status || '').toUpperCase();
             if (status === 'APPROVED') {
-              // Elevate session role to organizer in localStorage
-              const updatedSession = { ...user, role: 'organizer', hostName: app.host_name || user.name };
-              localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
-              router.replace('/organizer/dashboard');
-              return;
-            } else if (status === 'PENDING') {
-              router.replace('/organizer/apply');
-              return;
+              isApprovedOrganizer = true;
+              hostName = app.host_name || user.name || 'Verified Host';
             }
           }
         } catch (sbErr) {
           console.warn('Supabase host lookup notice:', sbErr);
         }
 
-        // 3. Fallback to API Applications Check
-        try {
-          const apiBase =
-            typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-              ? '/api'
-              : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+        // 3. Fallback to API Applications Check if Supabase direct check was empty
+        if (!isApprovedOrganizer) {
+          try {
+            const apiBase =
+              typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+                ? '/api'
+                : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
 
-          const res = await fetch(`${apiBase}/applications/`, { cache: 'no-store' });
-          if (res.ok) {
-            const json = await res.json();
-            if (json.success && Array.isArray(json.data?.organizers)) {
-              const matched = json.data.organizers.find(
-                (a: any) => (a.email || '').toLowerCase().trim() === email
-              );
-              if (matched) {
-                const status = (matched.status || '').toUpperCase();
-                if (status === 'APPROVED') {
-                  const updatedSession = { ...user, role: 'organizer', hostName: matched.hostName || matched.host_name || user.name };
-                  localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
-                  router.replace('/organizer/dashboard');
-                  return;
+            const res = await fetch(`${apiBase}/auth/organizers`, { cache: 'no-store' });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && Array.isArray(json.data)) {
+                const matched = json.data.find(
+                  (a: any) => (a.email || '').toLowerCase().trim() === email
+                );
+                if (matched) {
+                  isApprovedOrganizer = true;
+                  hostName = matched.name || matched.host_name || user.name;
                 }
               }
             }
+          } catch (apiErr) {
+            console.warn('API host lookup notice:', apiErr);
           }
-        } catch (apiErr) {
-          console.warn('API host lookup notice:', apiErr);
         }
 
-        // Default: If not approved organizer, route to application form
-        router.replace('/organizer/apply');
+        if (isApprovedOrganizer) {
+          // Elevate session role to organizer in localStorage
+          const updatedSession = { ...user, role: 'organizer', hostName };
+          localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
+          window.dispatchEvent(new Event('xenova-auth-change'));
+          router.replace('/organizer/dashboard');
+        } else {
+          // Demote session role to player in localStorage and route to apply form
+          const updatedSession = { ...user, role: 'player' };
+          delete updatedSession.hostName;
+          localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
+          window.dispatchEvent(new Event('xenova-auth-change'));
+          router.replace('/organizer/apply');
+        }
       } catch {
         router.replace('/login');
       }

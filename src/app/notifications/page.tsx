@@ -55,22 +55,97 @@ const initialNotifications: NotificationItem[] = [
 export default function NotificationsPage() {
   const router = useRouter();
   const [notifications, setNotifications] = useState<NotificationItem[]>(initialNotifications);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const raw = localStorage.getItem('xenova_notifications');
-    if (raw) {
+    async function loadNotifications() {
+      setLoading(true);
+      const combined: NotificationItem[] = [];
+      const seenIds = new Set<string>();
+
+      // Helper to add unique item
+      const addUnique = (item: any, fallbackId: string) => {
+        const id = String(item.id || fallbackId);
+        if (!seenIds.has(id)) {
+          seenIds.add(id);
+          combined.push({
+            id,
+            title: item.title || 'Platform Notification',
+            message: item.message || '',
+            time: item.time || 'Recently',
+            read: Boolean(item.read),
+            type: item.type || 'system',
+          });
+        }
+      };
+
+      // 1. Fetch from backend API
       try {
-        setNotifications(JSON.parse(raw));
-      } catch (e) {
-        console.error(e);
+        const apiBase =
+          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+            ? '/api'
+            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+        const res = await fetch(`${apiBase}/notifications`, { cache: 'no-store' });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data)) {
+            json.data.forEach((n: any, idx: number) => addUnique(n, `api-notif-${idx}`));
+          }
+        }
+      } catch (err) {
+        console.warn('API notifications fetch notice:', err);
       }
+
+      // 2. Direct Supabase Query
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        const { data } = await supabase.from('notifications').select('*').order('created_at', { ascending: false });
+        if (data && Array.isArray(data)) {
+          data.forEach((n: any, idx: number) => addUnique(n, `sb-notif-${idx}`));
+        }
+      } catch (err) {
+        console.warn('Supabase notifications fetch notice:', err);
+      }
+
+      // 3. Fallback to localStorage
+      try {
+        const raw = localStorage.getItem('xenova_notifications');
+        if (raw) {
+          const localList = JSON.parse(raw);
+          if (Array.isArray(localList)) {
+            localList.forEach((n: any, idx: number) => addUnique(n, `local-notif-${idx}`));
+          }
+        }
+      } catch (err) {
+        console.warn('localStorage notifications parse notice:', err);
+      }
+
+      // 4. Fallback default seeds if nothing loaded
+      if (combined.length === 0) {
+        initialNotifications.forEach((n, idx) => addUnique(n, `seed-notif-${idx}`));
+      }
+
+      setNotifications(combined);
+      setLoading(false);
     }
+
+    loadNotifications();
   }, []);
 
-  const markAllRead = () => {
+  const markAllRead = async () => {
     const updated = notifications.map((n) => ({ ...n, read: true }));
     setNotifications(updated);
     localStorage.setItem('xenova_notifications', JSON.stringify(updated));
+
+    // Update on backend
+    try {
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+      await fetch(`${apiBase}/notifications/mark-read`, { method: 'POST' });
+    } catch {}
   };
 
   return (
@@ -118,9 +193,9 @@ export default function NotificationsPage() {
       <section className="py-14 sm:py-20 bg-black">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 space-y-4">
           
-          {notifications.map((item) => (
+          {notifications.map((item, idx) => (
             <div
-              key={item.id}
+              key={`${item.id}-${idx}`}
               className={`p-6 rounded-3xl border transition ${
                 item.read ? 'border-white/10 bg-[#09090b]' : 'border-emerald-500/40 bg-emerald-500/10 shadow-lg'
               }`}

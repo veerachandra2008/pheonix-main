@@ -21,32 +21,42 @@ def create_order():
     2. Save initial PENDING registration to Supabase
     """
     try:
-        data = request.get_json() or {}
-        amount = data.get('amount')
-        name = data.get('name') or data.get('captainName')
-        email = data.get('email')
-        team_name = data.get('teamName')
-        tournament_slug = data.get('tournamentSlug') or data.get('tournamentId')
+        data = request.get_json(silent=True) or {}
+        print(f"\n[DEBUG /api/payments/create-order] Received request: {data}")
 
-        if amount is None or not name or not email or not team_name:
-            return jsonify({'success': False, 'message': 'Amount, name, email, and teamName are required.'}), 400
+        amount = data.get('amount')
+        name = str(data.get('name') or data.get('captainName') or data.get('captain_name') or 'Captain').strip()
+        email = str(data.get('email') or '').strip()
+        team_name = str(data.get('teamName') or data.get('team_name') or 'Team Alpha').strip()
+        tournament_slug = str(data.get('tournamentSlug') or data.get('tournamentId') or '').strip()
+
+        if not email:
+            print(f"[DEBUG create-order] Validation Error: Missing email. Payload: {data}")
+            return jsonify({'success': False, 'message': 'Captain email is required for registration.'}), 400
+
+        if amount is None:
+            print(f"[DEBUG create-order] Validation Error: Missing amount. Payload: {data}")
+            return jsonify({'success': False, 'message': 'Payment amount is required.'}), 400
 
         # Convert amount to float safely
         try:
             amount_val = float(amount)
-        except ValueError:
-            return jsonify({'success': False, 'message': 'Invalid amount value.'}), 400
+        except (ValueError, TypeError):
+            print(f"[DEBUG create-order] Validation Error: Invalid amount '{amount}'.")
+            return jsonify({'success': False, 'message': f'Invalid amount value: {amount}'}), 400
 
         # Razorpay amount is in paise (1 INR = 100 paise)
         amount_in_paise = int(round(amount_val * 100))
 
-        if amount_in_paise <= 0:
-            return jsonify({'success': False, 'message': 'Payment amount must be greater than 0 for paid checkout.'}), 400
+        if amount_in_paise < 100:
+            print(f"[DEBUG create-order] Validation Error: Amount in paise is {amount_in_paise} (must be >= 100 paise / ₹1).")
+            return jsonify({'success': False, 'message': 'Payment amount must be at least ₹1.00 (100 paise) for Razorpay checkout.'}), 400
 
         if not Config.RAZORPAY_KEY_ID or not Config.RAZORPAY_KEY_SECRET:
+            print("[DEBUG create-order] Error: RAZORPAY_KEY_ID or RAZORPAY_KEY_SECRET missing in backend/.env.")
             return jsonify({
                 'success': False,
-                'message': 'Razorpay API credentials (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET) are missing on the backend.'
+                'message': 'Razorpay API credentials (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET) are missing or empty in backend/.env file.'
             }), 500
 
         receipt_id = f"rcpt_{uuid.uuid4().hex[:8]}_{int(time.time())}"[:40]
@@ -56,12 +66,14 @@ def create_order():
             'currency': 'INR',
             'receipt': receipt_id,
             'notes': {
-                'name': name,
-                'email': email,
-                'teamName': team_name,
-                'tournamentSlug': tournament_slug or '',
+                'name': name[:40],
+                'email': email[:40],
+                'teamName': team_name[:40],
+                'tournamentSlug': tournament_slug[:40],
             }
         }
+
+        print(f"[DEBUG create-order] Calling Razorpay API with Key ID: {Config.RAZORPAY_KEY_ID}, Order Data: {order_data}")
 
         # Safely create real Razorpay Order
         try:
@@ -70,11 +82,15 @@ def create_order():
             order_id = order['id']
             order_amount = order['amount']
             order_currency = order.get('currency', 'INR')
+            print(f"[DEBUG create-order] Order successfully created! Order ID: {order_id}")
         except Exception as rz_err:
-            print(f"Razorpay Order Error: {rz_err}")
+            import traceback
+            traceback.print_exc()
+            error_details = str(rz_err)
+            print(f"\n[Razorpay Error] Failed to create order: {type(rz_err).__name__} -> {error_details}\n")
             return jsonify({
                 'success': False,
-                'message': f"Razorpay Order Creation Failed: {str(rz_err)}"
+                'message': f"Razorpay Order Creation Failed: {error_details}"
             }), 400
 
         # Save record to Supabase as PENDING if Supabase is reachable

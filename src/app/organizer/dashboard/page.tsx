@@ -122,38 +122,78 @@ export default function OrganizerDashboard() {
       try {
         const user = JSON.parse(rawSession);
         const email = (user.email || '').trim().toLowerCase();
-        let isAuthorized = user.role === 'organizer' || user.role === 'admin';
+        const role = (user.role || '').toLowerCase();
 
-        // If not marked organizer in local storage, check database
-        if (!isAuthorized && email) {
+        // 1. Root Platform Admin always has full access
+        if (role === 'admin' || email === 'admin@xenova.gg') {
+          setSession(user);
+          loadData(user.email, 'admin', user.name);
+          return;
+        }
+
+        let isApprovedOrganizer = false;
+        let hostName = user.name || 'Verified Host';
+
+        // 2. Real-time Supabase Database Check on organizer_applications
+        try {
+          const { supabase } = await import('@/lib/supabase');
+          const { data } = await supabase
+            .from('organizer_applications')
+            .select('*')
+            .eq('email', email);
+
+          if (data && data.length > 0) {
+            const app = data[0];
+            const status = (app.status || '').toUpperCase();
+            if (status === 'APPROVED') {
+              isApprovedOrganizer = true;
+              hostName = app.host_name || user.name || 'Verified Host';
+            }
+          }
+        } catch (sbErr) {
+          console.warn('Dashboard organizer verification notice:', sbErr);
+        }
+
+        // 3. Fallback to API Organizers Check if Supabase direct check was empty
+        if (!isApprovedOrganizer) {
           try {
-            const { supabase } = await import('@/lib/supabase');
-            const { data } = await supabase
-              .from('organizer_applications')
-              .select('*')
-              .eq('email', email);
+            const apiBase =
+              typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+                ? '/api'
+                : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
 
-            if (data && data.length > 0) {
-              const status = (data[0].status || '').toUpperCase();
-              if (status === 'APPROVED') {
-                isAuthorized = true;
-                user.role = 'organizer';
-                user.hostName = data[0].host_name || user.name;
-                localStorage.setItem('xenova_session', JSON.stringify(user));
+            const res = await fetch(`${apiBase}/auth/organizers`, { cache: 'no-store' });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && Array.isArray(json.data)) {
+                const matched = json.data.find(
+                  (a: any) => (a.email || '').toLowerCase().trim() === email
+                );
+                if (matched) {
+                  isApprovedOrganizer = true;
+                  hostName = matched.name || matched.host_name || user.name;
+                }
               }
             }
-          } catch (sbErr) {
-            console.warn('Dashboard organizer verification notice:', sbErr);
+          } catch (apiErr) {
+            console.warn('API organizer lookup notice:', apiErr);
           }
         }
 
-        if (!isAuthorized) {
+        if (!isApprovedOrganizer) {
+          // Demote session role to player in localStorage and route to apply form
+          const updatedSession = { ...user, role: 'player' };
+          delete updatedSession.hostName;
+          localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
+          window.dispatchEvent(new Event('xenova-auth-change'));
           router.replace('/organizer/apply');
           return;
         }
 
-        setSession(user);
-        loadData(user.email, user.role, user.name);
+        const validSession = { ...user, role: 'organizer', hostName };
+        localStorage.setItem('xenova_session', JSON.stringify(validSession));
+        setSession(validSession);
+        loadData(validSession.email, 'organizer', validSession.name);
       } catch {
         router.replace('/login');
       }
@@ -313,7 +353,7 @@ export default function OrganizerDashboard() {
             </div>
           ) : (
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {tournaments.map((tournament) => {
+              {tournaments.map((tournament, index) => {
                 const tournamentSlug = tournament.slug;
                 const regCount = registrations.filter((r) => {
                   const rSlug = (r.tournament_slug || r.tournamentSlug || '').toLowerCase();
@@ -322,7 +362,7 @@ export default function OrganizerDashboard() {
 
                 return (
                   <motion.article
-                    key={tournamentSlug || tournament.id}
+                    key={tournamentSlug || tournament.id || `t-${index}`}
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="border border-white/10 bg-[#0C111D] rounded-3xl overflow-hidden shadow-xl hover:border-white/20 transition flex flex-col justify-between group"

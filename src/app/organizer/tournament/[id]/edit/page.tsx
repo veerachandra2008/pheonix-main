@@ -111,20 +111,54 @@ export default function EditTournamentPage() {
   };
 
   useEffect(() => {
-    const rawSession = localStorage.getItem('xenova_session');
-    if (!rawSession) {
-      router.replace('/login');
-      return;
+    async function verifyAndLoad() {
+      const rawSession = localStorage.getItem('xenova_session');
+      if (!rawSession) {
+        router.replace('/login');
+        return;
+      }
+
+      try {
+        const user = JSON.parse(rawSession);
+        const email = (user.email || '').trim().toLowerCase();
+        const role = (user.role || '').toLowerCase();
+
+        if (role === 'admin' || email === 'admin@xenova.gg') {
+          setSession(user);
+          loadTournament(user.email, 'admin', user.name);
+          return;
+        }
+
+        let isApproved = false;
+        let hostName = user.name || 'Verified Host';
+
+        try {
+          const { supabase } = await import('@/lib/supabase');
+          const { data } = await supabase.from('organizer_applications').select('*').eq('email', email);
+          if (data && data.length > 0 && (data[0].status || '').toUpperCase() === 'APPROVED') {
+            isApproved = true;
+            hostName = data[0].host_name || user.name || 'Verified Host';
+          }
+        } catch {}
+
+        if (!isApproved) {
+          const updatedSession = { ...user, role: 'player' };
+          delete updatedSession.hostName;
+          localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
+          window.dispatchEvent(new Event('xenova-auth-change'));
+          router.replace('/organizer/apply');
+          return;
+        }
+
+        const validSession = { ...user, role: 'organizer', hostName };
+        setSession(validSession);
+        loadTournament(validSession.email, 'organizer', validSession.name);
+      } catch {
+        router.replace('/login');
+      }
     }
 
-    const user = JSON.parse(rawSession);
-    if (user.role !== 'organizer' && user.role !== 'admin') {
-      router.replace('/dashboard');
-      return;
-    }
-
-    setSession(user);
-    loadTournament(user.email, user.role, user.name);
+    verifyAndLoad();
   }, [router, rawId]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {

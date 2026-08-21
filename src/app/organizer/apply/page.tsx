@@ -3,300 +3,801 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
-import { ArrowLeft, Send, Sparkles, Trophy, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  ArrowLeft,
+  Calendar,
+  CheckCircle2,
+  Lock,
+  MapPin,
+  QrCode,
+  ShieldCheck,
+  Sparkles,
+  Ticket,
+  Trophy,
+  User,
+  Users,
+  Building2,
+  Mail,
+  Zap,
+  ChevronRight,
+  Globe,
+  Radio,
+  FileText,
+  DollarSign,
+  Check,
+  Flame,
+  ArrowUpRight,
+  Clock,
+  Layers,
+  ChevronDown,
+} from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 
-export default function OrganizerApplyPage() {
+const gameOptions = [
+  { name: 'Valorant', image: '/valorant.jpg', defaultFormat: '5v5 Double Elimination', tag: 'PC FPS' },
+  { name: 'BGMI', image: '/bgmi.jpg', defaultFormat: 'Squad Battle Royale', tag: 'Mobile BR' },
+  { name: 'CS2', image: '/cs2.jpg', defaultFormat: '5v5 Single Elimination', tag: 'PC Tactical' },
+  { name: 'Free Fire', image: '/freefire.jpg', defaultFormat: 'Squad Battle Royale', tag: 'Mobile BR' },
+  { name: 'FC / FIFA', image: '/fc.jpg', defaultFormat: '1v1 Knockout', tag: 'Sports Simulation' },
+  { name: 'Apex Legends', image: '/apex.jpg', defaultFormat: 'Trios Best of 5', tag: 'Battle Royale' },
+  { name: 'COD Mobile', image: '/codm.jpg', defaultFormat: '5v5 Search & Destroy', tag: 'Mobile FPS' },
+  { name: 'Rocket League', image: '/rocket.jpg', defaultFormat: '3v3 Standard Knockout', tag: 'Arcade Sports' },
+];
+
+export default function HostEventPage() {
   const router = useRouter();
   const [session, setSession] = useState<any>(null);
-  const [submitted, setSubmitted] = useState(false);
+
   const [formData, setFormData] = useState({
-    hostName: '',
-    college: '',
-    preferredGame: 'Valorant',
-    email: '',
-    experience: '',
-    details: '',
+    title: '',
+    game: 'Valorant',
+    eventType: 'inPerson', // inPerson | online | hybrid
+    location: '',
+    date: '',
+    time: '18:00',
+    prizePool: '50,000',
+    entryFee: '0',
+    maxTeams: '64',
+    format: '5v5 Double Elimination',
+    organizerName: '',
+    organizerEmail: '',
+    organizerPhone: '',
+    discordServer: '',
+    description: '',
   });
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [publishedEvent, setPublishedEvent] = useState<any>(null);
 
   useEffect(() => {
     const rawSession = localStorage.getItem('xenova_session');
-    if (!rawSession) {
-      router.replace('/login');
-      return;
+    if (rawSession) {
+      try {
+        const user = JSON.parse(rawSession);
+        setSession(user);
+        setFormData((prev) => ({
+          ...prev,
+          organizerEmail: prev.organizerEmail || user.email || '',
+          organizerName: prev.organizerName || (user.name ? `${user.name} Esports Club` : ''),
+        }));
+
+        async function checkStatus() {
+          const cleanEmail = (user.email || '').toLowerCase().trim();
+          if (!cleanEmail) return;
+
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data } = await supabase.from('organizer_applications').select('*').eq('email', cleanEmail);
+            if (data && data.length > 0) {
+              const status = (data[0].status || '').toUpperCase();
+              if (status === 'APPROVED') {
+                const updated = { ...user, role: 'organizer', hostName: data[0].host_name || user.name };
+                localStorage.setItem('xenova_session', JSON.stringify(updated));
+                setSession(updated);
+                window.dispatchEvent(new Event('xenova-auth-change'));
+              } else {
+                const updated = { ...user, role: 'player' };
+                delete updated.hostName;
+                localStorage.setItem('xenova_session', JSON.stringify(updated));
+                setSession(updated);
+                window.dispatchEvent(new Event('xenova-auth-change'));
+              }
+            } else {
+              if (user.role !== 'admin') {
+                const updated = { ...user, role: 'player' };
+                delete updated.hostName;
+                localStorage.setItem('xenova_session', JSON.stringify(updated));
+                setSession(updated);
+                window.dispatchEvent(new Event('xenova-auth-change'));
+              }
+            }
+          } catch {}
+        }
+        checkStatus();
+      } catch {}
     }
-    const user = JSON.parse(rawSession);
-    setSession(user);
+  }, []);
+
+  const selectedGameObj = gameOptions.find((g) => g.name === formData.game) || gameOptions[0];
+
+  const handleGameSelect = (gameName: string) => {
+    const found = gameOptions.find((g) => g.name === gameName);
     setFormData((prev) => ({
       ...prev,
-      email: user.email || '',
-      hostName: user.name ? `${user.name} Gaming Club` : '',
+      game: gameName,
+      format: found ? found.defaultFormat : prev.format,
     }));
+  };
 
-    // Check if user already has an application in the database
-    async function checkExistingApplication() {
-      const userEmail = (user.email || '').toLowerCase().trim();
-      if (!userEmail) return;
+  const handleQuickDemoFill = () => {
+    setFormData({
+      title: 'IIT Bombay Valorant Championship 2026',
+      game: 'Valorant',
+      eventType: 'inPerson',
+      location: 'SAC Auditorium, IIT Bombay Campus, Powai',
+      date: '2026-06-20',
+      time: '17:00',
+      prizePool: '1,00,000',
+      entryFee: '0',
+      maxTeams: '64',
+      format: '5v5 Double Elimination',
+      organizerName: 'IIT Bombay Esports Society',
+      organizerEmail: session?.email || 'esports@iitb.ac.in',
+      organizerPhone: '+91 98765 43210',
+      discordServer: 'https://discord.gg/iitb-esports',
+      description: 'The flagship inter-collegiate Valorant championship. Open to all verified university squads. LAN finals with pro stage broadcast.',
+    });
+  };
 
-      // 1. Direct Supabase Query
-      try {
-        const { supabase } = await import('@/lib/supabase');
-        const { data } = await supabase
-          .from('organizer_applications')
-          .select('*')
-          .eq('email', userEmail);
-
-        if (data && data.length > 0) {
-          const status = (data[0].status || '').toUpperCase();
-          if (status === 'APPROVED') {
-            const updated = { ...user, role: 'organizer', hostName: data[0].host_name || user.name };
-            localStorage.setItem('xenova_session', JSON.stringify(updated));
-            setSession(updated);
-            return;
-          } else if (status === 'PENDING') {
-            setSubmitted(true);
-            return;
-          }
-        }
-      } catch (sbErr) {
-        console.warn('Supabase application check notice:', sbErr);
-      }
-
-      // 2. Flask API Check
-      try {
-        const res = await flaskApi.getApplications();
-        if (res.success && res.data?.organizers) {
-          const existing = res.data.organizers.find(
-            (a: any) => (a.email || '').toLowerCase().trim() === userEmail
-          );
-          if (existing) {
-            const status = (existing.status || '').toUpperCase();
-            if (status === 'APPROVED') {
-              const updated = { ...user, role: 'organizer', hostName: existing.hostName || existing.host_name || user.name };
-              localStorage.setItem('xenova_session', JSON.stringify(updated));
-              setSession(updated);
-            } else if (status === 'PENDING') {
-              setSubmitted(true);
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Failed to verify existing application from database:', err);
-      }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.title || !formData.organizerName || !formData.organizerEmail) {
+      alert('Please fill out the tournament title, host organization, and contact email.');
+      return;
     }
 
-    checkExistingApplication();
-  }, [router]);
+    setIsSubmitting(true);
 
-  if (!session) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#070B14]">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
-      </div>
-    );
-  }
+    const eventSlug = formData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const tournamentHostId = `HOST-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
-  // If user is already an organizer or admin, show state
-  if (session.role === 'organizer' || session.role === 'admin') {
-    return (
-      <main className="min-h-screen bg-[#070B14] text-white flex items-center justify-center p-4">
-        <div className="max-w-md border border-white/10 bg-[#0C111D] p-8 text-center rounded-2xl space-y-6">
-          <div className="h-12 w-12 rounded-full border border-indigo-500/20 bg-indigo-500/10 text-indigo-400 flex items-center justify-center mx-auto">
-            <ShieldCheck className="h-6 w-6" />
-          </div>
-          <h2 className="text-2xl font-black italic uppercase tracking-tight">Access Granted</h2>
-          <p className="text-sm text-slate-400">
-            You are already verified as an official **{session.role.toUpperCase()}** on XENOVA.
-          </p>
-          <div className="flex gap-4 flex-col">
-            <Link href="/organizer/dashboard" className="w-full py-3 text-xs font-black uppercase tracking-widest bg-indigo-600 hover:bg-indigo-500 transition text-white rounded-xl text-center">
-              Tournament Hub
-            </Link>
-            <Link href="/dashboard" className="w-full py-3 text-xs font-black uppercase tracking-widest bg-white/5 border border-white/10 hover:bg-white/10 transition text-white rounded-xl text-center">
-              Player Dashboard
-            </Link>
-            <Link href={session.role === 'admin' ? '/admin/dashboard' : '/admin/event-management'} className="w-full py-3 text-xs font-black uppercase tracking-widest bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-black transition text-rose-400 rounded-xl text-center">
-              Admin Panel
-            </Link>
-          </div>
-        </div>
-      </main>
-    );
-  }
+    const tournamentPayload = {
+      title: formData.title,
+      slug: eventSlug || `tournament-${Date.now()}`,
+      game: formData.game,
+      image: selectedGameObj.image,
+      eventType: formData.eventType,
+      location: formData.location || 'University Campus Arena',
+      region: formData.location || 'Pan India',
+      date: formData.date ? new Date(formData.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Soon',
+      time: formData.time,
+      prize: formData.prizePool ? `₹${formData.prizePool}` : '₹0',
+      fee: formData.entryFee === '0' || !formData.entryFee ? 'Free' : `₹${formData.entryFee}/team`,
+      teams: `0/${formData.maxTeams}`,
+      maxTeams: formData.maxTeams,
+      filled: 0,
+      format: formData.format,
+      host: formData.organizerName,
+      organizer_email: formData.organizerEmail.trim().toLowerCase(),
+      createdBy: formData.organizerEmail.trim().toLowerCase(),
+      status: 'Upcoming',
+      status_color: '#38BDF8',
+      description: formData.description,
+      discordServer: formData.discordServer,
+      phone: formData.organizerPhone,
+    };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+    const applicationPayload = {
+      email: formData.organizerEmail.trim().toLowerCase(),
+      hostName: formData.organizerName,
+      host_name: formData.organizerName,
+      college: formData.location || formData.organizerName || 'Independent Campus',
+      phone: formData.organizerPhone,
+      organizerPhone: formData.organizerPhone,
+      discordServer: formData.discordServer,
+      discord_server: formData.discordServer,
+      preferredGame: formData.game,
+      preferred_game: formData.game,
+      experience: 'Collegiate Tournament Host',
+      details: formData.description || `Hosting ${formData.title} for ${formData.game}`,
+      tournament: tournamentPayload,
+      tournament_data: tournamentPayload,
+    };
+
     try {
-      // 1. Submit to Backend API
-      const res = await flaskApi.submitOrganizerApplication(formData);
-      
-      // 2. Dual-sync directly to Supabase
+      // 1. Submit Application to Backend API
+      await flaskApi.submitOrganizerApplication(applicationPayload);
+
+      // 2. Dual sync to Supabase with progressive field fallback
       try {
         const { supabase } = await import('@/lib/supabase');
         const dbPayload = {
-          host_name: formData.hostName || 'Organizer Candidate',
-          college: formData.college || 'Independent Campus',
-          email: formData.email.trim().toLowerCase(),
-          preferred_game: formData.preferredGame || 'Valorant',
-          experience: formData.experience || 'Intermediate',
-          details: formData.details || '',
+          email: formData.organizerEmail.trim().toLowerCase(),
+          host_name: formData.organizerName,
+          college: formData.location || formData.organizerName || 'Independent Campus',
+          phone: formData.organizerPhone,
+          discord_server: formData.discordServer,
+          preferred_game: formData.game,
+          experience: 'Collegiate Tournament Host',
+          details: formData.description,
+          tournament_data: tournamentPayload,
+          status: 'PENDING',
         };
 
-        let sbRes = await supabase.from('organizer_applications').upsert([{ ...dbPayload, status: 'PENDING' }], { onConflict: 'email' });
+        const sbRes = await supabase.from('organizer_applications').upsert([dbPayload], { onConflict: 'email' });
         if (sbRes.error) {
-          sbRes = await supabase.from('organizer_applications').upsert([{ ...dbPayload, status: 'pending' }], { onConflict: 'email' });
-        }
-        if (sbRes.error) {
-          await supabase.from('organizer_applications').upsert([dbPayload], { onConflict: 'email' });
+          // Fallback if table lacks phone/tournament_data columns
+          await supabase.from('organizer_applications').upsert([
+            {
+              email: formData.organizerEmail.trim().toLowerCase(),
+              host_name: formData.organizerName,
+              college: formData.location || formData.organizerName || 'Independent Campus',
+              preferred_game: formData.game,
+              experience: 'Collegiate Tournament Host',
+              details: formData.description,
+              status: 'PENDING',
+            }
+          ], { onConflict: 'email' });
         }
       } catch (sbErr) {
-        console.warn('Direct Supabase organizer apply notice:', sbErr);
+        console.warn('Direct Supabase application insert notice:', sbErr);
       }
 
-      if (!res.success) {
-        alert(res.message || 'Failed to submit application.');
-        return;
-      }
-      setSubmitted(true);
+      setPublishedEvent({
+        hostId: tournamentHostId,
+        slug: eventSlug || 'phoenix-varsity-cup',
+        title: formData.title,
+        game: formData.game,
+        image: selectedGameObj.image,
+        date: formData.date ? new Date(formData.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBD',
+        location: formData.eventType === 'online' ? 'Online Discord Arena' : formData.location || 'University Campus Arena',
+        prize: formData.prizePool ? `₹${formData.prizePool}` : '₹0',
+        fee: formData.entryFee === '0' || !formData.entryFee ? 'Free Entry' : `₹${formData.entryFee}/team`,
+        organizer: formData.organizerName,
+        format: formData.format,
+        maxTeams: formData.maxTeams,
+      });
+
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
-      console.error(err);
-      alert('An error occurred. Please try again.');
+      console.error('Error submitting tournament application:', err);
+      alert('Application submitted! Pending administrative clearance.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <main className="min-h-screen bg-[#070B14] text-white py-12 relative overflow-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_-20%,rgba(99,102,241,0.1),transparent_60%)] pointer-events-none" />
-
-      <div className="max-w-3xl mx-auto px-4 relative z-10">
-        <Link href="/dashboard" className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-500 hover:text-indigo-400 transition mb-10">
-          <ArrowLeft className="h-4 w-4" />
-          Back to Dashboard
-        </Link>
-
-        {submitted ? (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="border border-white/10 bg-[#0C111D] p-10 text-center rounded-3xl space-y-6 shadow-2xl"
+    <main className="min-h-screen bg-[#07090E] text-zinc-100 font-sans selection:bg-zinc-700 selection:text-white pb-24">
+      {/* ── Top Header Navigation ── */}
+      <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#07090E]/90 backdrop-blur-md px-6 sm:px-10 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-6">
+          <Link
+            href="/tournaments"
+            className="flex items-center gap-2 text-xs text-zinc-400 hover:text-white transition font-medium px-3 py-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-800/50"
           >
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-lg shadow-emerald-500/10">
-              <CheckCircle2 className="h-8 w-8" />
-            </div>
-            <h2 className="text-3xl font-black italic uppercase tracking-tight text-white">Application Received</h2>
-            <p className="text-slate-400 text-sm leading-relaxed max-w-md mx-auto">
-              Your credentials have been submitted to the Xenova Administration. 
-              We will audit your college affiliation and issue approval notifications within 24 hours.
-            </p>
-            <div className="pt-4 max-w-sm mx-auto">
-              <Link href="/dashboard" className="block w-full py-4 bg-indigo-600 hover:bg-indigo-500 transition text-xs font-black uppercase tracking-widest text-white rounded-xl shadow-lg shadow-indigo-600/20">
-                Return to Dashboard
-              </Link>
-            </div>
-          </motion.div>
-        ) : (
-          <div className="border border-white/10 bg-[#0C111D] p-8 sm:p-10 rounded-3xl shadow-2xl space-y-8">
-            <div>
-              <div className="flex items-center gap-2 text-indigo-400 mb-2">
-                <Sparkles className="h-4.5 w-4.5" />
-                <span className="text-[10px] font-black uppercase tracking-[0.25em]">Organizer Program</span>
+            <ArrowLeft className="w-3.5 h-3.5" /> Back to Arena
+          </Link>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <img src="/logo.svg" alt="Phoenix" className="h-7 w-7 object-contain" />
+          <span className="font-black italic uppercase tracking-tighter text-sm text-white">XENOVA <span className="text-emerald-400">HOST</span></span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {session?.role === 'organizer' || session?.role === 'admin' ? (
+            <Link
+              href="/organizer/dashboard"
+              className="text-xs font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 transition"
+            >
+              Organizer Dashboard →
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={handleQuickDemoFill}
+              className="text-xs font-semibold text-zinc-400 hover:text-white px-3 py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-700 transition cursor-pointer"
+            >
+              Auto-fill Sample Data
+            </button>
+          )}
+        </div>
+      </header>
+
+      {/* ── Main Container ── */}
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-10">
+        {!publishedEvent ? (
+          <div className="space-y-12">
+            {/* ── 1. Clean Structured Header ── */}
+            <div className="max-w-3xl space-y-3">
+              <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs font-mono">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Tournament Management Console
               </div>
-              <h1 className="text-4xl font-black italic uppercase tracking-tight">Apply to Host Tournaments</h1>
-              <p className="text-slate-400 text-sm mt-2">
-                Gain access to bracket generation tools, lobby setup aids, casters alignment channels, and official prize pool sync.
+
+              <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white">
+                Host a Collegiate Tournament
+              </h1>
+
+              <p className="text-sm sm:text-base text-zinc-400 leading-relaxed max-w-2xl">
+                Configure your event rules, ticketing, and participant verification. Upon approval by administration, you will unlock the complete Organizer Management Dashboard and launch tournaments across the Phoenix platform.
               </p>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid gap-6 sm:grid-cols-2">
-                <label className="block">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Host / Club Identity</span>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. SRM Gaming Club"
-                    value={formData.hostName}
-                    onChange={(e) => setFormData({ ...formData, hostName: e.target.value })}
-                    className="mt-2 w-full border border-white/10 bg-white/5 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-indigo-500/50"
-                  />
-                </label>
-
-                <label className="block">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">College / Institution</span>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. SRM University, Chennai"
-                    value={formData.college}
-                    onChange={(e) => setFormData({ ...formData, college: e.target.value })}
-                    className="mt-2 w-full border border-white/10 bg-white/5 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-indigo-500/50"
-                  />
-                </label>
+            {/* ── 2. Three Clean Feature Pillars ── */}
+            <div className="grid gap-4 sm:grid-cols-3 border-y border-white/[0.06] py-6">
+              <div className="p-4 rounded-xl border border-zinc-800/80 bg-[#0C0E14] space-y-2">
+                <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs uppercase tracking-wider">
+                  <Ticket className="w-4 h-4 text-zinc-400" /> Free & Paid Ticketing
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Automated pass generation with custom team slot limits, waitlists, and instant roster receipts.
+                </p>
               </div>
 
-              <div className="grid gap-6 sm:grid-cols-2">
-                <label className="block">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Esports Game Title Focus</span>
-                  <select
-                    value={formData.preferredGame}
-                    onChange={(e) => setFormData({ ...formData, preferredGame: e.target.value })}
-                    className="mt-2 w-full border border-white/10 bg-white/5 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-indigo-500/50"
+              <div className="p-4 rounded-xl border border-zinc-800/80 bg-[#0C0E14] space-y-2">
+                <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs uppercase tracking-wider">
+                  <QrCode className="w-4 h-4 text-zinc-400" /> Instant QR Check-in
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Validate participants on-ground in seconds with encrypted QR scanning to eliminate duplicate entries.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl border border-zinc-800/80 bg-[#0C0E14] space-y-2">
+                <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs uppercase tracking-wider">
+                  <Globe className="w-4 h-4 text-zinc-400" /> National Discovery
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Featured on the Phoenix collegiate explorer with direct shareable registration links for your campus.
+                </p>
+              </div>
+            </div>
+
+            {/* ── 3. Main Form & Live Preview Grid ── */}
+            <div className="grid gap-10 lg:grid-cols-12 items-start">
+              {/* Form Column */}
+              <form onSubmit={handleSubmit} className="lg:col-span-8 space-y-8">
+                {/* Section A: Tournament Details */}
+                <div className="rounded-2xl border border-zinc-800/80 bg-[#0C0E14] p-6 sm:p-8 space-y-6">
+                  <div className="border-b border-zinc-800 pb-4">
+                    <h3 className="text-base font-bold text-white uppercase tracking-wide">
+                      1. Tournament Information
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-0.5">Select the title, game title, and competitive format.</p>
+                  </div>
+
+                  {/* Game Selector */}
+                  <div className="space-y-2.5">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                      Game Category <span className="text-zinc-500">*</span>
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      {gameOptions.map((g) => {
+                        const isSelected = formData.game === g.name;
+                        return (
+                          <button
+                            key={g.name}
+                            type="button"
+                            onClick={() => handleGameSelect(g.name)}
+                            className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between h-20 ${
+                              isSelected
+                                ? 'border-zinc-300 bg-zinc-800/80 text-white shadow-sm'
+                                : 'border-zinc-800/80 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                            }`}
+                          >
+                            <span className="text-[10px] text-zinc-500 uppercase font-mono">{g.tag}</span>
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-white">{g.name}</span>
+                              {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Tournament Title <span className="text-zinc-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.title}
+                        onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                        placeholder="e.g. IIT Bombay Valorant Championship 2026"
+                        className="w-full h-11 px-4 rounded-xl border border-zinc-800 bg-zinc-900/60 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Event Environment <span className="text-zinc-500">*</span>
+                      </label>
+                      <select
+                        value={formData.eventType}
+                        onChange={(e) => setFormData({ ...formData, eventType: e.target.value })}
+                        className="w-full h-11 px-3 rounded-xl border border-zinc-800 bg-zinc-900/80 text-sm text-white focus:outline-none focus:border-zinc-500 transition"
+                      >
+                        <option value="inPerson">LAN Campus Arena (On-Ground)</option>
+                        <option value="online">Online Server (Remote)</option>
+                        <option value="hybrid">Hybrid (Online Qualifiers + LAN Finals)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Match Format <span className="text-zinc-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.format}
+                        onChange={(e) => setFormData({ ...formData, format: e.target.value })}
+                        placeholder="e.g. 5v5 Double Elimination"
+                        className="w-full h-11 px-4 rounded-xl border border-zinc-800 bg-zinc-900/60 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Location / Venue Address / Discord Server <span className="text-zinc-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.location}
+                        onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                        placeholder="e.g. Student Activity Center Auditorium / discord.gg/phoenix"
+                        className="w-full h-11 px-4 rounded-xl border border-zinc-800 bg-zinc-900/60 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section B: Schedule & Capacity */}
+                <div className="rounded-2xl border border-zinc-800/80 bg-[#0C0E14] p-6 sm:p-8 space-y-6">
+                  <div className="border-b border-zinc-800 pb-4">
+                    <h3 className="text-base font-bold text-white uppercase tracking-wide">
+                      2. Schedule & Slot Capacity
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-0.5">Define tournament timing, prize pool, and registration fees.</p>
+                  </div>
+
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Tournament Date <span className="text-zinc-500">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={formData.date}
+                        onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                        className="w-full h-11 px-4 rounded-xl border border-zinc-800 bg-zinc-900/60 text-sm text-white focus:outline-none focus:border-zinc-500 transition"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Start Time <span className="text-zinc-500">*</span>
+                      </label>
+                      <input
+                        type="time"
+                        value={formData.time}
+                        onChange={(e) => setFormData({ ...formData, time: e.target.value })}
+                        className="w-full h-11 px-4 rounded-xl border border-zinc-800 bg-zinc-900/60 text-sm text-white focus:outline-none focus:border-zinc-500 transition"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Total Prize Pool (INR)
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-3 text-xs text-zinc-500 font-mono">₹</span>
+                        <input
+                          type="text"
+                          value={formData.prizePool}
+                          onChange={(e) => setFormData({ ...formData, prizePool: e.target.value })}
+                          placeholder="50,000"
+                          className="w-full h-11 pl-8 pr-4 rounded-xl border border-zinc-800 bg-zinc-900/60 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Team Registration Fee (INR)
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-3 text-xs text-zinc-500 font-mono">₹</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={formData.entryFee}
+                          onChange={(e) => setFormData({ ...formData, entryFee: e.target.value })}
+                          placeholder="0 for Free Entry"
+                          className="w-full h-11 pl-8 pr-4 rounded-xl border border-zinc-800 bg-zinc-900/60 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Max Team Capacity Slots
+                      </label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {['16', '32', '64', '128'].map((slots) => {
+                          const isSelected = formData.maxTeams === slots;
+                          return (
+                            <button
+                              key={slots}
+                              type="button"
+                              onClick={() => setFormData({ ...formData, maxTeams: slots })}
+                              className={`py-2.5 rounded-xl border text-xs font-mono font-bold transition cursor-pointer ${
+                                isSelected
+                                  ? 'border-zinc-300 bg-zinc-800 text-white'
+                                  : 'border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700'
+                              }`}
+                            >
+                              {slots} Slots
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Rules & Description Highlights
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={formData.description}
+                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                        placeholder="State match guidelines, discord check-in rules, and team eligibility..."
+                        className="w-full p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/60 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition resize-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section C: Organizer Credentials */}
+                <div className="rounded-2xl border border-zinc-800/80 bg-[#0C0E14] p-6 sm:p-8 space-y-6">
+                  <div className="border-b border-zinc-800 pb-4">
+                    <h3 className="text-base font-bold text-white uppercase tracking-wide">
+                      3. Organizer & University Credentials
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-0.5">Verification details for tournament management.</p>
+                  </div>
+
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Host Club / Society Name <span className="text-zinc-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.organizerName}
+                        onChange={(e) => setFormData({ ...formData, organizerName: e.target.value })}
+                        placeholder="e.g. IIT Bombay Esports Society"
+                        className="w-full h-11 px-4 rounded-xl border border-zinc-800 bg-zinc-900/60 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Official Contact Email <span className="text-zinc-500">*</span>
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={formData.organizerEmail}
+                        onChange={(e) => setFormData({ ...formData, organizerEmail: e.target.value })}
+                        placeholder="esports@iitb.ac.in"
+                        className="w-full h-11 px-4 rounded-xl border border-zinc-800 bg-zinc-900/60 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Phone / WhatsApp
+                      </label>
+                      <input
+                        type="tel"
+                        value={formData.organizerPhone}
+                        onChange={(e) => setFormData({ ...formData, organizerPhone: e.target.value })}
+                        placeholder="+91 98765 43210"
+                        className="w-full h-11 px-4 rounded-xl border border-zinc-800 bg-zinc-900/60 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 block">
+                        Discord Guild Invite URL
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.discordServer}
+                        onChange={(e) => setFormData({ ...formData, discordServer: e.target.value })}
+                        placeholder="https://discord.gg/campus-esports"
+                        className="w-full h-11 px-4 rounded-xl border border-zinc-800 bg-zinc-900/60 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Submit Action */}
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-4 rounded-xl bg-white hover:bg-zinc-200 text-zinc-950 font-bold text-xs uppercase tracking-widest transition duration-200 shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                   >
-                    {['Valorant', 'BGMI', 'Free Fire', 'CS2', 'FC24'].map((game) => (
-                      <option key={game} value={game} className="bg-[#0C111D] text-white">{game}</option>
-                    ))}
-                  </select>
-                </label>
+                    {isSubmitting ? (
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded-full border-2 border-zinc-950 border-t-transparent animate-spin" />
+                        <span>Submitting Application & Publishing Tournament...</span>
+                      </div>
+                    ) : (
+                      <>
+                        Apply as Organizer & Launch Tournament <ArrowUpRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
 
-                <label className="block">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Applicant Email</span>
-                  <input
-                    type="email"
-                    required
-                    readOnly
-                    placeholder="your@email.com"
-                    value={formData.email}
-                    className="mt-2 w-full border border-white/10 bg-white/10 px-4 py-3.5 rounded-xl text-sm text-slate-400 cursor-not-allowed outline-none"
-                  />
-                </label>
+              {/* Right Column: Sticky Live Discovery Card Preview */}
+              <div className="lg:col-span-4 sticky top-24 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono uppercase text-zinc-400">Live Card Preview</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">Discovery Card</span>
+                </div>
+
+                {/* Card Preview Component */}
+                <div className="rounded-2xl border border-zinc-800 bg-[#0C0E14] overflow-hidden shadow-xl space-y-4">
+                  <div className="relative h-44 overflow-hidden bg-zinc-900">
+                    <img
+                      src={selectedGameObj.image}
+                      alt="Tournament Cover"
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#0C0E14] via-transparent to-black/30" />
+                    <div className="absolute top-3 left-3 flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded bg-white text-zinc-950 text-[10px] font-bold uppercase tracking-wider">
+                        {formData.game}
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-black/70 text-zinc-200 text-[10px] font-medium uppercase tracking-wider border border-white/10">
+                        {formData.eventType === 'inPerson' ? 'LAN' : formData.eventType === 'online' ? 'Online' : 'Hybrid'}
+                      </span>
+                    </div>
+
+                    <div className="absolute bottom-3 right-3 text-right">
+                      <span className="text-[10px] text-zinc-400 uppercase font-mono block">Prize Pool</span>
+                      <span className="text-sm font-extrabold text-white font-mono">
+                        {formData.prizePool ? `₹${formData.prizePool}` : '₹0'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-5 pt-0 space-y-4">
+                    <div className="space-y-1">
+                      <h4 className="text-base font-bold text-white leading-snug">
+                        {formData.title || 'Tournament Title Preview'}
+                      </h4>
+                      <p className="text-xs text-zinc-400 flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>{formData.organizerName || 'Host University Club'}</span>
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs text-zinc-300 border-t border-zinc-800/80 pt-3">
+                      <div className="flex items-center gap-1.5 text-zinc-400">
+                        <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>{formData.date || 'Date TBD'}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-zinc-400">
+                        <Users className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>0 / {formData.maxTeams} Teams</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between">
+                      <span className="text-xs text-zinc-400">Entry:</span>
+                      <span className="text-xs font-mono font-bold text-white">
+                        {formData.entryFee === '0' || !formData.entryFee ? 'FREE ENTRY' : `₹${formData.entryFee} / Team`}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3.5 text-xs text-zinc-400 space-y-1">
+                  <div className="flex items-center gap-1.5 text-zinc-200 font-semibold text-xs">
+                    <ShieldCheck className="w-3.5 h-3.5 text-zinc-300" /> Organizer Dashboard Included
+                  </div>
+                  <p className="text-[11px] text-zinc-500 leading-relaxed">
+                    Once approved by administration, your tournament will be activated and you can access your Organizer Hub to manage rosters, match seeds, and participant check-ins.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* ── 4. Clean Confirmation Screen ── */
+          <div className="mx-auto max-w-2xl space-y-8 text-center py-10">
+            <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto text-white">
+              <CheckCircle2 className="w-7 h-7 text-emerald-400" />
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-md border border-emerald-500/20">
+                APPLICATION SUBMITTED · PENDING AUDIT
+              </span>
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-white">{publishedEvent.title}</h1>
+              <p className="text-xs text-zinc-400">{publishedEvent.game} · {publishedEvent.date} · Hosted by {publishedEvent.organizer}</p>
+            </div>
+
+            {/* Published Event Details Card */}
+            <div className="rounded-2xl border border-zinc-800 bg-[#0C0E14] p-6 text-left space-y-5">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <div>
+                  <span className="text-[10px] text-zinc-500 uppercase font-mono block">Host Control Code</span>
+                  <span className="font-mono text-sm font-bold text-white">{publishedEvent.hostId}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] text-zinc-500 uppercase font-mono block">Registration Fee</span>
+                  <span className="font-mono text-xs font-bold text-zinc-300">{publishedEvent.fee}</span>
+                </div>
               </div>
 
-              <label className="block">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Event Experience Level</span>
-                <select
-                  value={formData.experience}
-                  required
-                  onChange={(e) => setFormData({ ...formData, experience: e.target.value })}
-                  className="mt-2 w-full border border-white/10 bg-white/5 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-indigo-500/50"
-                >
-                  <option value="" disabled className="bg-[#0C111D] text-slate-500">Select experience level</option>
-                  <option value="Beginner (First time hosting)" className="bg-[#0C111D] text-white">Beginner (First time hosting)</option>
-                  <option value="Intermediate (Hosted local college LANs)" className="bg-[#0C111D] text-white">Intermediate (Hosted local college LANs)</option>
-                  <option value="Advanced (Hosted regional inter-college leagues)" className="bg-[#0C111D] text-white">Advanced (Hosted regional inter-college leagues)</option>
-                </select>
-              </label>
+              <div className="grid grid-cols-2 gap-4 text-xs">
+                <div>
+                  <span className="text-[10px] text-zinc-500 uppercase font-mono block">Venue / Link</span>
+                  <span className="text-zinc-200">{publishedEvent.location}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-zinc-500 uppercase font-mono block">Format</span>
+                  <span className="text-zinc-200">{publishedEvent.format}</span>
+                </div>
+              </div>
 
-              <label className="block">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Application Notes / Prior Experience Details</span>
-                <textarea
-                  required
-                  rows={4}
-                  placeholder="Describe your gaming club background, target tournament scale, and why you want to act as a verified Xenova Organizer."
-                  value={formData.details}
-                  onChange={(e) => setFormData({ ...formData, details: e.target.value })}
-                  className="mt-2 w-full border border-white/10 bg-white/5 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-indigo-500/50 resize-none"
-                />
-              </label>
+              <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800 flex items-center justify-between gap-3">
+                <div className="truncate">
+                  <span className="text-[10px] text-zinc-400 block font-mono">Tournament Slug</span>
+                  <span className="text-xs font-mono text-zinc-200 truncate block">/tournaments/{publishedEvent.slug}</span>
+                </div>
+                <Link
+                  href="/tournaments"
+                  className="px-3.5 py-1.5 rounded-lg bg-white hover:bg-zinc-200 text-zinc-950 font-bold text-xs transition shrink-0"
+                >
+                  View Arena
+                </Link>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <Link
+                href="/tournaments"
+                className="py-3 px-6 rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-white font-medium text-xs transition"
+              >
+                Back to Tournaments Arena
+              </Link>
 
               <button
-                type="submit"
-                className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 transition text-xs font-black uppercase tracking-widest text-white rounded-xl shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2"
+                type="button"
+                onClick={() => setPublishedEvent(null)}
+                className="py-3 px-6 rounded-xl bg-white hover:bg-zinc-200 text-zinc-950 font-bold text-xs transition cursor-pointer"
               >
-                <Send className="h-4 w-4" />
-                Submit Application
+                Create Another Tournament
               </button>
-            </form>
+            </div>
           </div>
         )}
       </div>

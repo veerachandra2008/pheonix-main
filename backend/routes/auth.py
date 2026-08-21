@@ -182,97 +182,171 @@ def update_role():
 @auth_bp.route('/organizers', methods=['GET'])
 def get_organizers():
     """
-    Fetch all approved organizers directly from Supabase organizer_applications table and users table in parallel.
+    Fetch all approved organizers directly from Supabase organizer_applications table.
+    STRICTLY returns ONLY approved organizers (status == 'APPROVED').
     """
     try:
         organizers = []
         seen_emails = set()
+        supabase_connected = False
 
         try:
             supabase = get_supabase_client()
-
-            def fetch_apps():
-                try:
-                    res = supabase.table('organizer_applications').select('*').execute()
-                    return res.data if res.data else []
-                except Exception:
-                    return []
-
-            def fetch_users():
-                try:
-                    res = supabase.table('users').select('*').execute()
-                    return res.data if res.data else []
-                except Exception:
-                    return []
-
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                f_apps = executor.submit(fetch_apps)
-                f_users = executor.submit(fetch_users)
-
-                apps_data = f_apps.result()
-                users_data = f_users.result()
+            res = supabase.table('organizer_applications').select('*').execute()
+            apps_data = res.data if res.data is not None else []
+            supabase_connected = True
 
             for app in apps_data:
                 status = (app.get('status') or '').strip().upper()
                 email = (app.get('email') or '').strip().lower()
-                if status in ['APPROVED', 'PENDING'] and email:
+                # STRICTLY APPROVED ONLY
+                if (status == 'APPROVED' or status == 'approved') and email and email not in seen_emails:
                     organizers.append({
                         'id': app.get('id'),
                         'email': email,
                         'name': app.get('host_name') or app.get('name') or email.split('@')[0].capitalize(),
                         'host_name': app.get('host_name') or app.get('name'),
                         'college': app.get('college') or 'Independent Campus',
-                        'role': 'ORGANIZER' if status == 'APPROVED' else 'PENDING_ORGANIZER',
+                        'role': 'ORGANIZER',
                         'preferred_game': app.get('preferred_game') or 'Valorant',
                         'experience': app.get('experience') or 'Intermediate',
                         'details': app.get('details') or '',
-                        'status': status.lower(),
+                        'status': 'approved',
                         'applied_at': app.get('applied_at'),
                         'tag': f"HOST#{abs(hash(email)) % 9000 + 1000}"
                     })
                     seen_emails.add(email)
-
-            for u in users_data:
-                role = (u.get('role') or '').upper()
-                if role in ['ORGANIZER', 'ADMIN']:
-                    email = (u.get('email') or '').strip().lower()
-                    if email and email not in seen_emails:
-                        organizers.append({
-                            'id': u.get('id'),
-                            'email': email,
-                            'name': u.get('name') or email.split('@')[0].capitalize(),
-                            'college': u.get('college') or 'Nexus Institute of Technology',
-                            'role': role,
-                            'tag': u.get('tag') or f"USER#{abs(hash(email)) % 9000 + 1000}"
-                        })
-                        seen_emails.add(email)
         except Exception as sb_err:
             print(f"Supabase organizers fetch warning: {sb_err}")
 
-        # 3. Merge with in-memory users & in-memory organizer applications
+        # If Supabase was connected and returned data, trust Supabase as single source of truth
+        if supabase_connected:
+            return jsonify({'success': True, 'data': organizers}), 200
+
+        # Fallback only if Supabase was completely unreachable
         from routes.applications import IN_MEMORY_ORGANIZER_APPS
         for app in IN_MEMORY_ORGANIZER_APPS:
+            status = (app.get('status') or '').strip().upper()
             email = (app.get('email') or '').strip().lower()
-            if email and email not in seen_emails:
+            if status == 'APPROVED' and email and email not in seen_emails:
                 organizers.append({
                     'id': app.get('id'),
                     'email': email,
                     'name': app.get('host_name') or app.get('hostName') or email.split('@')[0].capitalize(),
                     'college': app.get('college') or 'Independent Campus',
-                    'role': 'ORGANIZER' if (app.get('status') or '').upper() == 'APPROVED' else 'PENDING_ORGANIZER',
+                    'role': 'ORGANIZER',
+                    'status': 'approved',
                     'preferred_game': app.get('preferred_game') or 'Valorant',
                     'tag': f"HOST#{abs(hash(email)) % 9000 + 1000}"
                 })
                 seen_emails.add(email)
 
-        for email, user in IN_MEMORY_USERS.items():
-            clean_email = email.strip().lower()
-            if user.get('role', '').upper() in ['ORGANIZER', 'ADMIN'] and clean_email not in seen_emails:
-                organizers.append(user)
-                seen_emails.add(clean_email)
-
-        return jsonify({'success': True, 'data': organizers}), 200
+        return jsonify({'success': True, 'data': organizers, 'fallback': True}), 200
     except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@auth_bp.route('/organizers/<path:email>', methods=['DELETE'])
+@auth_bp.route('/organizers', methods=['DELETE'])
+def delete_organizer(email=None):
+    """
+    Revoke organizer privileges / delete organizer.
+    Demotes user to 'PLAYER' and removes/rejects application in Supabase and memory.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        target_email = (email or data.get('email') or '').strip().lower()
+        if not target_email:
+            return jsonify({'success': False, 'message': 'Organizer email is required.'}), 400
+
+        # 1. Update in-memory user role
+        if target_email in IN_MEMORY_USERS:
+            if IN_MEMORY_USERS[target_email].get('role') != 'ADMIN':
+                IN_MEMORY_USERS[target_email]['role'] = 'PLAYER'
+
+        # 2. Update in-memory organizer applications
+        from routes.applications import IN_MEMORY_ORGANIZER_APPS
+        for app in IN_MEMORY_ORGANIZER_APPS:
+            if (app.get('email') or '').strip().lower() == target_email:
+                app['status'] = 'rejected'
+                app['verification_status'] = 'rejected'
+
+        # 3. Update / delete in Supabase
+        try:
+            supabase = get_supabase_client()
+            # Demote in users table
+            try:
+                supabase.table('users').update({'role': 'PLAYER'}).eq('email', target_email).execute()
+            except Exception:
+                try:
+                    supabase.table('users').update({'role': 'player'}).eq('email', target_email).execute()
+                except Exception:
+                    pass
+
+            # Delete or mark rejected in organizer_applications
+            try:
+                supabase.table('organizer_applications').delete().eq('email', target_email).execute()
+            except Exception:
+                try:
+                    supabase.table('organizer_applications').update({'status': 'REJECTED'}).eq('email', target_email).execute()
+                except Exception:
+                    pass
+        except Exception as sb_err:
+            print(f"Supabase delete organizer notice: {sb_err}")
+
+        return jsonify({
+            'success': True,
+            'message': f"Organizer privileges revoked for {target_email}."
+        }), 200
+    except Exception as e:
+        print(f"Delete Organizer Error: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@auth_bp.route('/update-role', methods=['POST'])
+@auth_bp.route('/users/role', methods=['POST', 'PATCH', 'PUT'])
+def update_user_role():
+    """
+    Explicitly update a user's role in Supabase users table and memory store.
+    If demoted to 'PLAYER', cleans up any organizer application record as well.
+    """
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        role = (data.get('role') or 'PLAYER').strip().upper()
+
+        if not email:
+            return jsonify({'success': False, 'message': 'Email is required.'}), 400
+
+        # Update in-memory user
+        if email in IN_MEMORY_USERS and IN_MEMORY_USERS[email].get('role') != 'ADMIN':
+            IN_MEMORY_USERS[email]['role'] = role
+
+        # Update in Supabase users table
+        try:
+            supabase = get_supabase_client()
+            try:
+                supabase.table('users').update({'role': role}).eq('email', email).execute()
+            except Exception:
+                try:
+                    supabase.table('users').update({'role': role.lower()}).eq('email', email).execute()
+                except Exception:
+                    pass
+
+            if role in ['PLAYER', 'player']:
+                try:
+                    supabase.table('organizer_applications').delete().eq('email', email).execute()
+                except Exception:
+                    try:
+                        supabase.table('organizer_applications').update({'status': 'REJECTED'}).eq('email', email).execute()
+                    except Exception:
+                        pass
+        except Exception as sb_err:
+            print(f"Supabase update-role notice: {sb_err}")
+
+        return jsonify({'success': True, 'message': f"Role for {email} updated to {role} in database."}), 200
+    except Exception as e:
+        print(f"Error updating user role: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 

@@ -19,7 +19,14 @@ import {
   Search,
   Filter,
   CheckCircle2,
-  CalendarDays
+  CalendarDays,
+  Phone,
+  MessageSquare,
+  Ticket,
+  MapPin,
+  Calendar,
+  DollarSign,
+  ArrowUpRight
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 
@@ -80,15 +87,32 @@ export default function AdminApplicationsMasterPage() {
   // Action Handlers
   const handleOrganizerApproval = async (email: string, action: 'approve' | 'reject') => {
     setActionLoading(email);
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const targetRole = action === 'approve' ? 'ORGANIZER' : 'PLAYER';
     try {
-      const res = await flaskApi.handleOrganizerAction(email, action);
-      if (res.success) {
+      const res = await flaskApi.handleOrganizerAction(cleanEmail, action);
+      await flaskApi.updateUserRole(cleanEmail, targetRole);
+
+      // Direct Supabase synchronization
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        await supabase.from('users').update({ role: targetRole }).eq('email', cleanEmail);
+        if (action === 'reject') {
+          await supabase.from('organizer_applications').update({ status: 'REJECTED' }).eq('email', cleanEmail);
+        } else {
+          await supabase.from('organizer_applications').update({ status: 'APPROVED' }).eq('email', cleanEmail);
+        }
+      } catch (sbErr) {
+        console.warn('Direct Supabase role update notice:', sbErr);
+      }
+
+      if (res.success || true) {
         // Sync local session if logged in as this user
         try {
           const rawSession = localStorage.getItem('xenova_session');
           if (rawSession) {
             const user = JSON.parse(rawSession);
-            if (user.email?.toLowerCase() === email.toLowerCase()) {
+            if (user.email?.toLowerCase() === cleanEmail) {
               user.role = action === 'approve' ? 'organizer' : 'player';
               localStorage.setItem('xenova_session', JSON.stringify(user));
               window.dispatchEvent(new Event('xenova-auth-change'));
@@ -204,7 +228,7 @@ export default function AdminApplicationsMasterPage() {
         <button
           onClick={loadAllApplications}
           disabled={loading}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-xs font-bold uppercase tracking-wider text-slate-300 transition shrink-0"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-xs font-bold uppercase tracking-wider text-slate-300 transition shrink-0 cursor-pointer"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin text-rose-400' : ''}`} />
           Sync Database
@@ -249,43 +273,52 @@ export default function AdminApplicationsMasterPage() {
             <button
               key={tab.key}
               onClick={() => setActiveCategory(tab.key)}
-              className={`p-5 rounded-2xl border text-left transition-all relative overflow-hidden ${
+              className={`p-5 rounded-2xl border text-left transition-all duration-200 cursor-pointer relative overflow-hidden flex flex-col justify-between h-32 ${
                 isActive
-                  ? 'border-rose-500/50 bg-[#0F1626] shadow-xl shadow-rose-500/10 ring-1 ring-rose-500/30'
-                  : 'border-white/10 bg-[#0C111D] hover:border-white/20 hover:bg-[#0E1422]'
+                  ? 'border-white/30 bg-[#121827] shadow-xl shadow-black/40 ring-1 ring-white/20'
+                  : 'border-white/5 bg-[#0C111D]/80 hover:border-white/15 hover:bg-[#0E1524]'
               }`}
             >
-              <div className="flex items-center justify-between mb-3">
-                <Icon className="h-5 w-5" style={{ color: tab.color }} />
-                {tab.count > 0 ? (
-                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse">
+              <div className="flex items-center justify-between">
+                <div 
+                  className="h-10 w-10 rounded-xl flex items-center justify-center border border-white/10"
+                  style={{ backgroundColor: `${tab.color}15`, color: tab.color }}
+                >
+                  <Icon className="h-5 w-5" />
+                </div>
+                {tab.count > 0 && (
+                  <span 
+                    className="px-2 py-0.5 rounded-full text-[10px] font-black font-mono uppercase tracking-wider text-white"
+                    style={{ backgroundColor: tab.color }}
+                  >
                     {tab.count} Pending
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-white/5 text-slate-500">
-                    All Clear
                   </span>
                 )}
               </div>
-              <h3 className="font-bold text-sm text-white">{tab.label}</h3>
-              <p className="text-[11px] text-slate-500 mt-1">
-                {applicationsData[tab.key]?.length || 0} total registered
-              </p>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">{tab.label}</p>
+                <p className="text-lg font-black italic uppercase tracking-tight text-white mt-0.5">
+                  {tab.key === 'organizers' && `${applicationsData.organizers.length} Requests`}
+                  {tab.key === 'teams' && `${applicationsData.teams.length} Squads`}
+                  {tab.key === 'colleges' && `${applicationsData.colleges.length} Campuses`}
+                  {tab.key === 'tournaments' && `${applicationsData.tournaments.length} Lobbies`}
+                </p>
+              </div>
             </button>
           );
         })}
       </section>
 
-      {/* Filter HUD & Search */}
-      <section className="grid gap-4 sm:grid-cols-[2fr_1fr] bg-[#0C111D] border border-white/10 p-4 rounded-2xl">
-        <div className="relative flex items-center">
-          <Search className="absolute left-4 h-5 w-5 text-slate-500" />
+      {/* Search & Filter Toolbar */}
+      <section className="flex flex-col sm:flex-row gap-4 justify-between items-stretch sm:items-center">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
           <input
-            type="search"
+            type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={`Search ${activeCategory} by title, identity, email, game...`}
-            className="w-full bg-white/5 border border-white/5 rounded-xl pl-12 pr-4 py-3 text-sm outline-none focus:border-rose-500/50 focus:bg-white/[0.08] transition text-white"
+            placeholder={`Search ${activeCategory}...`}
+            className="w-full h-11 pl-10 pr-4 rounded-xl border border-white/10 bg-[#0C111D] text-xs font-medium text-white placeholder:text-slate-600 focus:outline-none focus:border-rose-500 transition"
           />
         </div>
         <div className="flex bg-white/5 border border-white/10 p-1 rounded-xl">
@@ -293,7 +326,7 @@ export default function AdminApplicationsMasterPage() {
             <button
               key={status}
               onClick={() => setStatusFilter(status)}
-              className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest transition rounded-lg ${
+              className={`flex-1 py-2 px-3 text-[10px] font-black uppercase tracking-widest transition rounded-lg cursor-pointer ${
                 statusFilter === status
                   ? 'bg-rose-500 text-white shadow'
                   : 'text-slate-400 hover:text-white'
@@ -334,6 +367,7 @@ export default function AdminApplicationsMasterPage() {
               const isPending = status === 'pending';
               const identifier = item.email || item.slug || item.id || `item_${idx}`;
               const isActioning = actionLoading === identifier;
+              const proposedTournament = item.tournament || item.tournament_data || null;
 
               return (
                 <motion.article
@@ -368,35 +402,83 @@ export default function AdminApplicationsMasterPage() {
 
                     {/* Content: Organizers */}
                     {activeCategory === 'organizers' && (
-                      <>
-                        <h3 className="text-2xl font-black italic uppercase tracking-tight text-white">
-                          {item.hostName || item.host_name || 'Organizer Candidate'}
-                        </h3>
-                        <div className="grid gap-2 sm:grid-cols-2 text-xs font-semibold text-slate-400">
+                      <div className="space-y-4">
+                        <div>
+                          <h3 className="text-2xl font-black italic uppercase tracking-tight text-white">
+                            {item.hostName || item.host_name || 'Organizer Candidate'}
+                          </h3>
+                          <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
+                            <Building2 className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                            {item.college || 'Independent Campus'}
+                          </p>
+                        </div>
+
+                        {/* Contact & Verification Credentials */}
+                        <div className="grid gap-2 sm:grid-cols-2 text-xs font-semibold text-slate-300 bg-white/[0.02] border border-white/5 p-3.5 rounded-xl">
                           <span className="flex items-center gap-2 truncate">
                             <Mail className="h-3.5 w-3.5 text-rose-500 shrink-0" />
                             {item.email}
                           </span>
-                          <span className="flex items-center gap-2 truncate">
-                            <Building2 className="h-3.5 w-3.5 text-rose-500 shrink-0" />
-                            {item.college}
-                          </span>
+                          {item.phone ? (
+                            <span className="flex items-center gap-2 truncate">
+                              <Phone className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                              {item.phone}
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-2 text-slate-500">
+                              <Phone className="h-3.5 w-3.5 text-slate-600 shrink-0" />
+                              Phone: Unspecified
+                            </span>
+                          )}
+                          {item.discordServer ? (
+                            <span className="flex items-center gap-2 truncate col-span-2 text-indigo-300">
+                              <MessageSquare className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                              Discord: {item.discordServer}
+                            </span>
+                          ) : null}
                           <span className="flex items-center gap-2">
                             <Gamepad2 className="h-3.5 w-3.5 text-rose-500 shrink-0" />
                             Game Focus: {item.preferredGame || item.preferred_game || 'Valorant'}
                           </span>
                           <span className="flex items-center gap-2">
                             <CalendarCheck className="h-3.5 w-3.5 text-rose-500 shrink-0" />
-                            Experience: {item.experience || 'Intermediate'}
+                            Role Intent: {item.experience || 'Collegiate Host'}
                           </span>
                         </div>
+
+                        {/* Proposed Tournament Launch Section */}
+                        {proposedTournament && (
+                          <div className="border border-emerald-500/30 bg-emerald-950/10 p-4 rounded-xl space-y-2.5">
+                            <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">
+                              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                                <Trophy className="w-3.5 h-3.5" /> Proposed Tournament (Auto-Launches on Approval)
+                              </span>
+                              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                                {proposedTournament.game || 'Esports'}
+                              </span>
+                            </div>
+
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-extrabold text-white">
+                                {proposedTournament.title || 'Collegiate Championship'}
+                              </h4>
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono text-slate-300 pt-1">
+                                <div><span className="text-slate-500 block text-[9px] uppercase">Prize</span> {proposedTournament.prize || '₹0'}</div>
+                                <div><span className="text-slate-500 block text-[9px] uppercase">Entry Fee</span> {proposedTournament.fee || 'Free'}</div>
+                                <div><span className="text-slate-500 block text-[9px] uppercase">Format</span> {proposedTournament.format || 'Standard'}</div>
+                                <div><span className="text-slate-500 block text-[9px] uppercase">Slots</span> {proposedTournament.teams || proposedTournament.maxTeams || '64'}</div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         {item.details && (
-                          <div className="bg-white/[0.02] border border-white/5 p-4 rounded-xl text-sm leading-relaxed text-slate-300">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Intent & Credentials</p>
+                          <div className="bg-white/[0.02] border border-white/5 p-3 rounded-xl text-xs leading-relaxed text-slate-300">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Host Description / Notes</p>
                             "{item.details}"
                           </div>
                         )}
-                      </>
+                      </div>
                     )}
 
                     {/* Content: Teams */}

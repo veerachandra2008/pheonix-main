@@ -84,22 +84,6 @@ MOCK_TOURNAMENTS = [
         "teams": "96/128",
         "filled": 75,
         "fee": "₹150",
-    },
-    {
-        "slug": "apex-rivalry-iit-vs-nit",
-        "title": "Apex Rivalry: IIT vs NIT",
-        "host": "Xenova",
-        "image": "/apex.jpg",
-        "game": "Apex Legends",
-        "status": "Upcoming",
-        "status_color": "#38BDF8",
-        "prize": "₹1,20,000",
-        "date": "2 Jul",
-        "region": "Pan India",
-        "format": "Trios Best of 5",
-        "teams": "24/32",
-        "filled": 75,
-        "fee": "Free",
     }
 ]
 
@@ -107,28 +91,16 @@ IN_MEMORY_TOURNAMENTS = list(MOCK_TOURNAMENTS)
 
 @tournaments_bp.route('/', methods=['GET'])
 def get_tournaments():
-    """Fetch all tournaments from Supabase and memory fallback"""
-    tournaments = []
-    seen_slugs = set()
+    """Fetch all tournaments from Supabase with memory fallback"""
     try:
         supabase = get_supabase_client()
         res = supabase.table('tournaments').select('*').execute()
-        if res.data and isinstance(res.data, list):
-            for t in res.data:
-                slug = t.get('slug')
-                if slug:
-                    tournaments.append(t)
-                    seen_slugs.add(slug)
+        if res.data is not None:
+            return jsonify({'success': True, 'data': res.data}), 200
     except Exception as e:
         print(f"Supabase error fetching tournaments: {e}")
     
-    for t in IN_MEMORY_TOURNAMENTS:
-        slug = t.get('slug')
-        if slug and slug not in seen_slugs:
-            tournaments.append(t)
-            seen_slugs.add(slug)
-            
-    return jsonify({'success': True, 'data': tournaments}), 200
+    return jsonify({'success': True, 'data': IN_MEMORY_TOURNAMENTS, 'fallback': True}), 200
 
 VALID_TOURNAMENT_COLUMNS = {
     'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',

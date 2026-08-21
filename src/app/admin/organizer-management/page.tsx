@@ -58,46 +58,26 @@ export default function AdminOrganizerManagementPage() {
     try {
       let orgList: Organizer[] = [];
       const seen = new Set<string>();
+      let fetchedFromApi = false;
 
-      // 1. Direct Supabase Fetch from organizer_applications
-      try {
-        const { supabase } = await import('@/lib/supabase');
-        const { data: appData } = await supabase.from('organizer_applications').select('*');
-        if (appData && Array.isArray(appData)) {
-          for (const app of appData) {
-            const status = (app.status || '').toLowerCase();
-            const email = (app.email || '').toLowerCase().trim();
-            if (status === 'approved' && email && !seen.has(email)) {
-              seen.add(email);
-              orgList.push({
-                id: app.id,
-                email: app.email,
-                name: app.host_name || app.name || 'Verified Host',
-                college: app.college || 'Independent Campus',
-                role: 'ORGANIZER',
-                tag: `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
-              });
-            }
-          }
-        }
-      } catch (sbErr) {
-        console.warn('Supabase organizer_applications fetch notice:', sbErr);
-      }
-
-      // 2. Fetch organizers from backend API
+      // 1. Fetch organizers from backend API (strictly approved only)
       try {
         const orgRes = await flaskApi.getOrganizers();
         if (orgRes.success && Array.isArray(orgRes.data)) {
+          fetchedFromApi = true;
           for (const o of orgRes.data) {
             const email = (o.email || '').toLowerCase().trim();
-            if (email && !seen.has(email)) {
+            const status = (o.status || '').toLowerCase();
+            const role = (o.role || '').toUpperCase();
+            // ONLY include approved organizers or users with ORGANIZER/ADMIN role
+            if (email && !seen.has(email) && (status === 'approved' || role === 'ORGANIZER' || role === 'ADMIN')) {
               seen.add(email);
               orgList.push({
                 id: o.id,
                 email: o.email,
-                name: o.name || o.host_name || 'Verified Host',
-                college: o.college,
-                role: 'ORGANIZER',
+                name: o.name || o.host_name || o.hostName || 'Verified Host',
+                college: o.college || 'Independent Campus',
+                role: role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
                 tag: o.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
               });
             }
@@ -107,31 +87,40 @@ export default function AdminOrganizerManagementPage() {
         console.warn('Flask organizers fetch notice:', apiErr);
       }
 
-      // 3. Also check applications that were approved
-      try {
-        const appsRes = await flaskApi.getApplications();
-        if (appsRes.success && appsRes.data?.organizers) {
-          const approvedApps = appsRes.data.organizers.filter((a: any) => (a.status || '').toLowerCase() === 'approved');
-          for (const app of approvedApps) {
-            const email = (app.email || '').toLowerCase().trim();
-            if (email && !seen.has(email)) {
-              seen.add(email);
-              orgList.push({
-                id: app.id,
-                email: app.email,
-                name: app.hostName || app.host_name || 'Verified Host',
-                college: app.college,
-                role: 'ORGANIZER',
-                tag: `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
-              });
+      // 2. Direct Supabase Fallback only if API was unreachable
+      if (!fetchedFromApi) {
+        try {
+          const { supabase } = await import('@/lib/supabase');
+          const { data: appData } = await supabase
+            .from('organizer_applications')
+            .select('*')
+            .ilike('status', 'approved');
+
+          if (appData && Array.isArray(appData)) {
+            for (const app of appData) {
+              const status = (app.status || '').toLowerCase();
+              const email = (app.email || '').toLowerCase().trim();
+              if (status === 'approved' && email && !seen.has(email)) {
+                seen.add(email);
+                orgList.push({
+                  id: app.id,
+                  email: app.email,
+                  name: app.host_name || app.name || 'Verified Host',
+                  college: app.college || 'Independent Campus',
+                  role: 'ORGANIZER',
+                  tag: `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+                });
+              }
             }
           }
+        } catch (sbErr) {
+          console.warn('Supabase organizer fetch notice:', sbErr);
         }
-      } catch {}
+      }
 
       setOrganizers(orgList);
 
-      // 4. Fetch tournaments from Direct Supabase and Backend API
+      // 3. Fetch tournaments from Direct Supabase and Backend API
       let tournList: Tournament[] = [];
       const seenTourns = new Set<string>();
 
@@ -179,19 +168,34 @@ export default function AdminOrganizerManagementPage() {
   }, []);
 
   const removeOrganizer = async (email: string) => {
-    if (!confirm(`Revoke organizer privileges from ${email}? They will be converted to a regular player.`)) return;
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanEmail) return;
+    if (!confirm(`Revoke organizer privileges from ${cleanEmail}? They will be converted to a regular player.`)) return;
 
     try {
-      // 1. Demote user in backend database
-      await flaskApi.updateUserRole(email, 'PLAYER');
-      await flaskApi.handleOrganizerAction(email, 'reject');
+      // 1. Optimistically update local UI immediately
+      setOrganizers((prev) => prev.filter((o) => o.email.toLowerCase() !== cleanEmail));
 
-      // 2. Demote session if currently active
+      // 2. Delete / Revoke organizer in backend database & Supabase
+      await flaskApi.deleteOrganizer(cleanEmail);
+      await flaskApi.updateUserRole(cleanEmail, 'PLAYER');
+      await flaskApi.handleOrganizerAction(cleanEmail, 'reject');
+
+      // 3. Direct Supabase cleanup
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        await supabase.from('users').update({ role: 'PLAYER' }).eq('email', cleanEmail);
+        await supabase.from('organizer_applications').delete().eq('email', cleanEmail);
+      } catch (sbErr) {
+        console.warn('Direct Supabase revoke notice:', sbErr);
+      }
+
+      // 4. Demote session if currently logged in as this user
       try {
         const rawSession = localStorage.getItem('xenova_session');
         if (rawSession) {
           const session = JSON.parse(rawSession);
-          if (session.email?.toLowerCase() === email.toLowerCase() && session.role === 'organizer') {
+          if (session.email?.toLowerCase() === cleanEmail && session.role === 'organizer') {
             session.role = 'player';
             localStorage.setItem('xenova_session', JSON.stringify(session));
             window.dispatchEvent(new Event('xenova-auth-change'));
@@ -200,10 +204,11 @@ export default function AdminOrganizerManagementPage() {
       } catch {}
 
       await loadData();
-      alert(`Organizer privileges revoked for ${email}.`);
+      alert(`Organizer privileges revoked for ${cleanEmail}.`);
     } catch (e) {
       console.error(e);
       alert('Failed to remove organizer privileges.');
+      await loadData();
     }
   };
 

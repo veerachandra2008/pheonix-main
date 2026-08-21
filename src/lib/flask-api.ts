@@ -119,8 +119,35 @@ export const flaskApi = {
       }
 
       // Update role in Supabase 'users' table
-      const { data, error } = await supabase.from('users').insert([{ email: cleanEmail, role: role }]);
+      const { data, error } = await supabase.from('users').update({ role: role }).eq('email', cleanEmail);
       return { success: !error, message: `Role updated to ${role} in Supabase` };
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  },
+
+  // Delete / Revoke organizer privileges
+  async deleteOrganizer(email: string) {
+    try {
+      const res = await fetch(`${FLASK_API_BASE}/auth/organizers/${encodeURIComponent(email)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) return await res.json();
+    } catch {}
+
+    try {
+      const res = await fetch(`${FLASK_API_BASE}/applications/organizer/${encodeURIComponent(email)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) return await res.json();
+    } catch {}
+
+    // Direct Supabase Fallback
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      await supabase.from('users').update({ role: 'PLAYER' }).eq('email', cleanEmail);
+      await supabase.from('organizer_applications').delete().eq('email', cleanEmail);
+      return { success: true, message: 'Organizer revoked in Supabase' };
     } catch (err: any) {
       return { success: false, message: err.message };
     }

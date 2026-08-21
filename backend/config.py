@@ -5,23 +5,49 @@ from dotenv import load_dotenv
 _backend_dir = os.path.dirname(os.path.abspath(__file__))
 _root_dir = os.path.dirname(_backend_dir)
 
-load_dotenv(os.path.join(_backend_dir, '.env'))
-load_dotenv(os.path.join(_root_dir, '.env'))
-load_dotenv(os.path.join(_root_dir, '.env.local'))
+# Load environment variables from backend/.env (with override=True to guarantee freshest keys)
+backend_env_path = os.path.join(_backend_dir, '.env')
+if os.path.exists(backend_env_path):
+    load_dotenv(backend_env_path, override=True)
+load_dotenv(os.path.join(_root_dir, '.env.local'), override=False)
+load_dotenv(os.path.join(_root_dir, '.env'), override=False)
 load_dotenv()
 
 class Config:
-    PORT = int(os.getenv('PORT', 5000))
-    ENV = os.getenv('FLASK_ENV', 'development')
-    
-    # Supabase Configuration
-    SUPABASE_URL = os.getenv('SUPABASE_URL', '').strip()
-    SUPABASE_KEY = os.getenv('SUPABASE_KEY', '').strip() # Service role key or anon key
-    
-    # Razorpay Configuration
-    RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '').strip()
-    RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '').strip()
-    RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '').strip()
+    @classmethod
+    def reload_env(cls):
+        if os.path.exists(backend_env_path):
+            load_dotenv(backend_env_path, override=True)
+
+    @property
+    def PORT(self):
+        return int(os.getenv('PORT', 5000))
+
+    @property
+    def ENV(self):
+        return os.getenv('FLASK_ENV', 'development')
+
+    @property
+    def SUPABASE_URL(self):
+        return os.getenv('SUPABASE_URL', '').strip()
+
+    @property
+    def SUPABASE_KEY(self):
+        return os.getenv('SUPABASE_KEY', '').strip()
+
+    @property
+    def RAZORPAY_KEY_ID(self):
+        return os.getenv('RAZORPAY_KEY_ID', '').strip().strip('"\'')
+
+    @property
+    def RAZORPAY_KEY_SECRET(self):
+        return os.getenv('RAZORPAY_KEY_SECRET', '').strip().strip('"\'')
+
+    @property
+    def RAZORPAY_WEBHOOK_SECRET(self):
+        return os.getenv('RAZORPAY_WEBHOOK_SECRET', '').strip().strip('"\'')
+
+Config = Config()
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -171,12 +197,44 @@ def get_supabase_client():
 
     return _CACHED_SUPABASE_CLIENT
 
+class _RazorpayNativeOrder:
+    def __init__(self, auth):
+        self.auth = auth
+
+    def create(self, data):
+        url = "https://api.razorpay.com/v1/orders"
+        resp = requests.post(url, json=data, auth=self.auth, timeout=15)
+        res_json = resp.json()
+        if not resp.ok or 'error' in res_json:
+            err_msg = res_json.get('error', {}).get('description') or res_json.get('message') or resp.text
+            raise Exception(f"Razorpay API Error ({resp.status_code}): {err_msg}")
+        return res_json
+
+    def fetch(self, order_id):
+        url = f"https://api.razorpay.com/v1/orders/{order_id}"
+        resp = requests.get(url, auth=self.auth, timeout=15)
+        res_json = resp.json()
+        if not resp.ok or 'error' in res_json:
+            err_msg = res_json.get('error', {}).get('description') or res_json.get('message') or resp.text
+            raise Exception(f"Razorpay API Error ({resp.status_code}): {err_msg}")
+        return res_json
+
+class RazorpayNativeClient:
+    """Lightweight zero-dependency Razorpay Client supporting Python 3.12+ / 3.14+"""
+    def __init__(self, auth):
+        self.auth = auth
+        self.order = _RazorpayNativeOrder(auth)
+
 # Initialize Razorpay client helper safely
 def get_razorpay_client():
-    if not Config.RAZORPAY_KEY_ID or not Config.RAZORPAY_KEY_SECRET:
+    Config.reload_env()
+    key_id = Config.RAZORPAY_KEY_ID
+    key_secret = Config.RAZORPAY_KEY_SECRET
+    if not key_id or not key_secret:
         raise ValueError("RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are missing in backend/.env file.")
     try:
         import razorpay
-        return razorpay.Client(auth=(Config.RAZORPAY_KEY_ID, Config.RAZORPAY_KEY_SECRET))
-    except ImportError:
-        raise ImportError("Python package 'razorpay' is missing. Run: pip install razorpay")
+        return razorpay.Client(auth=(key_id, key_secret))
+    except Exception as err:
+        # Fallback to direct REST client if razorpay SDK has pkg_resources / setuptools issues
+        return RazorpayNativeClient(auth=(key_id, key_secret))
