@@ -140,43 +140,60 @@ def login():
 
 
 @auth_bp.route('/update-role', methods=['POST'])
-def update_role():
+@auth_bp.route('/users/role', methods=['POST', 'PATCH', 'PUT'])
+def update_user_role():
     """
-    Update a user's role in Supabase & memory store.
+    Explicitly update a user's role in Supabase users table and memory store.
+    If demoted to 'PLAYER', cleans up any organizer application record as well.
     """
     try:
         data = request.get_json() or {}
-        email = data.get('email', '').strip().lower()
-        new_role = data.get('role', '').strip().upper() # 'ORGANIZER' or 'PLAYER'
+        email = (data.get('email') or '').strip().lower()
+        role = (data.get('role') or 'PLAYER').strip().upper()
 
-        if not email or not new_role:
-            return jsonify({'success': False, 'message': 'Email and role are required.'}), 400
+        if not email:
+            return jsonify({'success': False, 'message': 'Email is required.'}), 400
 
+        # Update in-memory user
         if email in IN_MEMORY_USERS:
             current_role = IN_MEMORY_USERS[email].get('role', '').upper()
-            if current_role != 'ADMIN':
-                IN_MEMORY_USERS[email]['role'] = new_role
+            if current_role == 'ADMIN':
+                return jsonify({'success': True, 'message': 'User is ADMIN, role unchanged.'}), 200
+            IN_MEMORY_USERS[email]['role'] = role
 
+        # Update in Supabase users table
         try:
             supabase = get_supabase_client()
             existing = supabase.table('users').select('role').eq('email', email).execute()
             if existing.data and len(existing.data) > 0:
-                current_role = existing.data[0].get('role', '').upper()
+                current_role = (existing.data[0].get('role') or '').upper()
                 if current_role == 'ADMIN':
                     return jsonify({'success': True, 'message': 'User is ADMIN, role unchanged.'}), 200
 
-            res = supabase.table('users').update({'role': new_role}).eq('email', email).execute()
+            try:
+                supabase.table('users').update({'role': role}).eq('email', email).execute()
+            except Exception:
+                try:
+                    supabase.table('users').update({'role': role.lower()}).eq('email', email).execute()
+                except Exception:
+                    pass
+
+            if role in ['PLAYER', 'player']:
+                try:
+                    supabase.table('organizer_applications').delete().eq('email', email).execute()
+                except Exception:
+                    try:
+                        supabase.table('organizer_applications').update({'status': 'REJECTED'}).eq('email', email).execute()
+                    except Exception:
+                        pass
         except Exception as sb_err:
-            print(f"Supabase update-role warning: {sb_err}")
+            print(f"Supabase update-role notice: {sb_err}")
 
-        return jsonify({
-            'success': True,
-            'message': f"User role updated to {new_role}.",
-        }), 200
-
+        return jsonify({'success': True, 'message': f"Role for {email} updated to {role}."}), 200
     except Exception as e:
-        print(f"Update Role Error: {e}")
+        print(f"Error updating user role: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
+
 
 
 @auth_bp.route('/organizers', methods=['GET'])
@@ -300,53 +317,6 @@ def delete_organizer(email=None):
         }), 200
     except Exception as e:
         print(f"Delete Organizer Error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-
-@auth_bp.route('/update-role', methods=['POST'])
-@auth_bp.route('/users/role', methods=['POST', 'PATCH', 'PUT'])
-def update_user_role():
-    """
-    Explicitly update a user's role in Supabase users table and memory store.
-    If demoted to 'PLAYER', cleans up any organizer application record as well.
-    """
-    try:
-        data = request.get_json() or {}
-        email = (data.get('email') or '').strip().lower()
-        role = (data.get('role') or 'PLAYER').strip().upper()
-
-        if not email:
-            return jsonify({'success': False, 'message': 'Email is required.'}), 400
-
-        # Update in-memory user
-        if email in IN_MEMORY_USERS and IN_MEMORY_USERS[email].get('role') != 'ADMIN':
-            IN_MEMORY_USERS[email]['role'] = role
-
-        # Update in Supabase users table
-        try:
-            supabase = get_supabase_client()
-            try:
-                supabase.table('users').update({'role': role}).eq('email', email).execute()
-            except Exception:
-                try:
-                    supabase.table('users').update({'role': role.lower()}).eq('email', email).execute()
-                except Exception:
-                    pass
-
-            if role in ['PLAYER', 'player']:
-                try:
-                    supabase.table('organizer_applications').delete().eq('email', email).execute()
-                except Exception:
-                    try:
-                        supabase.table('organizer_applications').update({'status': 'REJECTED'}).eq('email', email).execute()
-                    except Exception:
-                        pass
-        except Exception as sb_err:
-            print(f"Supabase update-role notice: {sb_err}")
-
-        return jsonify({'success': True, 'message': f"Role for {email} updated to {role} in database."}), 200
-    except Exception as e:
-        print(f"Error updating user role: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 

@@ -203,7 +203,7 @@ def get_registration_by_pass_id(pass_id):
         except Exception as sb_err:
             print(f"Supabase fetch error: {sb_err}")
 
-        return jsonify({'success': False, 'message': f"No registration found for Pass ID: {pass_id}"}), 444
+        return jsonify({'success': False, 'message': f"No registration found for Pass ID: {pass_id}"}), 404
 
     except Exception as e:
         print(f"Error fetching registration: {e}")
