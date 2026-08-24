@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect, useState, use } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import {
   ShieldCheck,
   CheckCircle2,
@@ -17,11 +18,12 @@ import {
 } from 'lucide-react';
 
 interface PageProps {
-  params: Promise<{ passId: string }>;
+  params?: Promise<{ passId: string }>;
 }
 
 export default function VerifyPassPage({ params }: PageProps) {
-  const { passId } = use(params);
+  const routeParams = useParams();
+  const passId = (routeParams?.passId as string) || '';
   const [loading, setLoading] = useState(true);
   const [result, setResult] = useState<any>(null);
 

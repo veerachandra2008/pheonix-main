@@ -129,8 +129,8 @@ export default function EditTournamentPage() {
           return;
         }
 
-        let isApproved = false;
-        let hostName = user.name || 'Verified Host';
+        let isApproved = role === 'organizer' || role === 'host';
+        let hostName = user.hostName || user.name || 'Verified Host';
 
         try {
           const { supabase } = await import('@/lib/supabase');
@@ -140,6 +140,29 @@ export default function EditTournamentPage() {
             hostName = data[0].host_name || user.name || 'Verified Host';
           }
         } catch {}
+
+        if (!isApproved) {
+          try {
+            const apiBase =
+              typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+                ? '/api'
+                : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+            const res = await fetch(`${apiBase}/auth/organizers`, { cache: 'no-store' });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && Array.isArray(json.data)) {
+                const matched = json.data.find(
+                  (a: any) => (a.email || '').toLowerCase().trim() === email
+                );
+                if (matched) {
+                  isApproved = true;
+                  hostName = matched.name || matched.host_name || user.name;
+                }
+              }
+            }
+          } catch {}
+        }
 
         if (!isApproved) {
           const updatedSession = { ...user, role: 'player' };

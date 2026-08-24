@@ -71,8 +71,8 @@ export default function CreateTournamentPage() {
           return;
         }
 
-        let isApprovedOrganizer = false;
-        let hostName = user.name || 'Verified Host';
+        let isApprovedOrganizer = role === 'organizer' || role === 'host';
+        let hostName = user.hostName || user.name || 'Verified Host';
 
         // 2. Real-time Supabase Check
         try {

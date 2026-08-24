@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { use, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter, useParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Activity, 
@@ -28,7 +28,7 @@ import { getUserRegistrations, TournamentRegistrationRecord } from '@/lib/tourna
 import FinalCTA from '@/components/xenova/FinalCTA';
 
 type Props = {
-  params: Promise<{ id: string }>;
+  params?: Promise<{ id: string }>;
 };
 
 type Player = {
@@ -50,7 +50,8 @@ function slugify(value: string) {
 }
 
 export default function PlayerProfilePage({ params }: Props) {
-  const { id } = use(params);
+  const routeParams = useParams();
+  const id = (routeParams?.id as string) || '';
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<Player | null>(null);
   const [targetUser, setTargetUser] = useState<Player | null>(null);

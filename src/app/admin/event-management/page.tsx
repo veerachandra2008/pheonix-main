@@ -172,7 +172,7 @@ export default function AdminEventManagementPage() {
         format: 'Single Elimination',
         filled: '0',
         status: 'Registering',
-        statusColor: '#10B981',
+        status_color: '#10B981',
         image: '/valorant.jpg'
       });
       setPreviewImage('/valorant.jpg');

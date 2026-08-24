@@ -1,7 +1,8 @@
 'use client';
 
-import React, { use, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ArrowLeft, 
@@ -39,11 +40,12 @@ const fallbackTeams = [
 ];
 
 interface Props {
-  params: Promise<{ id: string }>;
+  params?: Promise<{ id: string }>;
 }
 
 export default function CollegeProfilePage({ params }: Props) {
-  const { id } = use(params);
+  const routeParams = useParams();
+  const id = (routeParams?.id as string) || '';
   const [customColleges, setCustomColleges] = useState<XenovaCollege[]>([]);
   const [customTeams, setCustomTeams] = useState<XenovaTeam[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'teams' | 'trophies' | 'athletes'>('overview');

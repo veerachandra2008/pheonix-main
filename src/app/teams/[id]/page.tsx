@@ -1,7 +1,8 @@
 'use client';
 
-import React, { use, useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { motion, useInView, type Variants } from 'framer-motion';
 import {
   ArrowLeft,
@@ -318,11 +319,12 @@ function AnimatedSection({ children, className = '', delay = 0 }: { children: Re
    ═══════════════════════════════════════════════════════════════════════════ */
 
 interface Props {
-  params: Promise<{ id: string }>;
+  params?: Promise<{ id: string }>;
 }
 
 export default function TeamProfilePage({ params }: Props) {
-  const { id } = use(params);
+  const routeParams = useParams();
+  const id = (routeParams?.id as string) || '';
   const [customTeams, setCustomTeams] = useState<TeamWithRoster[]>([]);
   const [copiedLink, setCopiedLink] = useState(false);
 

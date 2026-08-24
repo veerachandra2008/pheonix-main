@@ -1,8 +1,8 @@
 'use client';
 
-import React, { use, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { 
   ArrowLeft, 
@@ -104,11 +104,12 @@ const defaultTeams = [
 ];
 
 interface Props {
-  params: Promise<{ id: string }>;
+  params?: Promise<{ id: string }>;
 }
 
 export default function TeamManagePage({ params }: Props) {
-  const { id } = use(params);
+  const routeParams = useParams();
+  const id = (routeParams?.id as string) || '';
   const router = useRouter();
   
   const [teamName, setTeamName] = useState('');
