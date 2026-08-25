@@ -77,6 +77,56 @@ def seed_all():
         except Exception as e:
             print(f"  ❌ Notifications seeding failed: {e}")
 
+        # 5. Seed Sample Registrations & Linked Event Attendance
+        print("\n🎟️ Seeding Event Registrations & Attendance...")
+        try:
+            sample_regs = [
+                {
+                    'pass_id': 'XPH-A101',
+                    'tournament_slug': 'nexus-valorant-champions-cup',
+                    'tournament_title': 'Nexus Valorant Champions Cup',
+                    'team_name': 'Phoenix Titans',
+                    'captain_name': 'Rahul Sharma',
+                    'college': 'IIT Bombay',
+                    'email': 'rahul.titans@iitb.ac.in',
+                    'payment_status': 'FREE ENTRY'
+                },
+                {
+                    'pass_id': 'XPH-B204',
+                    'tournament_slug': 'nexus-valorant-champions-cup',
+                    'tournament_title': 'Nexus Valorant Champions Cup',
+                    'team_name': 'Shadow Vipers',
+                    'captain_name': 'Aarav Patel',
+                    'college': 'BITS Pilani',
+                    'email': 'aarav.vipers@bits.ac.in',
+                    'payment_status': 'PAID (₹500)'
+                },
+                {
+                    'pass_id': 'XPH-C309',
+                    'tournament_slug': 'nexus-valorant-champions-cup',
+                    'tournament_title': 'Nexus Valorant Champions Cup',
+                    'team_name': 'Apex Predators',
+                    'captain_name': 'Karthik Raja',
+                    'college': 'NIT Trichy',
+                    'email': 'karthik.apex@nitt.edu',
+                    'payment_status': 'PAID (₹500)'
+                }
+            ]
+            for reg in sample_regs:
+                supabase.table('registrations').upsert(reg, on_conflict='pass_id').execute()
+                supabase.table('event_attendance').upsert({
+                    'pass_id': reg['pass_id'],
+                    'tournament_slug': reg['tournament_slug'],
+                    'team_name': reg['team_name'],
+                    'captain_name': reg['captain_name'],
+                    'college': reg['college'],
+                    'email': reg['email'],
+                    'attendance_status': 'NOT_MARKED'
+                }, on_conflict='pass_id').execute()
+            print(f"  ✅ Seeded {len(sample_regs)} event registrations with linked event_attendance records.")
+        except Exception as e:
+            print(f"  ❌ Registrations/Attendance seeding notice: {e}")
+
         print("\n" + "=" * 60)
         print("🎉 Database Seeding Complete!")
         print("=" * 60)

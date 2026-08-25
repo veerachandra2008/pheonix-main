@@ -196,6 +196,10 @@ def verify_payment():
             'paymentId': razorpay_payment_id,
             'payment_status': 'SUCCESS',
             'paymentStatus': 'SUCCESS',
+            'attendance_status': 'NOT_MARKED',
+            'attendanceStatus': 'NOT_MARKED',
+            'attended_at': None,
+            'attended_by': None,
             'registered_at': str(int(time.time())),
             'registeredAt': str(int(time.time()))
         }

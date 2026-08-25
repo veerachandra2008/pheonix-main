@@ -394,4 +394,118 @@ export const flaskApi = {
     });
     return await res.json();
   },
+
+  // Dedicated Event Attendance APIs (Stores in event_attendance table)
+  async getEventAttendance(tournamentSlug?: string) {
+    try {
+      const query = tournamentSlug ? `?tournament_slug=${encodeURIComponent(tournamentSlug)}` : '';
+      const res = await fetch(`${FLASK_API_BASE}/attendance${query}`, { cache: 'no-store' });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Flask /attendance API not reachable, falling back to Supabase:', e);
+    }
+
+    // Direct Supabase Fallback for event_attendance
+    try {
+      let query = supabase.from('event_attendance').select('*');
+      if (tournamentSlug) {
+        query = query.eq('tournament_slug', tournamentSlug);
+      }
+      const { data, error } = await query;
+      if (!error && data && data.length > 0) {
+        return { success: true, data };
+      }
+    } catch {}
+
+    // Registrations fallback
+    return await this.getRegistrationsByTournament(tournamentSlug);
+  },
+
+  async getRegistrationsByTournament(tournamentSlug?: string) {
+    const query = tournamentSlug ? `?tournament_slug=${encodeURIComponent(tournamentSlug)}` : '';
+    const res = await fetch(`${FLASK_API_BASE}/registrations${query}`, { cache: 'no-store' });
+    return await res.json();
+  },
+
+  async updateAttendance(passId: string, attendanceStatus: 'PRESENT' | 'ABSENT' | 'NOT_MARKED', attendedBy?: string, additionalData?: any) {
+    try {
+      const res = await fetch(`${FLASK_API_BASE}/attendance/${encodeURIComponent(passId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attendance_status: attendanceStatus,
+          attended_by: attendedBy || 'Organizer',
+          ...additionalData,
+        }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Flask attendance update notice, falling back:', e);
+    }
+
+    // Direct Supabase table fallback
+    try {
+      const nowIso = new Date().toISOString();
+      const payload = {
+        pass_id: passId,
+        attendance_status: attendanceStatus,
+        attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
+        attended_by: attendanceStatus === 'NOT_MARKED' ? null : (attendedBy || 'Organizer'),
+        updated_at: nowIso,
+        ...additionalData,
+      };
+      await supabase.from('event_attendance').upsert(payload, { onConflict: 'pass_id' });
+      await supabase.from('registrations').update({
+        attendance_status: attendanceStatus,
+        attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
+        attended_by: attendanceStatus === 'NOT_MARKED' ? null : (attendedBy || 'Organizer'),
+      }).eq('pass_id', passId);
+      return { success: true, message: 'Updated via Supabase event_attendance table', data: payload };
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  },
+
+  async markRemainingAbsent(tournamentSlug: string, attendedBy?: string) {
+    try {
+      const res = await fetch(`${FLASK_API_BASE}/attendance/mark-all-absent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tournament_slug: tournamentSlug,
+          attended_by: attendedBy || 'Organizer',
+        }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Batch mark absent error, falling back:', e);
+    }
+
+    // Direct Supabase fallback
+    try {
+      const nowIso = new Date().toISOString();
+      await supabase.from('event_attendance').update({
+        attendance_status: 'ABSENT',
+        attended_at: nowIso,
+        attended_by: attendedBy || 'Organizer',
+        updated_at: nowIso,
+      }).eq('tournament_slug', tournamentSlug).eq('attendance_status', 'NOT_MARKED');
+
+      await supabase.from('registrations').update({
+        attendance_status: 'ABSENT',
+        attended_at: nowIso,
+        attended_by: attendedBy || 'Organizer',
+      }).eq('tournament_slug', tournamentSlug).eq('attendance_status', 'NOT_MARKED');
+
+      return { success: true, message: 'Marked remaining absent in database' };
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  },
 };

@@ -89,6 +89,7 @@ MOCK_TOURNAMENTS = [
 
 IN_MEMORY_TOURNAMENTS = list(MOCK_TOURNAMENTS)
 
+@tournaments_bp.route('', methods=['GET'])
 @tournaments_bp.route('/', methods=['GET'])
 def get_tournaments():
     """Fetch all tournaments from Supabase with memory fallback"""

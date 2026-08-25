@@ -10,7 +10,7 @@ registrations_bp = Blueprint('registrations', __name__)
 def create_registration():
     """
     Create a registration for Free Tournaments or Direct Entries.
-    Generates a unique pass_id and saves to DB.
+    Generates a unique pass_id, sets attendance_status='NOT_MARKED', and saves to DB.
     """
     try:
         data = request.get_json() or {}
@@ -25,6 +25,7 @@ def create_registration():
         tournament_format = data.get('tournamentFormat', 'Tournament')
         tournament_region = data.get('tournamentRegion', 'Pan India')
         tournament_fee = data.get('tournamentFee', 'Free')
+        team_id = data.get('teamId') or data.get('team_id') or f"team-{int(time.time())}"
 
         if not tournament_slug or not team_name or not email:
             return jsonify({'success': False, 'message': 'tournamentSlug, teamName, and email are required.'}), 400
@@ -48,6 +49,8 @@ def create_registration():
             'tournamentRegion': tournament_region,
             'tournament_fee': tournament_fee,
             'tournamentFee': tournament_fee,
+            'team_id': team_id,
+            'teamId': team_id,
             'team_name': team_name,
             'teamName': team_name,
             'college': college,
@@ -58,6 +61,12 @@ def create_registration():
             'paymentStatus': 'FREE ENTRY',
             'order_id': 'FREE',
             'payment_id': 'FREE',
+            'attendance_status': 'NOT_MARKED',
+            'attendanceStatus': 'NOT_MARKED',
+            'attended_at': None,
+            'attendedAt': None,
+            'attended_by': None,
+            'attendedBy': None,
             'registered_at': str(int(time.time())),
             'registeredAt': str(int(time.time()))
         }
@@ -72,11 +81,13 @@ def create_registration():
                 'pass_id': pass_id,
                 'tournament_slug': tournament_slug,
                 'tournament_title': tournament_title,
+                'team_id': team_id,
                 'team_name': team_name,
                 'college': college,
                 'captain_name': captain_name,
                 'email': email,
-                'payment_status': 'FREE ENTRY'
+                'payment_status': 'FREE ENTRY',
+                'attendance_status': 'NOT_MARKED'
             }).execute()
         except Exception as sb_err:
             print(f"Supabase free registration insert warning: {sb_err}")
@@ -93,11 +104,14 @@ def create_registration():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+@registrations_bp.route('', methods=['GET'])
 @registrations_bp.route('/', methods=['GET'])
 def get_all_registrations():
-    """Fetch all registrations with case-insensitive email filtering"""
+    """Fetch all registrations with optional tournament_slug and email filtering"""
     try:
         email = request.args.get('email')
+        tournament_slug = request.args.get('tournament_slug') or request.args.get('tournamentSlug')
+
         supabase_records = []
         try:
             supabase = get_supabase_client()
@@ -113,6 +127,11 @@ def get_all_registrations():
             pid = r.get('pass_id') or r.get('passId')
             if not pid:
                 continue
+            
+            att_status = (r.get('attendance_status') or r.get('attendanceStatus') or 'NOT_MARKED').upper()
+            if att_status not in ['NOT_MARKED', 'PRESENT', 'ABSENT']:
+                att_status = 'NOT_MARKED'
+
             normalized = {
                 'id': r.get('id') or pid,
                 'pass_id': pid,
@@ -133,15 +152,26 @@ def get_all_registrations():
                 'paymentStatus': r.get('payment_status') or r.get('paymentStatus', 'SUCCESS'),
                 'order_id': r.get('order_id') or r.get('orderId', ''),
                 'payment_id': r.get('payment_id') or r.get('paymentId', ''),
+                'attendance_status': att_status,
+                'attendanceStatus': att_status,
+                'attended_at': r.get('attended_at') or r.get('attendedAt'),
+                'attendedAt': r.get('attended_at') or r.get('attendedAt'),
+                'attended_by': r.get('attended_by') or r.get('attendedBy'),
+                'attendedBy': r.get('attended_by') or r.get('attendedBy'),
                 'registered_at': r.get('registered_at') or r.get('registeredAt', ''),
                 'registeredAt': r.get('registered_at') or r.get('registeredAt', ''),
             }
             combined_dict[pid] = normalized
 
         all_records = list(combined_dict.values())
+        
         if email:
             clean_email = email.strip().lower()
             all_records = [r for r in all_records if r.get('email') == clean_email]
+
+        if tournament_slug:
+            clean_slug = tournament_slug.strip().lower()
+            all_records = [r for r in all_records if (r.get('tournament_slug') or '').strip().lower() == clean_slug]
 
         return jsonify({'success': True, 'data': all_records}), 200
     except Exception as e:
@@ -153,9 +183,14 @@ def get_registration_by_pass_id(pass_id):
     Fetch verified registration details by pass_id from Supabase or Memory fallback.
     """
     try:
+        att_status = 'NOT_MARKED'
+        attended_at = None
+        attended_by = None
+
         # Check in-memory store first
         if pass_id in IN_MEMORY_REGISTRATIONS:
             item = IN_MEMORY_REGISTRATIONS[pass_id]
+            att_status = (item.get('attendance_status') or item.get('attendanceStatus') or 'NOT_MARKED').upper()
             return jsonify({
                 'success': True,
                 'data': {
@@ -169,6 +204,12 @@ def get_registration_by_pass_id(pass_id):
                     'captainName': item.get('captain_name') or item.get('captainName'),
                     'email': item.get('email'),
                     'paymentStatus': item.get('payment_status', 'SUCCESS'),
+                    'attendanceStatus': att_status,
+                    'attendance_status': att_status,
+                    'attendedAt': item.get('attended_at') or item.get('attendedAt'),
+                    'attended_at': item.get('attended_at') or item.get('attendedAt'),
+                    'attendedBy': item.get('attended_by') or item.get('attendedBy'),
+                    'attended_by': item.get('attended_by') or item.get('attendedBy'),
                     'registeredAt': item.get('registered_at', '')
                 }
             }), 200
@@ -179,6 +220,7 @@ def get_registration_by_pass_id(pass_id):
             res = supabase.table('registrations').select('*').eq('pass_id', pass_id).execute()
             if res.data and len(res.data) > 0:
                 item = res.data[0]
+                att_status = (item.get('attendance_status') or 'NOT_MARKED').upper()
                 record = {
                     'passId': item.get('pass_id'),
                     'pass_id': item.get('pass_id'),
@@ -192,6 +234,12 @@ def get_registration_by_pass_id(pass_id):
                     'orderId': item.get('order_id', ''),
                     'paymentId': item.get('payment_id', ''),
                     'paymentStatus': item.get('payment_status', 'SUCCESS'),
+                    'attendanceStatus': att_status,
+                    'attendance_status': att_status,
+                    'attendedAt': item.get('attended_at'),
+                    'attended_at': item.get('attended_at'),
+                    'attendedBy': item.get('attended_by'),
+                    'attended_by': item.get('attended_by'),
                     'tournamentGame': item.get('tournament_game', 'Esports'),
                     'tournamentDate': item.get('tournament_date', 'Scheduled'),
                     'tournamentFormat': item.get('tournament_format', 'Tournament'),
@@ -210,6 +258,148 @@ def get_registration_by_pass_id(pass_id):
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+@registrations_bp.route('/<pass_id>/attendance', methods=['PATCH', 'POST'])
+def update_attendance_status(pass_id):
+    """
+    Update Attendance Status for a single registration:
+    attendance_status: 'PRESENT' | 'ABSENT' | 'NOT_MARKED'
+    Records attended_at timestamp and attended_by organizer.
+    Prevents duplicate updates when already PRESENT.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        new_status = (data.get('attendance_status') or data.get('attendanceStatus') or '').strip().upper()
+        attended_by = data.get('attended_by') or data.get('attendedBy') or 'Organizer'
+        attended_at = data.get('attended_at') or data.get('attendedAt')
+
+        if new_status not in ['PRESENT', 'ABSENT', 'NOT_MARKED']:
+            return jsonify({
+                'success': False,
+                'message': f"Invalid attendance status '{new_status}'. Must be PRESENT, ABSENT, or NOT_MARKED."
+            }), 400
+
+        # Format ISO timestamp if not passed
+        if not attended_at and new_status in ['PRESENT', 'ABSENT']:
+            import datetime
+            attended_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        elif new_status == 'NOT_MARKED':
+            attended_at = None
+            attended_by = None
+
+        # Check existing in-memory store
+        existing_memory = IN_MEMORY_REGISTRATIONS.get(pass_id)
+        current_status = existing_memory.get('attendance_status') if existing_memory else None
+
+        # Supabase update
+        supabase_updated = False
+        try:
+            supabase = get_supabase_client()
+            update_payload = {
+                'attendance_status': new_status,
+                'attended_at': attended_at,
+                'attended_by': attended_by
+            }
+            res = supabase.table('registrations').update(update_payload).eq('pass_id', pass_id).execute()
+            if res.data and len(res.data) > 0:
+                supabase_updated = True
+                updated_item = res.data[0]
+                current_status = updated_item.get('attendance_status')
+        except Exception as sb_err:
+            print(f"Supabase attendance update warning: {sb_err}")
+
+        # Update in-memory store
+        if pass_id in IN_MEMORY_REGISTRATIONS:
+            IN_MEMORY_REGISTRATIONS[pass_id]['attendance_status'] = new_status
+            IN_MEMORY_REGISTRATIONS[pass_id]['attendanceStatus'] = new_status
+            IN_MEMORY_REGISTRATIONS[pass_id]['attended_at'] = attended_at
+            IN_MEMORY_REGISTRATIONS[pass_id]['attendedAt'] = attended_at
+            IN_MEMORY_REGISTRATIONS[pass_id]['attended_by'] = attended_by
+            IN_MEMORY_REGISTRATIONS[pass_id]['attendedBy'] = attended_by
+        elif supabase_updated:
+            IN_MEMORY_REGISTRATIONS[pass_id] = {
+                'pass_id': pass_id,
+                'passId': pass_id,
+                'attendance_status': new_status,
+                'attendanceStatus': new_status,
+                'attended_at': attended_at,
+                'attended_by': attended_by
+            }
+
+        return jsonify({
+            'success': True,
+            'message': f"Attendance updated to {new_status}",
+            'passId': pass_id,
+            'attendance_status': new_status,
+            'attendanceStatus': new_status,
+            'attended_at': attended_at,
+            'attendedAt': attended_at,
+            'attended_by': attended_by,
+            'attendedBy': attended_by
+        }), 200
+
+    except Exception as e:
+        print(f"Error updating attendance: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@registrations_bp.route('/attendance/mark-all-absent', methods=['POST'])
+def mark_all_remaining_as_absent():
+    """
+    Batch changes all remaining 'NOT_MARKED' registrations for a tournament to 'ABSENT'.
+    Does not modify registrations that are already 'PRESENT'.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        tournament_slug = (data.get('tournament_slug') or data.get('tournamentSlug') or '').strip().lower()
+        attended_by = data.get('attended_by') or data.get('attendedBy') or 'Organizer'
+
+        if not tournament_slug:
+            return jsonify({'success': False, 'message': 'tournament_slug is required'}), 400
+
+        import datetime
+        timestamp_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        updated_count = 0
+
+        # 1. Update in memory
+        for pid, rec in list(IN_MEMORY_REGISTRATIONS.items()):
+            rec_slug = (rec.get('tournament_slug') or rec.get('tournamentSlug') or '').strip().lower()
+            if rec_slug == tournament_slug:
+                current_att = (rec.get('attendance_status') or rec.get('attendanceStatus') or 'NOT_MARKED').upper()
+                if current_att == 'NOT_MARKED':
+                    rec['attendance_status'] = 'ABSENT'
+                    rec['attendanceStatus'] = 'ABSENT'
+                    rec['attended_at'] = timestamp_now
+                    rec['attendedAt'] = timestamp_now
+                    rec['attended_by'] = attended_by
+                    rec['attendedBy'] = attended_by
+                    updated_count += 1
+
+        # 2. Update in Supabase
+        try:
+            supabase = get_supabase_client()
+            res = supabase.table('registrations').update({
+                'attendance_status': 'ABSENT',
+                'attended_at': timestamp_now,
+                'attended_by': attended_by
+            }).eq('tournament_slug', tournament_slug).eq('attendance_status', 'NOT_MARKED').execute()
+            if res.data:
+                updated_count = max(updated_count, len(res.data))
+        except Exception as sb_err:
+            print(f"Supabase batch absent update warning: {sb_err}")
+
+        return jsonify({
+            'success': True,
+            'message': f"{updated_count} remaining registrations marked as Absent.",
+            'updated_count': updated_count,
+            'tournament_slug': tournament_slug
+        }), 200
+
+    except Exception as e:
+        print(f"Error marking remaining as absent: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @registrations_bp.route('/verify/<pass_id>', methods=['GET'])
 def verify_registration_pass(pass_id):
     """
@@ -219,11 +409,16 @@ def verify_registration_pass(pass_id):
         # Check memory store
         if pass_id in IN_MEMORY_REGISTRATIONS:
             reg = IN_MEMORY_REGISTRATIONS[pass_id]
+            att_status = (reg.get('attendance_status') or reg.get('attendanceStatus') or 'NOT_MARKED').upper()
             return jsonify({
                 'valid': True,
                 'status': 'VERIFIED',
                 'passId': pass_id,
-                'data': reg
+                'data': {
+                    **reg,
+                    'attendanceStatus': att_status,
+                    'attendance_status': att_status
+                }
             }), 200
 
         # Query Supabase
@@ -232,6 +427,7 @@ def verify_registration_pass(pass_id):
             res = supabase.table('registrations').select('*').eq('pass_id', pass_id).execute()
             if res.data and len(res.data) > 0:
                 item = res.data[0]
+                att_status = (item.get('attendance_status') or 'NOT_MARKED').upper()
                 return jsonify({
                     'valid': True,
                     'status': 'VERIFIED',
@@ -244,7 +440,11 @@ def verify_registration_pass(pass_id):
                         'college': item.get('college'),
                         'email': item.get('email'),
                         'paymentStatus': item.get('payment_status', 'SUCCESS'),
-                        'paymentId': item.get('payment_id', '')
+                        'paymentId': item.get('payment_id', ''),
+                        'attendanceStatus': att_status,
+                        'attendance_status': att_status,
+                        'attendedAt': item.get('attended_at'),
+                        'attendedBy': item.get('attended_by')
                     }
                 }), 200
         except Exception as sb_err:

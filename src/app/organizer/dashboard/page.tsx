@@ -429,12 +429,20 @@ export default function OrganizerDashboard() {
                     </div>
 
                     {/* Actions */}
-                    <div className="p-5 pt-0 border-t border-white/5 mt-3 flex items-center justify-between gap-2">
+                    <div className="p-5 pt-0 border-t border-white/5 mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <Link
+                        href={`/organizer/tournament/${tournamentSlug}/attendance`}
+                        className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 transition text-xs font-black uppercase tracking-wider text-white text-center rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1.5"
+                      >
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                        Event Attendance
+                      </Link>
+
                       <Link
                         href={`/organizer/tournament/${tournamentSlug}`}
-                        className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 transition text-xs font-black uppercase tracking-wider text-white text-center rounded-xl shadow-lg shadow-indigo-600/20"
+                        className="py-2.5 px-3 bg-white/10 hover:bg-white/15 transition text-xs font-bold uppercase tracking-wider text-slate-200 text-center rounded-xl"
                       >
-                        Manage & Rosters ({regCount})
+                        Rosters ({regCount})
                       </Link>
 
                       <Link

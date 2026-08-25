@@ -126,6 +126,24 @@ CREATE TABLE IF NOT EXISTS organizer_applications (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 8. EVENT ATTENDANCE TABLE (Dedicated table linked to registrations)
+CREATE TABLE IF NOT EXISTS event_attendance (
+    id BIGSERIAL PRIMARY KEY,
+    pass_id TEXT NOT NULL REFERENCES registrations(pass_id) ON DELETE CASCADE,
+    tournament_slug TEXT NOT NULL,
+    team_name TEXT NOT NULL,
+    captain_name TEXT,
+    college TEXT,
+    email TEXT,
+    attendance_status TEXT NOT NULL DEFAULT 'NOT_MARKED',
+    attended_at TIMESTAMPTZ,
+    attended_by TEXT,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_pass_attendance UNIQUE (pass_id)
+);
+
 -- Disable RLS for public table operations or enable public read/write
 ALTER TABLE colleges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
@@ -134,6 +152,7 @@ ALTER TABLE tournaments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE registrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tournament_registrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE organizer_applications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_attendance ENABLE ROW LEVEL SECURITY;
 
 -- Allow public read and write policies
 CREATE POLICY "Allow public read colleges" ON colleges FOR SELECT USING (true);
@@ -160,6 +179,11 @@ CREATE POLICY "Allow public read organizer_applications" ON organizer_applicatio
 CREATE POLICY "Allow public insert organizer_applications" ON organizer_applications FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update organizer_applications" ON organizer_applications FOR UPDATE USING (true);
 CREATE POLICY "Allow public delete organizer_applications" ON organizer_applications FOR DELETE USING (true);
+
+CREATE POLICY "Allow public read event_attendance" ON event_attendance FOR SELECT USING (true);
+CREATE POLICY "Allow public insert event_attendance" ON event_attendance FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update event_attendance" ON event_attendance FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete event_attendance" ON event_attendance FOR DELETE USING (true);
 
 -- ====================================================================
 -- SEED DATA

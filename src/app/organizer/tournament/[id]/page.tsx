@@ -356,19 +356,27 @@ export default function TournamentManagePage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-6 border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-8">
-              <div className="text-center">
+            <div className="flex flex-wrap items-center gap-4 border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-8">
+              <div className="text-center pr-2">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Registered</p>
                 <p className="text-3xl font-black text-white">{registrations.length}</p>
                 <p className="text-[10px] font-bold text-slate-400 mt-0.5">Capacity: {tournament.teams}</p>
               </div>
 
+              <Link
+                href={`/organizer/tournament/${rawId}/attendance`}
+                className="inline-flex items-center gap-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 transition text-xs font-black uppercase tracking-wider text-white rounded-xl shadow-lg shadow-emerald-600/20 cursor-pointer"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                Event Attendance Desk
+              </Link>
+
               <button
                 onClick={handleExportCSV}
-                className="inline-flex items-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-500 transition text-xs font-black uppercase tracking-wider text-white rounded-xl shadow-lg shadow-indigo-600/20 cursor-pointer"
+                className="inline-flex items-center gap-2 px-3.5 py-3 bg-white/10 hover:bg-white/15 transition text-xs font-bold uppercase tracking-wider text-white rounded-xl cursor-pointer"
               >
                 <Download className="h-4 w-4" />
-                Export Roster
+                Export
               </button>
             </div>
           </div>
