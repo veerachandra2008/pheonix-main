@@ -70,16 +70,26 @@ CREATE TABLE IF NOT EXISTS tournaments (
     status TEXT DEFAULT 'Registering',
     status_color TEXT DEFAULT '#22C55E',
     prize TEXT DEFAULT '₹50,000',
+    prize_1st TEXT,
+    prize_2nd TEXT,
+    prize_3rd TEXT,
     date TEXT DEFAULT 'Upcoming',
     region TEXT DEFAULT 'Pan India',
     format TEXT DEFAULT 'Tournament',
     teams TEXT DEFAULT '64/64',
     filled INTEGER DEFAULT 50,
     fee TEXT DEFAULT 'Free',
+    description TEXT,
+    rules TEXT,
+    schedule TEXT,
+    map_pool TEXT,
+    contact_email TEXT,
+    discord_url TEXT,
+    organizer_email TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. REGISTRATIONS TABLE
+-- 5. REGISTRATIONS TABLE (Single Source of Truth for Free & Paid Entries + 4-Player Rosters)
 CREATE TABLE IF NOT EXISTS registrations (
     id BIGSERIAL PRIMARY KEY,
     pass_id TEXT UNIQUE NOT NULL,
@@ -90,29 +100,18 @@ CREATE TABLE IF NOT EXISTS registrations (
     college TEXT NOT NULL,
     captain_name TEXT NOT NULL,
     email TEXT NOT NULL,
+    players JSONB DEFAULT '[]'::jsonb,
+    player_emails TEXT[] DEFAULT ARRAY[]::TEXT[],
     payment_status TEXT DEFAULT 'SUCCESS',
     order_id TEXT,
     payment_id TEXT,
+    attendance_status TEXT DEFAULT 'NOT_MARKED',
+    attended_at TIMESTAMPTZ,
+    attended_by TEXT,
     registered_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 6. TOURNAMENT_REGISTRATIONS (Payment Tracking)
-CREATE TABLE IF NOT EXISTS tournament_registrations (
-    id BIGSERIAL PRIMARY KEY,
-    tournament_slug TEXT NOT NULL,
-    captain_name TEXT NOT NULL,
-    captain_email TEXT NOT NULL,
-    team_name TEXT NOT NULL,
-    amount NUMERIC DEFAULT 0,
-    payment_status TEXT DEFAULT 'PENDING',
-    order_id TEXT UNIQUE,
-    payment_id TEXT,
-    signature TEXT,
-    pass_id TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 7. ORGANIZER APPLICATIONS TABLE
+-- 6. ORGANIZER APPLICATIONS TABLE
 CREATE TABLE IF NOT EXISTS organizer_applications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     host_name TEXT NOT NULL,
@@ -126,7 +125,7 @@ CREATE TABLE IF NOT EXISTS organizer_applications (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 8. EVENT ATTENDANCE TABLE (Dedicated table linked to registrations)
+-- 7. EVENT ATTENDANCE TABLE (Dedicated table linked to registrations)
 CREATE TABLE IF NOT EXISTS event_attendance (
     id BIGSERIAL PRIMARY KEY,
     pass_id TEXT NOT NULL REFERENCES registrations(pass_id) ON DELETE CASCADE,
@@ -144,15 +143,32 @@ CREATE TABLE IF NOT EXISTS event_attendance (
     CONSTRAINT unique_pass_attendance UNIQUE (pass_id)
 );
 
+-- 8. TOURNAMENT ROSTERS TABLE (Dedicated table for all 4 registered players grouped by tournament)
+CREATE TABLE IF NOT EXISTS tournament_rosters (
+    id BIGSERIAL PRIMARY KEY,
+    tournament_slug TEXT NOT NULL,
+    pass_id TEXT NOT NULL REFERENCES registrations(pass_id) ON DELETE CASCADE,
+    team_name TEXT NOT NULL,
+    slot INTEGER NOT NULL CHECK (slot BETWEEN 1 AND 4),
+    player_name TEXT NOT NULL,
+    in_game_tag TEXT NOT NULL,
+    email TEXT NOT NULL,
+    phone TEXT,
+    college TEXT,
+    is_captain BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_pass_slot UNIQUE (pass_id, slot)
+);
+
 -- Disable RLS for public table operations or enable public read/write
 ALTER TABLE colleges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tournaments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE registrations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tournament_registrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE organizer_applications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_attendance ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tournament_rosters ENABLE ROW LEVEL SECURITY;
 
 -- Allow public read and write policies
 CREATE POLICY "Allow public read colleges" ON colleges FOR SELECT USING (true);
@@ -170,10 +186,7 @@ CREATE POLICY "Allow public insert tournaments" ON tournaments FOR INSERT WITH C
 
 CREATE POLICY "Allow public read registrations" ON registrations FOR SELECT USING (true);
 CREATE POLICY "Allow public insert registrations" ON registrations FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "Allow public read tournament_registrations" ON tournament_registrations FOR SELECT USING (true);
-CREATE POLICY "Allow public insert tournament_registrations" ON tournament_registrations FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow public update tournament_registrations" ON tournament_registrations FOR UPDATE USING (true);
+CREATE POLICY "Allow public update registrations" ON registrations FOR UPDATE USING (true);
 
 CREATE POLICY "Allow public read organizer_applications" ON organizer_applications FOR SELECT USING (true);
 CREATE POLICY "Allow public insert organizer_applications" ON organizer_applications FOR INSERT WITH CHECK (true);
@@ -184,6 +197,11 @@ CREATE POLICY "Allow public read event_attendance" ON event_attendance FOR SELEC
 CREATE POLICY "Allow public insert event_attendance" ON event_attendance FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update event_attendance" ON event_attendance FOR UPDATE USING (true);
 CREATE POLICY "Allow public delete event_attendance" ON event_attendance FOR DELETE USING (true);
+
+CREATE POLICY "Allow public read tournament_rosters" ON tournament_rosters FOR SELECT USING (true);
+CREATE POLICY "Allow public insert tournament_rosters" ON tournament_rosters FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update tournament_rosters" ON tournament_rosters FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete tournament_rosters" ON tournament_rosters FOR DELETE USING (true);
 
 -- ====================================================================
 -- SEED DATA

@@ -113,8 +113,15 @@ def seed_all():
                 }
             ]
             for reg in sample_regs:
-                supabase.table('registrations').upsert(reg, on_conflict='pass_id').execute()
-                supabase.table('event_attendance').upsert({
+                # 1. Registrations table
+                existing_reg = supabase.table('registrations').select('id').eq('pass_id', reg['pass_id']).execute()
+                if existing_reg.data and len(existing_reg.data) > 0:
+                    supabase.table('registrations').update(reg).eq('pass_id', reg['pass_id']).execute()
+                else:
+                    supabase.table('registrations').insert(reg).execute()
+
+                # 2. Event Attendance table
+                att_row = {
                     'pass_id': reg['pass_id'],
                     'tournament_slug': reg['tournament_slug'],
                     'team_name': reg['team_name'],
@@ -122,7 +129,12 @@ def seed_all():
                     'college': reg['college'],
                     'email': reg['email'],
                     'attendance_status': 'NOT_MARKED'
-                }, on_conflict='pass_id').execute()
+                }
+                existing_att = supabase.table('event_attendance').select('id').eq('pass_id', reg['pass_id']).execute()
+                if existing_att.data and len(existing_att.data) > 0:
+                    supabase.table('event_attendance').update(att_row).eq('pass_id', reg['pass_id']).execute()
+                else:
+                    supabase.table('event_attendance').insert(att_row).execute()
             print(f"  ✅ Seeded {len(sample_regs)} event registrations with linked event_attendance records.")
         except Exception as e:
             print(f"  ❌ Registrations/Attendance seeding notice: {e}")

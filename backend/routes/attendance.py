@@ -131,9 +131,38 @@ def get_tournament_attendance():
                 'attended_by': attended_by,
                 'attendedBy': attended_by,
                 'notes': notes,
+                'players': reg.get('players', []),
                 'registered_at': reg.get('registered_at')
             }
             combined_records.append(record)
+
+        # 3.5 Query tournament_rosters to attach 4 players
+        try:
+            supabase = get_supabase_client()
+            r_query = supabase.table('tournament_rosters').select('*')
+            if tournament_slug:
+                r_query = r_query.eq('tournament_slug', tournament_slug.strip().lower())
+            r_res = r_query.order('slot').execute()
+            if r_res.data:
+                roster_map = {}
+                for row in r_res.data:
+                    p_id = row.get('pass_id')
+                    if p_id not in roster_map:
+                        roster_map[p_id] = []
+                    roster_map[p_id].append({
+                        'slot': row.get('slot'),
+                        'name': row.get('player_name'),
+                        'inGameTag': row.get('in_game_tag'),
+                        'email': row.get('email'),
+                        'phone': row.get('phone', ''),
+                        'isCaptain': row.get('is_captain', row.get('slot') == 1)
+                    })
+                for rec in combined_records:
+                    p_id = rec.get('pass_id')
+                    if p_id in roster_map:
+                        rec['players'] = roster_map[p_id]
+        except Exception as rost_err:
+            print(f"Notice fetching tournament_rosters for attendance join: {rost_err}")
 
         # 4. Optional status filtering
         if status_filter:
@@ -237,18 +266,38 @@ def update_single_attendance(pass_id):
 
         # Look up linked registration details
         tournament_slug = data.get('tournament_slug') or data.get('tournamentSlug') or ''
-        team_name = data.get('team_name') or data.get('teamName') or 'Team'
-        captain_name = data.get('captain_name') or data.get('captainName') or 'Captain'
+        team_name = data.get('team_name') or data.get('teamName') or ''
+        captain_name = data.get('captain_name') or data.get('captainName') or ''
         college = data.get('college', '')
         email = data.get('email', '')
 
-        if not tournament_slug and pass_id in IN_MEMORY_REGISTRATIONS:
+        # 1. Check in-memory registrations
+        if pass_id in IN_MEMORY_REGISTRATIONS:
             reg = IN_MEMORY_REGISTRATIONS[pass_id]
-            tournament_slug = reg.get('tournament_slug') or ''
-            team_name = reg.get('team_name') or team_name
-            captain_name = reg.get('captain_name') or captain_name
-            college = reg.get('college') or college
-            email = reg.get('email') or email
+            tournament_slug = tournament_slug or reg.get('tournament_slug') or reg.get('tournamentSlug') or ''
+            team_name = team_name or reg.get('team_name') or reg.get('teamName') or ''
+            captain_name = captain_name or reg.get('captain_name') or reg.get('captainName') or ''
+            college = college or reg.get('college') or ''
+            email = email or reg.get('email') or ''
+
+        # 2. Check Supabase registrations table if details missing
+        try:
+            supabase = get_supabase_client()
+            sb_reg = supabase.table('registrations').select('*').eq('pass_id', pass_id).execute()
+            if sb_reg.data and len(sb_reg.data) > 0:
+                r = sb_reg.data[0]
+                tournament_slug = tournament_slug or r.get('tournament_slug') or ''
+                team_name = team_name or r.get('team_name') or ''
+                captain_name = captain_name or r.get('captain_name') or ''
+                college = college or r.get('college') or ''
+                email = email or r.get('email') or ''
+        except Exception as e:
+            print(f"Supabase lookup notice for pass {pass_id}: {e}")
+
+        # Fallbacks to satisfy NOT NULL constraints
+        team_name = team_name or 'Squad'
+        captain_name = captain_name or 'Captain'
+        tournament_slug = tournament_slug or 'tournament'
 
         attendance_record = {
             'pass_id': pass_id,
@@ -271,10 +320,10 @@ def update_single_attendance(pass_id):
             'updated_at': now_iso
         }
 
-        # 1. Update in-memory event attendance store
+        # Update in-memory event attendance store
         IN_MEMORY_EVENT_ATTENDANCE[pass_id] = attendance_record
 
-        # 2. Update linked in-memory registrations as well
+        # Update linked in-memory registrations as well
         if pass_id in IN_MEMORY_REGISTRATIONS:
             IN_MEMORY_REGISTRATIONS[pass_id]['attendance_status'] = new_status
             IN_MEMORY_REGISTRATIONS[pass_id]['attendanceStatus'] = new_status
@@ -284,6 +333,24 @@ def update_single_attendance(pass_id):
         # 3. Upsert into Supabase 'event_attendance' table
         try:
             supabase = get_supabase_client()
+            
+            # Ensure foreign key exists in registrations table
+            try:
+                reg_check = supabase.table('registrations').select('pass_id').eq('pass_id', pass_id).execute()
+                if not reg_check.data or len(reg_check.data) == 0:
+                    supabase.table('registrations').insert({
+                        'pass_id': pass_id,
+                        'tournament_slug': tournament_slug,
+                        'team_name': team_name,
+                        'captain_name': captain_name,
+                        'college': college,
+                        'email': email,
+                        'attendance_status': new_status,
+                        'payment_status': 'SUCCESS'
+                    }).execute()
+            except Exception as reg_err:
+                print(f"Registration existence verification notice: {reg_err}")
+
             db_payload = {
                 'pass_id': pass_id,
                 'tournament_slug': tournament_slug,
@@ -297,16 +364,25 @@ def update_single_attendance(pass_id):
                 'notes': notes,
                 'updated_at': now_iso
             }
-            supabase.table('event_attendance').upsert(db_payload, on_conflict='pass_id').execute()
+            existing_att = supabase.table('event_attendance').select('id').eq('pass_id', pass_id).execute()
+            if existing_att.data and len(existing_att.data) > 0:
+                supabase.table('event_attendance').update(db_payload).eq('pass_id', pass_id).execute()
+            else:
+                supabase.table('event_attendance').insert(db_payload).execute()
+            print(f"✅ Supabase event_attendance saved successfully for {pass_id} -> {new_status}")
 
             # Also update registrations table for sync
-            supabase.table('registrations').update({
-                'attendance_status': new_status,
-                'attended_at': attended_at,
-                'attended_by': attended_by
-            }).eq('pass_id', pass_id).execute()
+            try:
+                supabase.table('registrations').update({
+                    'attendance_status': new_status,
+                    'attended_at': attended_at,
+                    'attended_by': attended_by
+                }).eq('pass_id', pass_id).execute()
+                print(f"✅ Supabase registrations synchronized for {pass_id} -> {new_status}")
+            except Exception as reg_up_err:
+                print(f"ℹ️ registrations table update note: {reg_up_err}")
         except Exception as sb_err:
-            print(f"Supabase event_attendance upsert warning: {sb_err}")
+            print(f"❌ Supabase event_attendance error: {sb_err}")
 
         return jsonify({
             'success': True,

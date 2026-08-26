@@ -105,7 +105,9 @@ def get_tournaments():
 
 VALID_TOURNAMENT_COLUMNS = {
     'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
-    'prize', 'date', 'region', 'format', 'teams', 'filled', 'fee', 'organizer_email'
+    'prize', 'date', 'region', 'format', 'teams', 'filled', 'fee', 'organizer_email',
+    'description', 'rules', 'schedule', 'prize_1st', 'prize_2nd', 'prize_3rd',
+    'map_pool', 'contact_email', 'discord_url'
 }
 
 def sanitize_tournament_payload(data):
@@ -214,17 +216,45 @@ def register_tournament():
     try:
         supabase = get_supabase_client()
         payload = {
-            'tournament_slug': data.get('tournamentSlug'),
-            'tournament_title': data.get('tournamentTitle'),
+            'tournament_slug': data.get('tournamentSlug') or 'tournament',
+            'tournament_title': data.get('tournamentTitle') or 'Tournament',
             'team_id': str(data.get('teamId', '')),
-            'team_name': data.get('teamName'),
-            'college': data.get('college'),
-            'captain_name': data.get('captainName'),
-            'email': data.get('email'),
+            'team_name': data.get('teamName') or 'Team',
+            'college': data.get('college') or '',
+            'captain_name': data.get('captainName') or 'Captain',
+            'email': data.get('email') or '',
             'pass_id': pass_id,
             'registered_at': str(data.get('registeredAt', '')),
         }
-        res = supabase.table('registrations').insert(payload).execute()
+        try:
+            res = supabase.table('registrations').insert({**payload, 'attendance_status': 'NOT_MARKED'}).execute()
+        except Exception:
+            res = supabase.table('registrations').insert(payload).execute()
+
+        # Also insert initial event_attendance row
+        try:
+            att_payload = {
+                'pass_id': pass_id,
+                'tournament_slug': data.get('tournamentSlug') or 'tournament',
+                'team_name': data.get('teamName') or 'Team',
+                'captain_name': data.get('captainName') or 'Captain',
+                'college': data.get('college') or '',
+                'email': data.get('email') or '',
+                'attendance_status': 'NOT_MARKED'
+            }
+            existing_att = supabase.table('event_attendance').select('id').eq('pass_id', pass_id).execute()
+            if existing_att.data and len(existing_att.data) > 0:
+                supabase.table('event_attendance').update(att_payload).eq('pass_id', pass_id).execute()
+            else:
+                supabase.table('event_attendance').insert(att_payload).execute()
+
+            # Save 4 players to tournament_rosters table
+            from routes.rosters import save_tournament_rosters_to_db
+            players = data.get('players', [])
+            save_tournament_rosters_to_db(supabase, pass_id, data.get('tournamentSlug') or 'tournament', data.get('teamName') or 'Team', data.get('college') or '', players)
+        except Exception as att_err:
+            print(f"event_attendance / tournament_rosters initial insert notice: {att_err}")
+
         return jsonify({'success': True, 'data': res.data, 'passId': pass_id}), 201
     except Exception as e:
         print(f"Supabase warning registering tournament: {e}")

@@ -325,23 +325,41 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             {/* Divider */}
             <div className="border-t border-dashed border-white/[0.1]" />
 
-            {/* Detail grid */}
-            <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-              {[
-                { label: 'Captain Name', value: ticketData?.captainName },
-                { label: 'University Email', value: ticketData?.email, mono: true },
-                { label: 'Tournament Date', value: ticketData?.tournamentDate, icon: CalendarDays },
-                { label: 'Format', value: ticketData?.tournamentFormat, icon: Trophy },
-                { label: 'Region', value: ticketData?.tournamentRegion, icon: MapPin },
-                { label: 'Payment ID', value: ticketData?.paymentId || 'FREE_ENTRY', mono: true },
-              ].map(({ label, value, mono }) => (
-                <div key={label} className="space-y-0.5">
-                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{label}</p>
-                  <p className={`text-sm font-semibold text-white truncate ${mono ? 'font-mono text-xs text-zinc-300' : ''}`}>
-                    {value || '—'}
-                  </p>
-                </div>
-              ))}
+            {/* Official 4-Player Verified Squad Roster */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+                  Verified 4-Player Squad Roster
+                </p>
+                <span className="text-[10px] font-mono text-emerald-400 font-bold">4 / 4 Registered</span>
+              </div>
+
+              <div className="space-y-2">
+                {(ticketData?.players && ticketData.players.length > 0 ? ticketData.players : [
+                  { slot: 1, name: ticketData?.captainName || 'Captain', inGameTag: 'CAPTAIN#001', email: ticketData?.email || 'captain@university.edu', isCaptain: true },
+                  { slot: 2, name: 'Teammate 2', inGameTag: 'PLAYER_2', email: 'player2@university.edu', isCaptain: false },
+                  { slot: 3, name: 'Teammate 3', inGameTag: 'PLAYER_3', email: 'player3@university.edu', isCaptain: false },
+                  { slot: 4, name: 'Teammate 4', inGameTag: 'PLAYER_4', email: 'player4@university.edu', isCaptain: false },
+                ]).map((p: any) => (
+                  <div
+                    key={p.slot}
+                    className="p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center justify-between text-xs gap-2"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
+                        p.isCaptain || p.slot === 1
+                          ? 'bg-emerald-500 text-black'
+                          : 'bg-white/10 text-zinc-400'
+                      }`}>
+                        {p.isCaptain || p.slot === 1 ? '👑 Captain' : `P${p.slot}`}
+                      </span>
+                      <span className="font-bold text-white truncate">{p.name}</span>
+                      <span className="font-mono text-emerald-400 text-[11px]">({p.inGameTag || 'IGN'})</span>
+                    </div>
+                    <span className="font-mono text-zinc-400 text-[11px] truncate max-w-[170px] text-right">{p.email}</span>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* Divider */}

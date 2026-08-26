@@ -93,22 +93,6 @@ def create_order():
                 'message': f"Razorpay Order Creation Failed: {error_details}"
             }), 400
 
-        # Save record to Supabase as PENDING if Supabase is reachable
-        try:
-            supabase = get_supabase_client()
-            registration_payload = {
-                'tournament_slug': tournament_slug,
-                'captain_name': name,
-                'captain_email': email,
-                'team_name': team_name,
-                'amount': amount_val,
-                'payment_status': 'PENDING',
-                'order_id': order_id
-            }
-            supabase.table('tournament_registrations').insert(registration_payload).execute()
-        except Exception as sb_err:
-            print(f"Supabase Warning (Pending Order): {sb_err}")
-
         return jsonify({
             'success': True,
             'order_id': order_id,
@@ -166,6 +150,8 @@ def verify_payment():
         tournament_format = data.get('tournamentFormat', 'Tournament')
         tournament_region = data.get('tournamentRegion', 'Pan India')
         tournament_fee = data.get('tournamentFee', 'Paid')
+        players = data.get('players', [])
+        player_emails = data.get('playerEmails', [email])
 
         record = {
             'pass_id': pass_id,
@@ -190,6 +176,8 @@ def verify_payment():
             'captain_name': captain_name,
             'captainName': captain_name,
             'email': email,
+            'players': players,
+            'player_emails': player_emails,
             'order_id': razorpay_order_id,
             'orderId': razorpay_order_id,
             'payment_id': razorpay_payment_id,
@@ -210,16 +198,7 @@ def verify_payment():
         # Save/Update in Supabase
         try:
             supabase = get_supabase_client()
-            # Update tournament_registrations status
-            supabase.table('tournament_registrations').update({
-                'payment_status': 'SUCCESS',
-                'payment_id': razorpay_payment_id,
-                'signature': razorpay_signature,
-                'pass_id': pass_id
-            }).eq('order_id', razorpay_order_id).execute()
-
-            # Insert into main registrations table
-            supabase.table('registrations').insert({
+            reg_payload = {
                 'pass_id': pass_id,
                 'tournament_slug': tournament_slug,
                 'tournament_title': tournament_title,
@@ -229,10 +208,35 @@ def verify_payment():
                 'email': email,
                 'order_id': razorpay_order_id,
                 'payment_id': razorpay_payment_id,
-                'payment_status': 'SUCCESS'
-            }).execute()
+                'payment_status': 'SUCCESS',
+            }
+            try:
+                supabase.table('registrations').insert({**reg_payload, 'attendance_status': 'NOT_MARKED'}).execute()
+            except Exception:
+                supabase.table('registrations').insert(reg_payload).execute()
+
+            # Insert initial event_attendance row
+            att_payload = {
+                'pass_id': pass_id,
+                'tournament_slug': tournament_slug,
+                'team_name': team_name,
+                'captain_name': captain_name,
+                'college': college,
+                'email': email,
+                'attendance_status': 'NOT_MARKED'
+            }
+            existing_att = supabase.table('event_attendance').select('id').eq('pass_id', pass_id).execute()
+            if existing_att.data and len(existing_att.data) > 0:
+                supabase.table('event_attendance').update(att_payload).eq('pass_id', pass_id).execute()
+            else:
+                supabase.table('event_attendance').insert(att_payload).execute()
+
+            # Save 4 players to tournament_rosters table
+            from routes.rosters import save_tournament_rosters_to_db
+            save_tournament_rosters_to_db(supabase, pass_id, tournament_slug, team_name, college, players)
+
         except Exception as sb_err:
-            print(f"Supabase registration insert warning: {sb_err}")
+            print(f"Supabase registration / rosters insert warning: {sb_err}")
 
         return jsonify({
             'success': True,
@@ -277,7 +281,7 @@ def razorpay_webhook():
             if order_id:
                 try:
                     supabase = get_supabase_client()
-                    supabase.table('tournament_registrations').update({
+                    supabase.table('registrations').update({
                         'payment_status': 'SUCCESS',
                         'payment_id': payment_id
                     }).eq('order_id', order_id).execute()

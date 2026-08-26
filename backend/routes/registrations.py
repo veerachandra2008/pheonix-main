@@ -32,6 +32,9 @@ def create_registration():
 
         pass_id = generate_pass_id()
 
+        players = data.get('players', [])
+        player_emails = data.get('playerEmails', [email])
+
         record = {
             'pass_id': pass_id,
             'passId': pass_id,
@@ -57,6 +60,8 @@ def create_registration():
             'captain_name': captain_name,
             'captainName': captain_name,
             'email': email,
+            'players': players,
+            'player_emails': player_emails,
             'payment_status': 'FREE ENTRY',
             'paymentStatus': 'FREE ENTRY',
             'order_id': 'FREE',
@@ -77,7 +82,7 @@ def create_registration():
         # Save to Supabase
         try:
             supabase = get_supabase_client()
-            supabase.table('registrations').insert({
+            reg_payload = {
                 'pass_id': pass_id,
                 'tournament_slug': tournament_slug,
                 'tournament_title': tournament_title,
@@ -87,8 +92,32 @@ def create_registration():
                 'captain_name': captain_name,
                 'email': email,
                 'payment_status': 'FREE ENTRY',
+            }
+            try:
+                supabase.table('registrations').insert({**reg_payload, 'attendance_status': 'NOT_MARKED'}).execute()
+            except Exception:
+                supabase.table('registrations').insert(reg_payload).execute()
+
+            # Insert initial event_attendance row
+            att_payload = {
+                'pass_id': pass_id,
+                'tournament_slug': tournament_slug,
+                'team_name': team_name,
+                'captain_name': captain_name,
+                'college': college,
+                'email': email,
                 'attendance_status': 'NOT_MARKED'
-            }).execute()
+            }
+            existing_att = supabase.table('event_attendance').select('id').eq('pass_id', pass_id).execute()
+            if existing_att.data and len(existing_att.data) > 0:
+                supabase.table('event_attendance').update(att_payload).eq('pass_id', pass_id).execute()
+            else:
+                supabase.table('event_attendance').insert(att_payload).execute()
+
+            # Save 4 players to tournament_rosters table
+            from routes.rosters import save_tournament_rosters_to_db
+            save_tournament_rosters_to_db(supabase, pass_id, tournament_slug, team_name, college, players)
+
         except Exception as sb_err:
             print(f"Supabase free registration insert warning: {sb_err}")
 
@@ -163,11 +192,40 @@ def get_all_registrations():
             }
             combined_dict[pid] = normalized
 
+        # Query tournament_rosters table to attach all 4 individual players
+        try:
+            supabase = get_supabase_client()
+            r_query = supabase.table('tournament_rosters').select('*')
+            if tournament_slug:
+                r_query = r_query.eq('tournament_slug', tournament_slug.strip().lower())
+            r_res = r_query.order('slot').execute()
+            if r_res.data:
+                roster_map = {}
+                for row in r_res.data:
+                    p_id = row.get('pass_id')
+                    if p_id not in roster_map:
+                        roster_map[p_id] = []
+                    roster_map[p_id].append({
+                        'slot': row.get('slot'),
+                        'name': row.get('player_name'),
+                        'inGameTag': row.get('in_game_tag'),
+                        'email': row.get('email'),
+                        'phone': row.get('phone', ''),
+                        'isCaptain': row.get('is_captain', row.get('slot') == 1)
+                    })
+                for rec in combined_dict.values():
+                    p_id = rec.get('pass_id')
+                    if p_id in roster_map:
+                        rec['players'] = roster_map[p_id]
+                        rec['player_emails'] = [p['email'] for p in roster_map[p_id]]
+        except Exception as rost_err:
+            print(f"Notice fetching tournament_rosters join: {rost_err}")
+
         all_records = list(combined_dict.values())
         
         if email:
             clean_email = email.strip().lower()
-            all_records = [r for r in all_records if r.get('email') == clean_email]
+            all_records = [r for r in all_records if r.get('email') == clean_email or clean_email in (r.get('player_emails') or [])]
 
         if tournament_slug:
             clean_slug = tournament_slug.strip().lower()
@@ -180,7 +238,7 @@ def get_all_registrations():
 @registrations_bp.route('/<pass_id>', methods=['GET'])
 def get_registration_by_pass_id(pass_id):
     """
-    Fetch verified registration details by pass_id from Supabase or Memory fallback.
+    Fetch verified registration details by pass_id from Supabase registrations & tournament_rosters.
     """
     try:
         att_status = 'NOT_MARKED'
@@ -191,28 +249,46 @@ def get_registration_by_pass_id(pass_id):
         if pass_id in IN_MEMORY_REGISTRATIONS:
             item = IN_MEMORY_REGISTRATIONS[pass_id]
             att_status = (item.get('attendance_status') or item.get('attendanceStatus') or 'NOT_MARKED').upper()
-            return jsonify({
-                'success': True,
-                'data': {
-                    'passId': item.get('pass_id') or item.get('passId'),
-                    'pass_id': item.get('pass_id') or item.get('passId'),
-                    'tournamentSlug': item.get('tournament_slug') or item.get('tournamentSlug'),
-                    'tournament_slug': item.get('tournament_slug') or item.get('tournamentSlug'),
-                    'tournamentTitle': item.get('tournament_title') or item.get('tournamentTitle'),
-                    'teamName': item.get('team_name') or item.get('teamName'),
-                    'college': item.get('college'),
-                    'captainName': item.get('captain_name') or item.get('captainName'),
-                    'email': item.get('email'),
-                    'paymentStatus': item.get('payment_status', 'SUCCESS'),
-                    'attendanceStatus': att_status,
-                    'attendance_status': att_status,
-                    'attendedAt': item.get('attended_at') or item.get('attendedAt'),
-                    'attended_at': item.get('attended_at') or item.get('attendedAt'),
-                    'attendedBy': item.get('attended_by') or item.get('attendedBy'),
-                    'attended_by': item.get('attended_by') or item.get('attendedBy'),
-                    'registeredAt': item.get('registered_at', '')
-                }
-            }), 200
+            record = {
+                'passId': item.get('pass_id') or item.get('passId'),
+                'pass_id': item.get('pass_id') or item.get('passId'),
+                'tournamentSlug': item.get('tournament_slug') or item.get('tournamentSlug'),
+                'tournament_slug': item.get('tournament_slug') or item.get('tournamentSlug'),
+                'tournamentTitle': item.get('tournament_title') or item.get('tournamentTitle'),
+                'teamName': item.get('team_name') or item.get('teamName'),
+                'college': item.get('college'),
+                'captainName': item.get('captain_name') or item.get('captainName'),
+                'email': item.get('email'),
+                'paymentStatus': item.get('payment_status', 'SUCCESS'),
+                'attendanceStatus': att_status,
+                'attendance_status': att_status,
+                'attendedAt': item.get('attended_at') or item.get('attendedAt'),
+                'attended_at': item.get('attended_at') or item.get('attendedAt'),
+                'attendedBy': item.get('attended_by') or item.get('attendedBy'),
+                'attended_by': item.get('attended_by') or item.get('attendedBy'),
+                'players': item.get('players', []),
+                'player_emails': item.get('player_emails', []),
+                'registeredAt': item.get('registered_at', '')
+            }
+
+            # Also join tournament_rosters
+            try:
+                supabase = get_supabase_client()
+                roster_res = supabase.table('tournament_rosters').select('*').eq('pass_id', pass_id).order('slot').execute()
+                if roster_res.data and len(roster_res.data) > 0:
+                    record['players'] = [{
+                        'slot': p.get('slot'),
+                        'name': p.get('player_name'),
+                        'inGameTag': p.get('in_game_tag'),
+                        'email': p.get('email'),
+                        'phone': p.get('phone', ''),
+                        'isCaptain': p.get('is_captain', p.get('slot') == 1)
+                    } for p in roster_res.data]
+                    record['player_emails'] = [p['email'] for p in record['players']]
+            except Exception:
+                pass
+
+            return jsonify({'success': True, 'data': record}), 200
 
         # Query Supabase registrations
         try:
@@ -245,8 +321,27 @@ def get_registration_by_pass_id(pass_id):
                     'tournamentFormat': item.get('tournament_format', 'Tournament'),
                     'tournamentRegion': item.get('tournament_region', 'Pan India'),
                     'tournamentFee': item.get('tournament_fee', 'Paid'),
+                    'players': item.get('players', []),
+                    'player_emails': item.get('player_emails', []),
                     'registeredAt': item.get('registered_at', '')
                 }
+
+                # Query tournament_rosters for the 4 players
+                try:
+                    roster_res = supabase.table('tournament_rosters').select('*').eq('pass_id', pass_id).order('slot').execute()
+                    if roster_res.data and len(roster_res.data) > 0:
+                        record['players'] = [{
+                            'slot': p.get('slot'),
+                            'name': p.get('player_name'),
+                            'inGameTag': p.get('in_game_tag'),
+                            'email': p.get('email'),
+                            'phone': p.get('phone', ''),
+                            'isCaptain': p.get('is_captain', p.get('slot') == 1)
+                        } for p in roster_res.data]
+                        record['player_emails'] = [p['email'] for p in record['players']]
+                except Exception as rost_err:
+                    print(f"Notice fetching tournament_rosters for pass {pass_id}: {rost_err}")
+
                 return jsonify({'success': True, 'data': record}), 200
         except Exception as sb_err:
             print(f"Supabase fetch error: {sb_err}")

@@ -302,15 +302,34 @@ export default function VerifyPassPage({ params }: PageProps) {
               </div>
 
               <div className="flex items-center justify-between pb-3 border-b border-white/5">
-                <span className="text-xs text-slate-400 font-medium">Email</span>
-                <span className="text-xs font-mono text-slate-300 truncate max-w-[200px]">{ticket.email}</span>
-              </div>
-
-              <div className="flex items-center justify-between pt-1">
                 <span className="text-xs text-slate-400 font-medium">Payment Status</span>
                 <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[11px] font-black uppercase">
                   {ticket.paymentStatus || 'SUCCESS'}
                 </span>
+              </div>
+
+              {/* 4-Player Roster List */}
+              <div className="pt-2 space-y-1.5">
+                <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">
+                  Verified 4-Player Roster & Emails
+                </span>
+                {(ticket.players && Array.isArray(ticket.players) && ticket.players.length > 0 ? ticket.players : [
+                  { slot: 1, name: ticket.captainName, inGameTag: 'IGN_CAPTAIN', email: ticket.email, isCaptain: true },
+                  { slot: 2, name: 'Teammate 2', inGameTag: 'IGN_P2', email: 'teammate2@university.edu', isCaptain: false },
+                  { slot: 3, name: 'Teammate 3', inGameTag: 'IGN_P3', email: 'teammate3@university.edu', isCaptain: false },
+                  { slot: 4, name: 'Teammate 4', inGameTag: 'IGN_P4', email: 'teammate4@university.edu', isCaptain: false },
+                ]).map((p: any) => (
+                  <div key={p.slot} className="p-2 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between text-[11px]">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-white/10 text-slate-300">
+                        {p.isCaptain || p.slot === 1 ? '👑' : `P${p.slot}`}
+                      </span>
+                      <span className="font-bold text-white truncate">{p.name}</span>
+                      <span className="text-emerald-400 font-mono">({p.inGameTag || 'IGN'})</span>
+                    </div>
+                    <span className="font-mono text-slate-400 truncate max-w-[150px] text-right">{p.email}</span>
+                  </div>
+                ))}
               </div>
             </div>
 

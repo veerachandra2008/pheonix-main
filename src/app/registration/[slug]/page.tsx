@@ -1,611 +1,435 @@
 'use client';
 
-import React, { useEffect, useState, use } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
+import { motion } from 'framer-motion';
 import {
   ArrowLeft,
-  Trophy,
   Users,
-  CalendarDays,
-  MapPin,
-  Zap,
   ShieldCheck,
+  CheckCircle2,
+  AlertCircle,
+  Plus,
+  Trophy,
+  Zap,
+  Calendar,
+  MapPin,
+  Mail,
+  User,
+  Hash,
+  Phone,
+  Sparkles,
   ChevronRight,
-  CircleDot,
-  Clock,
+  School
 } from 'lucide-react';
-import { tournaments } from '@/app/tournaments/data';
-import { getAllTeams, saveCustomTeams, getCustomTeams, slugify } from '@/lib/xenova-data';
-import { Plus, X, ShieldAlert } from 'lucide-react';
+import { tournaments } from '../../tournaments/data';
 
-interface PageProps {
-  params?: Promise<{ slug: string }>;
+interface PlayerSlot {
+  slot: number;
+  name: string;
+  inGameTag: string;
+  email: string;
+  phone?: string;
+  isCaptain: boolean;
 }
 
-const GAME_IMAGES: Record<string, string> = {
-  Valorant: '/valorant.jpg',
-  VALORANT: '/valorant.jpg',
-  BGMI: '/bgmi.jpg',
-  'Free Fire': '/freefire.jpg',
-  CS2: '/cs2.jpg',
-  'Apex Legends': '/apex.jpg',
-  'FC / FIFA': '/fc.jpg',
-  default: '/hero-arena.jpg',
-};
-
-export default function RegistrationStep1({ params: paramsPromise }: PageProps) {
-  const urlParams = useParams();
-  const rawSlug = (urlParams?.slug as string) || '';
-  const [slug, setSlug] = useState(rawSlug);
+export default function RegistrationStepOne() {
   const router = useRouter();
-
-  useEffect(() => {
-    if (paramsPromise) {
-      paramsPromise.then((p) => {
-        if (p?.slug) setSlug(p.slug);
-      }).catch(() => {});
-    }
-  }, [paramsPromise]);
+  const params = useParams();
+  const rawSlug = (params?.slug as string) || '';
+  const slug = rawSlug;
 
   const [tournament, setTournament] = useState<any>(() => tournaments.find((t) => t.slug === rawSlug) || null);
-  const [myTeams, setMyTeams] = useState<any[]>([]);
-  const [selectedTeam, setSelectedTeam] = useState<any>(null);
   const [session, setSession] = useState<any>(null);
 
-  // Custom team modal state
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newTeamName, setNewTeamName] = useState('');
-  const [newTeamCollege, setNewTeamCollege] = useState('');
-  const [newTeamGame, setNewTeamGame] = useState('');
-  const [rosterInputs, setRosterInputs] = useState<string[]>(['', '', '', '']);
-  const [creatingTeam, setCreatingTeam] = useState(false);
-  const [createError, setCreateError] = useState('');
+  // 4-Player Squad Details
+  const [teamName, setTeamName] = useState('');
+  const [college, setCollege] = useState('');
+  
+  // Exactly 4 Players (Counting Captain as Slot 1)
+  const [players, setPlayers] = useState<PlayerSlot[]>([
+    { slot: 1, name: '', inGameTag: '', email: '', phone: '', isCaptain: true },
+    { slot: 2, name: '', inGameTag: '', email: '', isCaptain: false },
+    { slot: 3, name: '', inGameTag: '', email: '', isCaptain: false },
+    { slot: 4, name: '', inGameTag: '', email: '', isCaptain: false },
+  ]);
+
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     const rawSession = localStorage.getItem('xenova_session');
-    if (!rawSession) { router.replace('/login'); return; }
+    if (!rawSession) {
+      router.replace('/login');
+      return;
+    }
     const user = JSON.parse(rawSession);
     setSession(user);
 
-    async function loadData() {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+    // Prefill Captain (Player 1) & Team from session if available
+    setTeamName(user.team || '');
+    setCollege(user.college || '');
+    setPlayers((prev) => [
+      {
+        ...prev[0],
+        name: user.name || '',
+        email: user.email || '',
+        inGameTag: user.tag || '',
+        phone: user.phone || '',
+      },
+      prev[1],
+      prev[2],
+      prev[3],
+    ]);
 
-      // 1. Fetch tournament
+    async function loadTournamentData() {
+      const apiBase = process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
       try {
-        const tournRes = await fetch(`${apiBase}/tournaments/`);
-        const tournData = await tournRes.json();
-        if (tournData.success && Array.isArray(tournData.data)) {
-          const found = tournData.data.find((t: any) => t.slug === slug);
-          if (found) {
-            setTournament(found);
-            if (found.game) setNewTeamGame(found.game);
-          }
+        const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) {
+          const found = data.data.find((t: any) => t.slug === slug || String(t.id) === slug);
+          if (found) setTournament(found);
         }
       } catch (e) {
-        console.error('Failed to load tournament from database:', e);
-      }
-
-      // 2. Fetch teams
-      try {
-        const teamsRes = await fetch(`${apiBase}/teams/`);
-        const teamsData = await teamsRes.json();
-        if (teamsData.success && Array.isArray(teamsData.data)) {
-          const userEmail = (user.email || '').toLowerCase().trim();
-          const userTeams = teamsData.data.filter((t: any) => {
-            const created = (t.created_by || t.createdBy || '').toLowerCase().trim();
-            const cap = (t.captain_email || t.captainEmail || '').toLowerCase().trim();
-            return created === userEmail || cap === userEmail || t.captain === user.name;
-          });
-          const list = userTeams.length > 0 ? userTeams : teamsData.data;
-          setMyTeams(list);
-          if (list.length > 0) setSelectedTeam(list[0]);
-        }
-      } catch (e) {
-        console.error('Failed to load teams from database:', e);
+        console.error('Failed to load tournament:', e);
       }
     }
 
-    loadData();
+    loadTournamentData();
   }, [slug, router]);
 
-  const handleCreateTeamSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTeamName.trim()) { setCreateError('Team name is required.'); return; }
-    setCreatingTeam(true);
-    setCreateError('');
-
-    const collegeName = newTeamCollege.trim() || session?.college || 'Independent';
-    const teamSlug = slugify(newTeamName);
-    const validRoster = rosterInputs.filter((r) => r.trim() !== '');
-
-    const newTeamObj = {
-      slug: teamSlug,
-      name: newTeamName.trim(),
-      college: collegeName,
-      game: newTeamGame || tournament?.game || 'Valorant',
-      rank: 10,
-      win_rate: 100,
-      streak: 'W1',
-      captain: session?.name || 'Captain',
-      captain_email: session?.email || '',
-      created_by: session?.email || '',
-      trophies: 0,
-      members: 1 + validRoster.length,
-      recent_wins: 0,
-      form: ['W'],
-      active_score: 100,
-      joined: 2026,
-      accent: '#22c55e',
-      roster: validRoster,
-      verified: true,
-      verification_status: 'approved',
-    };
-
-    try {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
-      await fetch(`${apiBase}/teams/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newTeamObj),
-      });
-
-      // Update state & auto select
-      const updatedList = [newTeamObj, ...myTeams];
-      setMyTeams(updatedList);
-      setSelectedTeam(newTeamObj);
-      setShowCreateModal(false);
-      setNewTeamName('');
-      setRosterInputs(['', '', '', '']);
-    } catch (err: any) {
-      setCreateError(err?.message || 'Failed to create team.');
-    } finally {
-      setCreatingTeam(false);
-    }
+  const handlePlayerChange = (slotIndex: number, field: keyof PlayerSlot, value: string) => {
+    setPlayers((prev) => {
+      const updated = [...prev];
+      updated[slotIndex] = { ...updated[slotIndex], [field]: value };
+      return updated;
+    });
+    setErrorMsg('');
   };
 
+  const handleContinue = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
 
-  const handleContinue = () => {
-    if (!selectedTeam || !tournament) return;
-    // Persist selection to sessionStorage for next step
-    sessionStorage.setItem('reg_selection', JSON.stringify({
-      tournamentSlug: tournament.slug,
-      tournamentTitle: tournament.title || tournament.name,
-      tournamentGame: tournament.game,
-      tournamentPrize: tournament.prize,
-      tournamentDate: tournament.date,
-      tournamentFormat: tournament.format,
-      tournamentRegion: tournament.region,
-      tournamentFee: tournament.fee,
-      tournamentImage: tournament.image,
-      teamId: selectedTeam.id || selectedTeam.name,
-      teamName: selectedTeam.name,
-      college: selectedTeam.college || session?.college || '',
-      captainName: session?.name || '',
-      email: session?.email || '',
-    }));
+    if (!teamName.trim()) {
+      setErrorMsg('Please enter your Squad / Team Name.');
+      return;
+    }
+
+    if (!college.trim()) {
+      setErrorMsg('Please enter your University / College Campus.');
+      return;
+    }
+
+    // Validate ALL 4 Players
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailsUsed = new Set<string>();
+
+    for (let i = 0; i < 4; i++) {
+      const p = players[i];
+      const slotNum = i + 1;
+      const roleLabel = i === 0 ? 'Captain (Player 1)' : `Player ${slotNum}`;
+
+      if (!p.name.trim()) {
+        setErrorMsg(`Please enter Full Name for ${roleLabel}.`);
+        return;
+      }
+      if (!p.inGameTag.trim()) {
+        setErrorMsg(`Please enter In-Game Tag / IGN for ${roleLabel}.`);
+        return;
+      }
+      if (!p.email.trim()) {
+        setErrorMsg(`Please enter Email Address for ${roleLabel}. All 4 players require unique emails.`);
+        return;
+      }
+      if (!emailRegex.test(p.email.trim())) {
+        setErrorMsg(`Invalid email format for ${roleLabel}: "${p.email.trim()}".`);
+        return;
+      }
+
+      const lowerEmail = p.email.trim().toLowerCase();
+      if (emailsUsed.has(lowerEmail)) {
+        setErrorMsg(`Duplicate email found: "${p.email.trim()}". Each of the 4 players must have their own unique email address.`);
+        return;
+      }
+      emailsUsed.add(lowerEmail);
+    }
+
+    // Persist full 4-player squad to sessionStorage
+    const selectionPayload = {
+      tournamentSlug: tournament?.slug || slug,
+      tournamentTitle: tournament?.title || tournament?.name || 'Esports Championship',
+      tournamentGame: tournament?.game || 'Valorant',
+      tournamentPrize: tournament?.prize || 'Verified Prize Pool',
+      tournamentDate: tournament?.date || 'Upcoming',
+      tournamentFormat: tournament?.format || '4v4 Squad Match',
+      tournamentRegion: tournament?.region || 'Pan India',
+      tournamentFee: tournament?.fee || 'Free',
+      tournamentImage: tournament?.image || '/hero-arena.jpg',
+      teamName: teamName.trim(),
+      college: college.trim(),
+      captainName: players[0].name.trim(),
+      captainEmail: players[0].email.trim(),
+      email: players[0].email.trim(),
+      captainPhone: players[0].phone?.trim() || '',
+      players: players.map((p) => ({
+        slot: p.slot,
+        name: p.name.trim(),
+        inGameTag: p.inGameTag.trim(),
+        email: p.email.trim(),
+        phone: p.phone?.trim() || '',
+        isCaptain: p.isCaptain,
+      })),
+      playerEmails: Array.from(emailsUsed),
+    };
+
+    sessionStorage.setItem('reg_selection', JSON.stringify(selectionPayload));
     router.push(`/registration/${slug}/confirm`);
   };
 
   if (!tournament) {
     return (
-      <main className="min-h-screen bg-[#09090b] flex items-center justify-center">
+      <main className="min-h-screen bg-[#070B14] flex items-center justify-center text-white">
         <div className="text-center space-y-4">
-          <div className="w-12 h-12 rounded-full border-2 border-white/10 border-t-emerald-500 animate-spin mx-auto" />
-          <p className="text-zinc-400 text-sm">Loading tournament...</p>
+          <div className="w-12 h-12 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin mx-auto" />
+          <p className="text-slate-400 text-sm font-bold uppercase tracking-wider">Loading Tournament Details...</p>
         </div>
       </main>
     );
   }
 
-  const gameImage = tournament.image || GAME_IMAGES[tournament.game] || GAME_IMAGES.default;
-  const slotsLeft = tournament.teams
-    ? (() => { const parts = tournament.teams.split('/'); return parseInt(parts[1]) - parseInt(parts[0]); })()
-    : null;
-
   return (
-    <main className="min-h-screen bg-[#09090b] text-white font-sans">
-
+    <main className="min-h-screen bg-[#070B14] text-white font-sans selection:bg-emerald-500 selection:text-zinc-950 pb-20">
+      
       {/* ─── STICKY TOP NAV ─── */}
-      <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#09090b]/80 backdrop-blur-xl">
+      <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#0C111D]/80 backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <Link
-            href="/tournaments"
-            className="inline-flex items-center gap-2 text-zinc-400 hover:text-white text-sm font-medium transition"
+            href={`/tournaments/${tournament.slug}`}
+            className="inline-flex items-center gap-2 text-slate-400 hover:text-white text-xs font-bold uppercase tracking-wider transition px-3 py-1.5 rounded-lg bg-white/5 border border-white/10"
           >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Tournaments
+            <ArrowLeft className="h-4 w-4" /> Back to Lobby
           </Link>
 
           {/* Step Indicator */}
           <div className="hidden sm:flex items-center gap-2">
-            {['Select Team', 'Verify Squad', 'Entry Pass'].map((label, i) => (
-              <React.Fragment key={label}>
-                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${
-                  i === 0
-                    ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400'
-                    : 'text-zinc-600 border border-white/[0.06]'
-                }`}>
-                  <span className={`w-4 h-4 rounded-full text-[10px] font-black flex items-center justify-center ${
-                    i === 0 ? 'bg-emerald-500 text-black' : 'bg-white/5 text-zinc-600'
-                  }`}>{i + 1}</span>
-                  {label}
+            {[
+              { num: 1, label: '4-Player Roster', active: true },
+              { num: 2, label: 'Review & Verify', active: false },
+              { num: 3, label: 'Entry Pass Pass', active: false },
+            ].map((step, idx) => (
+              <React.Fragment key={step.num}>
+                <div
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${
+                    step.active
+                      ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400'
+                      : 'text-slate-500 border border-white/5'
+                  }`}
+                >
+                  <span
+                    className={`w-4 h-4 rounded-full text-[10px] font-black flex items-center justify-center ${
+                      step.active ? 'bg-emerald-500 text-black' : 'bg-white/5 text-slate-500'
+                    }`}
+                  >
+                    {step.num}
+                  </span>
+                  {step.label}
                 </div>
-                {i < 2 && <div className="w-4 h-px bg-white/[0.08]" />}
+                {idx < 2 && <div className="w-4 h-px bg-white/10" />}
               </React.Fragment>
             ))}
           </div>
 
-          <div className="text-xs text-zinc-600 font-medium">Step 1 of 3</div>
+          <span className="text-xs font-mono text-emerald-400 font-bold">Step 1 of 3</span>
         </div>
       </nav>
 
-      {/* ─── SPLIT LAYOUT ─── */}
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10 lg:py-16">
-        <div className="grid lg:grid-cols-12 gap-8 lg:gap-12 items-start">
-
-          {/* ── LEFT: Tournament Showcase (7 cols) ── */}
-          <div className="lg:col-span-7 space-y-6">
-
-            {/* Hero Image Card */}
-            <div className="relative w-full aspect-[16/9] rounded-3xl overflow-hidden">
-              <img
-                src={gameImage}
-                alt={tournament.game}
-                className="w-full h-full object-cover brightness-[0.55] saturate-110"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] via-black/30 to-transparent" />
-
-              {/* Status chip */}
-              <div className="absolute top-5 left-5 flex items-center gap-2">
-                <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold backdrop-blur-md border ${
-                  tournament.status === 'Live'
-                    ? 'bg-black/70 border-red-500/40 text-red-400'
-                    : tournament.status === 'Registering'
-                    ? 'bg-black/70 border-emerald-500/40 text-emerald-400'
-                    : 'bg-black/70 border-sky-500/40 text-sky-400'
-                }`}>
-                  <CircleDot className="h-3 w-3" />
-                  {tournament.status}
-                </span>
-                <span className="px-3 py-1.5 rounded-full text-[11px] font-bold bg-black/70 border border-white/15 text-zinc-300 backdrop-blur-md">
-                  {tournament.game}
-                </span>
-              </div>
-
-              {/* Prize Pool overlay */}
-              <div className="absolute bottom-5 left-5 right-5 flex items-end justify-between">
-                <div>
-                  <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-0.5">Prize Pool</p>
-                  <p className="text-3xl font-black text-white">{tournament.prize}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-0.5">Entry</p>
-                  <p className="text-lg font-black text-emerald-400">{tournament.fee}</p>
-                </div>
-              </div>
+      {/* ─── MAIN CONTAINER ─── */}
+      <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 pt-10">
+        <form onSubmit={handleContinue} className="space-y-10">
+          
+          {/* Header Title */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-emerald-400 text-xs font-black uppercase tracking-widest">
+              <Sparkles className="h-4 w-4" />
+              <span>Official Squad Registration</span>
             </div>
-
-            {/* Tournament Title + Host */}
-            <div className="space-y-1">
-              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-                {tournament.title || tournament.name}
-              </h1>
-              <p className="text-sm text-zinc-400">
-                Hosted by <span className="text-white font-semibold">{tournament.host || 'Xenova'}</span>
-              </p>
-            </div>
-
-            {/* Stat chips grid */}
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { icon: CalendarDays, label: 'Date', value: tournament.date },
-                { icon: MapPin, label: 'Region', value: tournament.region },
-                { icon: Trophy, label: 'Format', value: tournament.format },
-                { icon: Users, label: 'Teams', value: tournament.teams },
-              ].map(({ icon: Icon, label, value }) => (
-                <div
-                  key={label}
-                  className="flex items-center gap-3 p-4 rounded-2xl bg-white/[0.03] border border-white/[0.07] backdrop-blur-sm"
-                >
-                  <div className="p-2 rounded-xl bg-white/[0.05] border border-white/[0.07]">
-                    <Icon className="h-4 w-4 text-emerald-400" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">{label}</p>
-                    <p className="text-sm font-semibold text-white">{value}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Slots progress */}
-            {tournament.filled !== undefined && (
-              <div className="p-5 rounded-2xl bg-white/[0.03] border border-white/[0.07]">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-amber-400" />
-                    <span className="text-sm font-semibold text-white">Slots Filling Fast</span>
-                  </div>
-                  {slotsLeft !== null && (
-                    <span className="text-xs font-bold text-amber-400">{slotsLeft} slots left</span>
-                  )}
-                </div>
-                <div className="h-2 rounded-full bg-white/[0.05] overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-emerald-500 transition-all duration-700"
-                    style={{ width: `${tournament.filled}%` }}
-                  />
-                </div>
-                <p className="text-[11px] text-zinc-500 mt-2">{tournament.filled}% capacity reserved</p>
-              </div>
-            )}
-
-            {/* What you get strip */}
-            <div className="p-5 rounded-2xl bg-white/[0.03] border border-white/[0.07] space-y-3">
-              <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">What's Included</p>
-              <div className="grid grid-cols-2 gap-y-2.5 gap-x-4">
-                {[
-                  'Verified bracket placement',
-                  'Anti-cheat integration',
-                  'Live match updates',
-                  'Digital trophy on win',
-                  'Official leaderboard ELO',
-                  'Direct prize payout',
-                ].map((item) => (
-                  <div key={item} className="flex items-center gap-2 text-xs text-zinc-300">
-                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                    {item}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <h1 className="text-3xl sm:text-4xl font-black uppercase tracking-tight text-white">
+              {tournament.title || tournament.name}
+            </h1>
+            <p className="text-slate-400 text-xs sm:text-sm">
+              Register exactly <strong className="text-emerald-400">4 players (Captain + 3 Teammates)</strong>. All 4 members must provide their full names, in-game tags, and valid student emails.
+            </p>
           </div>
 
-          {/* ── RIGHT: Team Selector (5 cols) ── */}
-          <div className="lg:col-span-5">
-            <div className="sticky top-24 space-y-5">
-
-              {/* Glass panel header */}
-              <div className="p-6 rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl space-y-5">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-bold uppercase tracking-widest mb-3">
-                      <Zap className="h-3 w-3" />
-                      Register Your Squad
-                    </div>
-                    <h2 className="text-lg font-black text-white">Select your team</h2>
-                    <p className="text-xs text-zinc-400 mt-1">
-                      Choose or create a team for this tournament.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setShowCreateModal(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-xs font-bold transition shrink-0 mt-1"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    New Team
-                  </button>
-                </div>
-
-                {/* Captain info strip */}
-                {session && (
-                  <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.06]">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-black text-sm shrink-0">
-                      {session.name?.slice(0, 2).toUpperCase() || 'XP'}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-white truncate">{session.name}</p>
-                      <p className="text-[11px] text-zinc-500 truncate">{session.email}</p>
-                    </div>
-                    <div className="ml-auto shrink-0">
-                      <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                    </div>
-                  </div>
-                )}
-
-                {/* Team cards */}
-                <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
-                  {myTeams.length === 0 ? (
-                    <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] text-center space-y-3">
-                      <Users className="h-8 w-8 text-zinc-600 mx-auto" />
-                      <div>
-                        <p className="text-sm font-semibold text-white">No teams found</p>
-                        <p className="text-xs text-zinc-500 mt-1">Create your custom squad to register.</p>
-                      </div>
-                      <button
-                        onClick={() => setShowCreateModal(true)}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 text-black text-xs font-bold hover:bg-emerald-400 transition"
-                      >
-                        <Plus className="h-4 w-4" />
-                        Create Custom Team
-                      </button>
-                    </div>
-                  ) : (
-                    myTeams.map((team) => {
-                      const isSelected = selectedTeam?.name === team.name;
-                      return (
-                        <button
-                          key={team.name}
-                          onClick={() => setSelectedTeam(team)}
-                          className={`w-full text-left p-4 rounded-2xl border transition-all duration-200 ${
-                            isSelected
-                              ? 'bg-emerald-500/10 border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.08)]'
-                              : 'bg-white/[0.02] border-white/[0.07] hover:border-white/15 hover:bg-white/[0.04]'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${
-                              isSelected
-                                ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
-                                : 'bg-white/[0.05] border border-white/[0.08] text-zinc-400'
-                            }`}>
-                              {team.name.slice(0, 2).toUpperCase()}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <p className={`text-sm font-bold truncate ${isSelected ? 'text-white' : 'text-zinc-200'}`}>
-                                  {team.name}
-                                </p>
-                                {team.isCustom && (
-                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 uppercase">Custom</span>
-                                )}
-                              </div>
-                              <p className="text-[11px] text-zinc-500 truncate">{team.college}</p>
-                            </div>
-                            {isSelected && (
-                              <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
-                                <svg className="w-3 h-3 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                              </div>
-                            )}
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-
-                {/* Continue CTA */}
-                <button
-                  onClick={handleContinue}
-                  disabled={!selectedTeam}
-                  className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500 text-black font-black text-sm uppercase tracking-wider hover:bg-emerald-400 transition disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20"
-                >
-                  Continue to Squad Verification
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-
-                <p className="text-center text-[11px] text-zinc-600">
-                  All registrations are verified against student ID records.
-                </p>
-              </div>
-
+          {/* Error Banner */}
+          {errorMsg && (
+            <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-center gap-2.5">
+              <AlertCircle className="h-5 w-5 shrink-0 text-rose-400" />
+              <span>{errorMsg}</span>
             </div>
-          </div>
-        </div>
-      </div>
+          )}
 
-      {/* ─── CREATE CUSTOM TEAM MODAL ─── */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 overflow-y-auto">
-          <div className="relative w-full max-w-lg rounded-3xl bg-[#111115] border border-white/10 p-6 sm:p-8 space-y-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                  <Plus className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-black text-white">Create Custom Team</h3>
-                  <p className="text-xs text-zinc-400">Register a new squad for {tournament?.title || 'this tournament'}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-white/5 transition"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+          {/* ═══════════════ SQUAD INFO CARD ═══════════════ */}
+          <div className="p-6 sm:p-8 rounded-3xl bg-[#0C111D] border border-white/10 space-y-6 shadow-xl">
+            <h3 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
+              <Users className="h-4 w-4 text-emerald-400" /> 1. Squad Identification
+            </h3>
 
-            {/* Error banner */}
-            {createError && (
-              <div className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
-                <ShieldAlert className="h-4 w-4 shrink-0" />
-                <span>{createError}</span>
-              </div>
-            )}
-
-            {/* Form */}
-            <form onSubmit={handleCreateTeamSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Team Name *</label>
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Squad / Team Name <span className="text-rose-400">*</span>
+                </label>
                 <input
                   type="text"
+                  value={teamName}
+                  onChange={(e) => { setTeamName(e.target.value); setErrorMsg(''); }}
+                  placeholder="e.g. TEAM TITANS"
                   required
-                  placeholder="e.g. Phoenix Knights"
-                  value={newTeamName}
-                  onChange={(e) => setNewTeamName(e.target.value)}
-                  className="w-full rounded-2xl bg-white/[0.04] border border-white/10 px-4 py-3 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-emerald-500 transition"
+                  className="w-full px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-sm font-bold uppercase outline-none focus:border-emerald-500"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">College / Institution</label>
-                  <input
-                    type="text"
-                    placeholder={session?.college || 'Your College'}
-                    value={newTeamCollege}
-                    onChange={(e) => setNewTeamCollege(e.target.value)}
-                    className="w-full rounded-2xl bg-white/[0.04] border border-white/10 px-4 py-3 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-emerald-500 transition"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Game</label>
-                  <input
-                    type="text"
-                    value={newTeamGame || tournament?.game || 'Valorant'}
-                    onChange={(e) => setNewTeamGame(e.target.value)}
-                    className="w-full rounded-2xl bg-white/[0.04] border border-white/10 px-4 py-3 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-emerald-500 transition"
-                  />
-                </div>
-              </div>
-
-              {/* Roster Teammates */}
-              <div className="space-y-2 pt-2">
-                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block">
-                  Roster Players (Optional)
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                  <School className="h-3.5 w-3.5 text-emerald-400" /> University / College <span className="text-rose-400">*</span>
                 </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {rosterInputs.map((val, idx) => (
-                    <input
-                      key={idx}
-                      type="text"
-                      placeholder={`Player ${idx + 2} IGN`}
-                      value={val}
-                      onChange={(e) => {
-                        const updated = [...rosterInputs];
-                        updated[idx] = e.target.value;
-                        setRosterInputs(updated);
-                      }}
-                      className="rounded-xl bg-white/[0.03] border border-white/10 px-3.5 py-2.5 text-xs text-white placeholder:text-zinc-600 outline-none focus:border-emerald-500 transition"
-                    />
-                  ))}
-                </div>
+                <input
+                  type="text"
+                  value={college}
+                  onChange={(e) => { setCollege(e.target.value); setErrorMsg(''); }}
+                  placeholder="e.g. Nexus Institute of Technology"
+                  required
+                  className="w-full px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-sm outline-none focus:border-emerald-500 font-semibold"
+                />
               </div>
-
-              {/* Action */}
-              <div className="pt-4 flex items-center justify-end gap-3 border-t border-white/[0.08]">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-5 py-3 rounded-2xl border border-white/10 text-zinc-400 hover:text-white text-xs font-bold transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={creatingTeam}
-                  className="px-6 py-3 rounded-2xl bg-emerald-500 text-black text-xs font-black uppercase tracking-wider hover:bg-emerald-400 transition disabled:opacity-50"
-                >
-                  {creatingTeam ? 'Creating...' : 'Create & Select Team'}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
-        </div>
-      )}
+
+          {/* ═══════════════ EXACTLY 4 SQUAD PLAYERS ═══════════════ */}
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-emerald-400" /> 2. Four Squad Members (All 4 Required)
+              </h3>
+              <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-black uppercase rounded-full">
+                4 / 4 Roster Slots
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {players.map((player, idx) => {
+                const isCap = idx === 0;
+                return (
+                  <motion.div
+                    key={player.slot}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.05 }}
+                    className={`p-6 rounded-3xl border shadow-xl relative space-y-4 ${
+                      isCap
+                        ? 'bg-gradient-to-b from-emerald-500/10 via-[#0C111D] to-[#0C111D] border-emerald-500/40'
+                        : 'bg-[#0C111D] border-white/10'
+                    }`}
+                  >
+                    {/* Header badge */}
+                    <div className="flex items-center justify-between">
+                      <span className={`text-xs font-black uppercase tracking-wider px-3 py-1 rounded-full ${
+                        isCap
+                          ? 'bg-emerald-500 text-black'
+                          : 'bg-white/10 text-slate-300'
+                      }`}>
+                        {isCap ? '👑 Player 1 (Captain)' : `Player ${player.slot}`}
+                      </span>
+                      <span className="text-[11px] font-mono text-slate-500">Slot {player.slot}</span>
+                    </div>
+
+                    {/* Full Name */}
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                        <User className="h-3 w-3 text-slate-400" /> Full Name <span className="text-rose-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={player.name}
+                        onChange={(e) => handlePlayerChange(idx, 'name', e.target.value)}
+                        placeholder={isCap ? "e.g. Rahul Sharma" : `e.g. Teammate ${player.slot} Name`}
+                        required
+                        className="w-full px-3.5 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-bold outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    {/* In-Game Tag / IGN */}
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                        <Hash className="h-3 w-3 text-emerald-400" /> In-Game Tag / IGN <span className="text-rose-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={player.inGameTag}
+                        onChange={(e) => handlePlayerChange(idx, 'inGameTag', e.target.value)}
+                        placeholder="e.g. TITAN#9999 or VIPER_OP"
+                        required
+                        className="w-full px-3.5 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-mono font-bold outline-none focus:border-emerald-500 uppercase"
+                      />
+                    </div>
+
+                    {/* Player Email (MANDATORY FOR ALL 4 PLAYERS) */}
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                        <Mail className="h-3 w-3 text-amber-400" /> Student Email Address <span className="text-rose-400">*</span>
+                      </label>
+                      <input
+                        type="email"
+                        value={player.email}
+                        onChange={(e) => handlePlayerChange(idx, 'email', e.target.value)}
+                        placeholder={`player${player.slot}@university.edu`}
+                        required
+                        className="w-full px-3.5 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-mono outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    {/* Phone for Captain */}
+                    {isCap && (
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                          <Phone className="h-3 w-3 text-emerald-400" /> Captain Phone / WhatsApp
+                        </label>
+                        <input
+                          type="tel"
+                          value={player.phone || ''}
+                          onChange={(e) => handlePlayerChange(idx, 'phone', e.target.value)}
+                          placeholder="+91 9876543210"
+                          className="w-full px-3.5 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-mono outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                    )}
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ═══════════════ BOTTOM ACTION ═══════════════ */}
+          <div className="pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="text-xs text-slate-400 text-center sm:text-left">
+              Registration Fee: <strong className="text-white">{tournament.fee || 'Free'}</strong> · Prize Pool: <strong className="text-amber-400">{tournament.prize}</strong>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full sm:w-auto px-8 py-4 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-black font-black text-sm uppercase tracking-wider rounded-2xl transition shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              Verify 4-Player Squad
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+
+        </form>
+      </div>
+
     </main>
   );
 }
-

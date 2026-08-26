@@ -903,6 +903,22 @@ export default function TournamentAttendancePage() {
                           </span>
                         </div>
 
+                        {/* 4-Player Roster List in Attendance Desk */}
+                        {item.players && Array.isArray(item.players) && item.players.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {item.players.map((p: any) => (
+                              <span
+                                key={p.slot}
+                                className="px-2 py-0.5 rounded-md bg-black/40 border border-white/10 text-[10px] font-mono text-slate-300 flex items-center gap-1"
+                              >
+                                <span className="text-emerald-400 font-bold">{p.slot === 1 ? '👑' : `P${p.slot}`}:</span>
+                                <span>{p.name}</span>
+                                <span className="text-slate-500 font-normal">({p.email})</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
                         {/* Attendance Metadata Stamp */}
                         <div className="pt-0.5">
                           {isPresent && (

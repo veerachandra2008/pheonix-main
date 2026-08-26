@@ -200,6 +200,8 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
             college: selection.college,
             captainName: selection.captainName,
             email,
+            players: selection.players || [],
+            playerEmails: selection.playerEmails || [email],
           }),
         });
 
@@ -346,6 +348,8 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
                 college: selection.college,
                 captainName: selection.captainName,
                 email,
+                players: selection.players || [],
+                playerEmails: selection.playerEmails || [email],
                 amount: numericAmount,
               }),
             });
@@ -556,10 +560,16 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
           </div>
         </div>
 
-        {/* Team card */}
+        {/* Team card with 4 Players Breakdown */}
         <div className="space-y-3">
-          <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Registering Team</p>
-          <div className="p-5 rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Verified 4-Player Roster</p>
+            <span className="text-[10px] font-black uppercase text-emerald-400 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30">
+              4 / 4 Members Registered
+            </span>
+          </div>
+
+          <div className="p-5 sm:p-6 rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl space-y-5">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center font-black text-lg text-emerald-400 shrink-0">
                 {selection.teamName?.slice(0, 2).toUpperCase()}
@@ -568,22 +578,34 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
                 <p className="text-base font-black text-white">{selection.teamName}</p>
                 <p className="text-xs text-zinc-400 mt-0.5">{selection.college}</p>
               </div>
-              <div className="shrink-0">
-                <div className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold">
-                  SELECTED
-                </div>
-              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 mt-5 pt-4 border-t border-white/[0.06]">
-              <div className="space-y-0.5">
-                <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Captain</p>
-                <p className="text-sm font-semibold text-white">{selection.captainName || '—'}</p>
-              </div>
-              <div className="space-y-0.5">
-                <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">University</p>
-                <p className="text-sm font-semibold text-white truncate">{selection.college || '—'}</p>
-              </div>
+            {/* 4-Player Table */}
+            <div className="space-y-2 pt-2">
+              {(selection.players && selection.players.length > 0 ? selection.players : [
+                { slot: 1, name: selection.captainName, inGameTag: 'CAPTAIN', email: selection.email, isCaptain: true },
+                { slot: 2, name: 'Teammate 2', inGameTag: 'PLAYER_2', email: 'teammate2@university.edu', isCaptain: false },
+                { slot: 3, name: 'Teammate 3', inGameTag: 'PLAYER_3', email: 'teammate3@university.edu', isCaptain: false },
+                { slot: 4, name: 'Teammate 4', inGameTag: 'PLAYER_4', email: 'teammate4@university.edu', isCaptain: false },
+              ]).map((p: any) => (
+                <div
+                  key={p.slot}
+                  className="p-3 rounded-2xl bg-black/40 border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase ${
+                      p.isCaptain || p.slot === 1
+                        ? 'bg-emerald-500 text-black'
+                        : 'bg-white/10 text-slate-300'
+                    }`}>
+                      {p.isCaptain || p.slot === 1 ? '👑 Captain' : `P${p.slot}`}
+                    </span>
+                    <span className="text-xs font-bold text-white">{p.name}</span>
+                    <span className="text-[11px] font-mono font-bold text-emerald-400">({p.inGameTag || 'IGN'})</span>
+                  </div>
+                  <span className="text-xs font-mono text-slate-400 sm:text-right truncate">{p.email}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>

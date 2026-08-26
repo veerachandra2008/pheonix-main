@@ -318,6 +318,53 @@ export default function OrganizerDashboard() {
           </div>
         </section>
 
+        {/* Quick Operations Hub Cards */}
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Link
+            href="/organizer/rosters"
+            className="p-5 rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/40 via-[#0C111D] to-[#0C111D] hover:border-indigo-500/60 transition group flex items-center justify-between shadow-lg"
+          >
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-indigo-600/20 text-indigo-400">
+                  <Users className="h-5 w-5" />
+                </span>
+                <h3 className="text-base font-black uppercase tracking-tight text-white group-hover:text-indigo-300 transition">
+                  Squad Rosters Hub
+                </h3>
+              </div>
+              <p className="text-xs text-slate-400">
+                View & export all 4 registered players (Captain + Teammates) across all tournaments.
+              </p>
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-indigo-600/20 text-indigo-300 text-xs font-bold uppercase tracking-wider group-hover:bg-indigo-600 group-hover:text-white transition shrink-0">
+              Open Rosters →
+            </div>
+          </Link>
+
+          <Link
+            href="/organizer/attendance"
+            className="p-5 rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/40 via-[#0C111D] to-[#0C111D] hover:border-emerald-500/60 transition group flex items-center justify-between shadow-lg"
+          >
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-emerald-600/20 text-emerald-400">
+                  <ShieldCheck className="h-5 w-5" />
+                </span>
+                <h3 className="text-base font-black uppercase tracking-tight text-white group-hover:text-emerald-300 transition">
+                  Event Attendance Hub
+                </h3>
+              </div>
+              <p className="text-xs text-slate-400">
+                Live match-day check-in desk, QR ticket verification, and no-show tracker.
+              </p>
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-emerald-600/20 text-emerald-300 text-xs font-bold uppercase tracking-wider group-hover:bg-emerald-600 group-hover:text-white transition shrink-0">
+              Open Attendance →
+            </div>
+          </Link>
+        </section>
+
         {/* Tournaments Grid */}
         <section className="space-y-4">
           <div className="flex items-center justify-between">
@@ -443,6 +490,14 @@ export default function OrganizerDashboard() {
                         className="py-2.5 px-3 bg-white/10 hover:bg-white/15 transition text-xs font-bold uppercase tracking-wider text-slate-200 text-center rounded-xl"
                       >
                         Rosters ({regCount})
+                      </Link>
+
+                      <Link
+                        href={`/organizer/tournament/${tournamentSlug}/edit`}
+                        className="py-2.5 px-3 bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 hover:border-indigo-500 transition text-xs font-bold uppercase tracking-wider text-indigo-300 hover:text-white text-center rounded-xl"
+                        title="Edit Rules & Details"
+                      >
+                        Edit
                       </Link>
 
                       <Link

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, useParams, notFound } from 'next/navigation';
-import { FormEvent, useState, useEffect } from 'react';
+import { FormEvent, useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CalendarDays,
@@ -21,11 +21,16 @@ import {
   Clock,
   Sparkles,
   Share2,
-  Check
+  Check,
+  ChevronRight,
+  Gamepad2,
+  Layers,
+  DollarSign,
+  Ticket
 } from 'lucide-react';
-import { tournaments } from '../data';
-import { getUserRegistrations, saveRegistration } from '@/lib/tournaments-db';
-import FinalCTA from '@/components/xenova/FinalCTA';
+import { tournaments as defaultTournaments } from '../data';
+import { getUserRegistrations } from '@/lib/tournaments-db';
+import { flaskApi } from '@/lib/flask-api';
 
 interface TournamentPageParams {
   params?: Promise<{
@@ -33,15 +38,60 @@ interface TournamentPageParams {
   }>;
 }
 
-interface RegistrationRecord {
-  tournamentSlug: string;
-  teamName: string;
-  captainName: string;
-  email: string;
-  college: string;
-  note?: string;
-  registeredAt: string;
-}
+// Game specific defaults for maps & rules
+const GAME_METADATA: Record<string, { maps: string[]; defaultRules: string[]; defaultDesc: string }> = {
+  Valorant: {
+    maps: ['Ascent', 'Bind', 'Haven', 'Lotus', 'Split', 'Sunset'],
+    defaultRules: [
+      'Standard 5v5 Competitive Mode with 13-round victory condition.',
+      'All 4 main players must be registered active university students.',
+      'Riot Vanguard Anti-Cheat is mandatory on all client machines.',
+      'A 10-minute check-in grace period applies before match forfeit.',
+      'Overtime format: Win by 2 (Max 2 overtime sets then Sudden Death).',
+    ],
+    defaultDesc: 'Official university Valorant championship. Assemble your 4-player squad, prove tactical superiority, and climb the collegiate brackets for varsity glory and cash rewards.'
+  },
+  BGMI: {
+    maps: ['Erangel', 'Miramar', 'Sanhok', 'Vikendi'],
+    defaultRules: [
+      'Battle Royale Squad matches with standard 10-point scoring table.',
+      'Only mobile devices permitted (Emulators, iPad, and Triggers strictly prohibited).',
+      'All 4 players must submit registered gamer tags and university emails.',
+      'Point System: 1st Place = 10 pts, 2nd = 6 pts, 3rd = 5 pts, 4th = 4 pts + 1 pt per elimination.',
+      'Room credentials will be dispatched to squad captains 15 minutes before lobby launch.',
+    ],
+    defaultDesc: 'The ultimate battleground for university mobile gamers. Drop into Erangel and Miramar with your 4-player squad to claim the regional championship trophy.'
+  },
+  CS2: {
+    maps: ['Mirage', 'Inferno', 'Nuke', 'Ancient', 'Anubis', 'Dust II'],
+    defaultRules: [
+      'Standard MR12 Competitive rules on 128-tick verified private match servers.',
+      'Valve Anti-Cheat (VAC) and custom server anticheat active.',
+      'Map veto system: Ban-Ban-Pick-Pick-Decider for BO3 matches.',
+      'Tactical pauses: Maximum two 30-second timeouts allowed per team per map.',
+    ],
+    defaultDesc: 'Collegiate CS2 championship series. Execute precision smokes, site retakes, and tactical gunplay across the active duty map pool.'
+  },
+  'Free Fire': {
+    maps: ['Bermuda', 'Purgatory', 'Kalahari', 'Alpine'],
+    defaultRules: [
+      'Classic Squad Battle Royale mode across 4 rotating maps.',
+      'Gun skins with attribute enhancements are disabled for competitive parity.',
+      'Emulators and root devices are strictly disqualified.',
+      'Kill point multiplier and placement points tally after each match set.',
+    ],
+    defaultDesc: 'High-octane collegiate Free Fire tournament. Form your 4-player squad and outlast university rivals in fast-paced survival action.'
+  },
+  'FC / FIFA': {
+    maps: ['Champions Stadium', 'Wembley', 'Santiago Bernabéu'],
+    defaultRules: [
+      '1v1 / 2v2 Competitive Head-to-Head with 95 OVR squad balancing.',
+      '6-minute halves with tactical defending required.',
+      'In case of a draw at 90 minutes, match proceeds to Classic Extra Time and Penalties.',
+    ],
+    defaultDesc: 'The premier collegiate virtual football open. Showcase precision dribbling, tactical builds, and competitive skill.'
+  }
+};
 
 export default function TournamentDetailPage({ params: paramsPromise }: TournamentPageParams) {
   const urlParams = useParams();
@@ -57,80 +107,99 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
     }
   }, [paramsPromise]);
 
-  const [customTournaments, setCustomTournaments] = useState<any[]>([]);
+  const [tournament, setTournament] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [sessionUser, setSessionUser] = useState<any>(null);
-  const [registered, setRegistered] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
   const [alreadyRegistered, setAlreadyRegistered] = useState(false);
+  const [userPassId, setUserPassId] = useState<string | null>(null);
+  const [registeredTeamsList, setRegisteredTeamsList] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'prizes' | 'schedule' | 'teams' | 'rules'>('overview');
   const [copiedLink, setCopiedLink] = useState(false);
 
-  const [formValues, setFormValues] = useState({
-    teamName: '',
-    captainName: '',
-    email: '',
-    college: '',
-    players: '',
-    note: '',
-  });
-
   useEffect(() => {
     async function loadTournamentData() {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+      const apiBase = process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+      const targetSlug = slug || rawSlug;
+      if (!targetSlug) return;
 
+      setLoading(true);
+
+      // 1. Check session
       try {
-        // 1. Check logged-in user session
         const rawSession = localStorage.getItem('xenova_session');
         if (rawSession) {
           const user = JSON.parse(rawSession);
           setSessionUser(user);
-          setFormValues((prev) => ({
-            ...prev,
-            captainName: user.name || user.tag || '',
-            email: user.email || '',
-            teamName: user.team || '',
-            college: user.college || '',
-          }));
-
-          // Check existing registrations via backend database
           if (user.email) {
-            getUserRegistrations(user.email.toLowerCase()).then((regs) => {
-              if (regs.some((r) => r.tournamentSlug === slug)) {
-                setAlreadyRegistered(true);
-              }
-            }).catch(() => {});
+            const regs = await getUserRegistrations(user.email.toLowerCase());
+            const matchedReg = regs.find((r) => r.tournamentSlug?.toLowerCase() === targetSlug.toLowerCase());
+            if (matchedReg) {
+              setAlreadyRegistered(true);
+              setUserPassId(matchedReg.passId);
+            }
           }
         }
+      } catch (e) {
+        console.warn('Session check notice:', e);
+      }
 
-        // 2. Load tournament from backend database
+      // 2. Fetch tournament from database
+      let found: any = null;
+      try {
         const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
-        const json = await res.json();
-        if (json.success && Array.isArray(json.data)) {
-          setCustomTournaments(json.data);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data)) {
+            found = json.data.find(
+              (t: any) =>
+                t.slug?.toLowerCase() === targetSlug.toLowerCase() ||
+                String(t.id) === targetSlug
+            );
+          }
         }
       } catch (e) {
-        console.error('Failed to load tournament from database:', e);
+        console.warn('Backend tournament fetch notice:', e);
       }
+
+      if (!found) {
+        found = defaultTournaments.find(
+          (t) => t.slug?.toLowerCase() === targetSlug.toLowerCase()
+        );
+      }
+
+      if (!found) {
+        found = {
+          slug: targetSlug,
+          title: targetSlug.split('-').map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(' '),
+          game: 'Valorant',
+          host: 'Xenova Collegiate',
+          image: '/valorant.jpg',
+          prize: '₹1,00,000',
+          fee: 'Free',
+          date: 'Upcoming',
+          region: 'Pan India',
+          format: '4v4 Squad Tournament',
+          teams: '64 Teams',
+          status: 'Registering',
+          status_color: '#10B981',
+        };
+      }
+
+      setTournament(found);
+
+      // 3. Fetch registered squads specifically for this tournament
+      try {
+        const regsRes = await flaskApi.getRegistrationsByTournament(found.slug || targetSlug);
+        if (regsRes && regsRes.success && Array.isArray(regsRes.data)) {
+          setRegisteredTeamsList(regsRes.data);
+        }
+      } catch {}
+
+      setLoading(false);
     }
 
     loadTournamentData();
-  }, [slug]);
-
-  const tournament =
-    customTournaments.find((item) => item.slug === slug) ||
-    tournaments.find((item) => item.slug === slug) ||
-    tournaments.find((item) => item.slug === rawSlug);
-
-  if (!tournament && typeof window !== 'undefined' && slug && customTournaments.length > 0) {
-    notFound();
-  }
-
-  if (!tournament) {
-    return null;
-  }
+  }, [slug, rawSlug]);
 
   const handleShare = () => {
     if (typeof window !== 'undefined') {
@@ -140,70 +209,91 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
     }
   };
 
-  const slugify = (text: string) => text.toLowerCase().replace(/\s+/g, '-');
+  // Compute game-specific details
+  const gameMeta = useMemo(() => {
+    if (!tournament) return GAME_METADATA.Valorant;
+    const gameKey = Object.keys(GAME_METADATA).find((k) =>
+      tournament.game?.toLowerCase().includes(k.toLowerCase())
+    );
+    return gameKey ? GAME_METADATA[gameKey] : GAME_METADATA.Valorant;
+  }, [tournament]);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!formValues.teamName.trim() || !formValues.captainName.trim() || !formValues.email.trim()) {
-      setErrorMsg('Please fill in all required fields.');
-      return;
+  // Compute dynamic prize amounts
+  const computedPrizes = useMemo(() => {
+    if (!tournament) return { first: '₹60,000', second: '₹30,000', third: '₹10,000', total: '₹1,00,000' };
+    
+    if (tournament.prize_1st && tournament.prize_2nd) {
+      return {
+        first: tournament.prize_1st,
+        second: tournament.prize_2nd,
+        third: tournament.prize_3rd || 'Trophy & Verified Badge',
+        total: tournament.prize || 'Championship Pool',
+      };
     }
 
-    if (!sessionUser) {
-      router.push('/login');
-      return;
+    const numericMatch = (tournament.prize || '').match(/\d[\d,]*/);
+    if (numericMatch) {
+      const rawNum = parseInt(numericMatch[0].replace(/,/g, ''), 10);
+      const p1 = Math.round(rawNum * 0.55);
+      const p2 = Math.round(rawNum * 0.30);
+      const p3 = Math.round(rawNum * 0.15);
+      return {
+        first: `₹${p1.toLocaleString('en-IN')}`,
+        second: `₹${p2.toLocaleString('en-IN')}`,
+        third: `₹${p3.toLocaleString('en-IN')}`,
+        total: tournament.prize,
+      };
     }
 
-    try {
-      const passId = `XPH-${Math.floor(10000000 + Math.random() * 90000000)}`;
+    return {
+      first: '50% of Pool',
+      second: '30% of Pool',
+      third: '20% of Pool',
+      total: tournament.prize || 'Guaranteed Pool',
+    };
+  }, [tournament]);
 
-      await saveRegistration({
-        tournamentSlug: slug,
-        tournamentTitle: tournament?.title || 'Championship Tournament',
-        tournamentGame: tournament?.game || 'Esports',
-        tournamentPrize: tournament?.prize || 'Verified Prize',
-        tournamentDate: tournament?.date || 'Upcoming',
-        tournamentFormat: tournament?.format || 'Double Elimination',
-        tournamentRegion: tournament?.region || 'Pan India',
-        tournamentFee: tournament?.fee || 'Free',
-        tournamentImage: tournament?.image || '/hero-arena.jpg',
-        teamId: slugify(formValues.teamName),
-        teamName: formValues.teamName.trim(),
-        college: formValues.college.trim(),
-        captainName: formValues.captainName.trim(),
-        email: formValues.email.trim(),
-        passId: passId,
-        registeredAt: new Date().toISOString(),
-      });
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-black text-white">
+        <div className="text-center space-y-4">
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent mx-auto" />
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Loading Tournament Lobby...</p>
+        </div>
+      </div>
+    );
+  }
 
-      setRegistered(true);
-      setAlreadyRegistered(true);
-    } catch (e) {
-      console.error(e);
-      setErrorMsg('Failed to process registration. Please try again.');
-    }
-  };
+  if (!tournament) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-6 text-white text-center">
+        <div className="space-y-4 max-w-md">
+          <h2 className="text-2xl font-black">Tournament Not Found</h2>
+          <p className="text-sm text-slate-400">The requested championship lobby does not exist or has concluded.</p>
+          <Link href="/tournaments" className="inline-flex px-6 py-3 rounded-xl bg-emerald-500 text-black font-black text-xs uppercase">
+            Browse Active Tournaments
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <main className="min-h-screen bg-black text-white font-sans selection:bg-emerald-500 selection:text-zinc-950">
+    <main className="min-h-screen bg-black text-white font-sans selection:bg-emerald-500 selection:text-zinc-950 pb-24">
       
-      {/* ═══════════════ 1. JAW-DROPPING CINEMATIC HERO BANNER ═══════════════ */}
-      <section className="relative min-h-[480px] sm:min-h-[540px] w-full overflow-hidden border-b border-zinc-900 bg-black flex items-end">
+      {/* ═══════════════ 1. HERO BANNER ═══════════════ */}
+      <section className="relative min-h-[480px] sm:min-h-[520px] w-full overflow-hidden border-b border-zinc-900 bg-black flex items-end">
         
-        {/* Background Image Layer with Parallax Vignette */}
+        {/* Background Image Layer */}
         <div className="absolute inset-0 z-0 overflow-hidden">
           <img
-            src={tournament?.image || '/hero-arena.jpg'}
-            alt={tournament?.title || 'Tournament'}
-            className="h-full w-full object-cover filter brightness-75 saturate-125 scale-105"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = '/hero-arena.jpg';
-            }}
+            src={tournament.image || '/hero-arena.jpg'}
+            alt={tournament.title || 'Tournament'}
+            className="h-full w-full object-cover filter brightness-70 saturate-125 scale-105"
+            onError={(e) => { (e.target as HTMLImageElement).src = '/hero-arena.jpg'; }}
           />
-          {/* Multi-Layer Deep Vignette Shadows */}
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-transparent" />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,rgba(0,0,0,0.85)_100%)]" />
         </div>
 
         {/* Back Link & Quick Actions */}
@@ -212,7 +302,7 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
             href="/tournaments"
             className="inline-flex items-center gap-2.5 rounded-full border border-white/20 bg-black/70 backdrop-blur-2xl px-4 py-2 text-xs font-black uppercase tracking-wider text-zinc-300 transition hover:bg-white/10 hover:text-white shadow-2xl"
           >
-            <ArrowLeft className="h-4 w-4" /> Back to Tournaments
+            <ArrowLeft className="h-4 w-4" /> Tournaments
           </Link>
 
           <button
@@ -231,35 +321,44 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
             
             {/* Badges Strip */}
             <div className="flex flex-wrap items-center gap-3">
-              <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/20 border border-emerald-500/40 px-3.5 py-1.5 text-xs font-black uppercase tracking-wider text-emerald-400 backdrop-blur-md shadow-lg">
-                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                {tournament.status || 'REGISTRATION OPEN'}
+              <span
+                className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-black uppercase tracking-wider text-white backdrop-blur-md shadow-lg"
+                style={{ backgroundColor: tournament.status_color || '#10B981' }}
+              >
+                <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+                {tournament.status || 'Registering'}
               </span>
+
               <span className="inline-flex items-center gap-2 rounded-full bg-black/80 border border-white/15 px-3.5 py-1.5 text-xs font-extrabold uppercase tracking-wider text-zinc-200 backdrop-blur-md">
-                {tournament.game}
+                <Gamepad2 className="h-3.5 w-3.5 text-emerald-400" /> {tournament.game}
               </span>
+
               <span className="inline-flex items-center gap-2 rounded-full bg-amber-500/20 border border-amber-500/40 px-3.5 py-1.5 text-xs font-black uppercase tracking-wider text-amber-400 backdrop-blur-md">
                 <Trophy className="h-3.5 w-3.5" /> Prize Pool {tournament.prize}
               </span>
             </div>
 
             {/* Title */}
-            <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black uppercase tracking-tight text-white leading-none drop-shadow-2xl">
+            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black uppercase tracking-tight text-white leading-tight">
               {tournament.title || tournament.name}
             </h1>
 
-            {/* Subtext info */}
+            {/* Meta Items */}
             <div className="flex flex-wrap items-center gap-4 text-xs sm:text-sm font-semibold text-zinc-300 pt-1">
               <span className="flex items-center gap-1.5 text-emerald-400">
-                <ShieldCheck className="h-4 w-4" /> Hosted by {tournament.host}
+                <ShieldCheck className="h-4 w-4" /> Hosted by {tournament.host || 'Xenova Esports'}
               </span>
               <span>•</span>
               <span className="flex items-center gap-1.5 text-zinc-300">
-                <CalendarDays className="h-4 w-4 text-emerald-400" /> {tournament.date}
+                <CalendarDays className="h-4 w-4 text-emerald-400" /> {tournament.date || 'Scheduled'}
               </span>
               <span>•</span>
               <span className="flex items-center gap-1.5 text-zinc-300">
-                <MapPin className="h-4 w-4 text-emerald-400" /> {tournament.region}
+                <MapPin className="h-4 w-4 text-emerald-400" /> {tournament.region || 'Online'}
+              </span>
+              <span>•</span>
+              <span className="flex items-center gap-1.5 text-amber-400 font-bold">
+                Fee: {tournament.fee || 'Free'}
               </span>
             </div>
 
@@ -272,11 +371,11 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex space-x-2 sm:space-x-4 overflow-x-auto py-3 no-scrollbar">
             {[
-              { id: 'overview', label: 'Overview & Format', icon: Trophy },
-              { id: 'prizes', label: 'Prize Pool', icon: Crown },
-              { id: 'schedule', label: 'Schedule', icon: Clock },
-              { id: 'teams', label: 'Varsity Teams', icon: Users },
-              { id: 'rules', label: 'Rules & Anti-Cheat', icon: FileText },
+              { id: 'overview', label: 'Overview & Maps', icon: Trophy },
+              { id: 'prizes', label: 'Prize Podium', icon: Crown },
+              { id: 'schedule', label: 'Schedule & Stages', icon: Clock },
+              { id: 'teams', label: `Registered Squads (${registeredTeamsList.length})`, icon: Users },
+              { id: 'rules', label: 'Rules & Guidelines', icon: FileText },
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -299,24 +398,24 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
         </div>
       </section>
 
-      {/* ═══════════════ 3. MAIN DYNAMIC CONTENT & STICKY REGISTRATION ═══════════════ */}
+      {/* ═══════════════ 3. MAIN CONTENT GRID ═══════════════ */}
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 md:py-16">
         <div className="grid gap-10 lg:grid-cols-12 items-start">
           
           {/* LEFT COLUMN - DYNAMIC TABBED CONTENT (8 COLS) */}
-          <div className="lg:col-span-8 space-y-10">
+          <div className="lg:col-span-8 space-y-8">
             
-            {/* TAB 1: OVERVIEW & FORMAT */}
+            {/* TAB 1: OVERVIEW & MAPS */}
             {activeTab === 'overview' && (
               <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
                 
-                {/* Description Box */}
-                <div className="rounded-3xl border border-white/10 bg-[#09090b] p-8 space-y-4 shadow-2xl">
+                {/* Synopsis */}
+                <div className="rounded-3xl border border-white/10 bg-[#09090b] p-6 sm:p-8 space-y-4 shadow-2xl">
                   <h2 className="text-xl font-black uppercase tracking-tight text-white flex items-center gap-2.5">
                     <Sparkles className="h-5 w-5 text-emerald-400" /> Tournament Synopsis
                   </h2>
-                  <p className="text-sm sm:text-base text-zinc-300 leading-relaxed font-normal">
-                    {tournament.description || "Compete in India's official collegiate esports league. Assemble your university squad, submit verified student credentials, and play through bracketed elimination rounds for varsity glory and direct cash rewards."}
+                  <p className="text-sm sm:text-base text-zinc-300 leading-relaxed font-normal whitespace-pre-line">
+                    {tournament.description || gameMeta.defaultDesc}
                   </p>
                 </div>
 
@@ -324,15 +423,15 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <div className="rounded-2xl border border-white/10 bg-[#09090b] p-5 space-y-1">
                     <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Match Mode</span>
-                    <p className="text-sm font-black text-white">{tournament.format || '5v5 Tactical'}</p>
+                    <p className="text-sm font-black text-white">{tournament.format || '4v4 Squad'}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-[#09090b] p-5 space-y-1">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Squad Size</span>
+                    <p className="text-sm font-black text-emerald-400">Exactly 4 Players</p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-[#09090b] p-5 space-y-1">
                     <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Slots Cap</span>
-                    <p className="text-sm font-black text-white">{tournament.teams || '64 Squads'}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-[#09090b] p-5 space-y-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Platform</span>
-                    <p className="text-sm font-black text-white">PC / Verified</p>
+                    <p className="text-sm font-black text-white">{tournament.teams || '64 Teams'}</p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-[#09090b] p-5 space-y-1">
                     <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Anti-Cheat</span>
@@ -340,49 +439,47 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
                   </div>
                 </div>
 
-                {/* Visual Prize Breakdown Summary Card */}
-                <div className="rounded-3xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 via-[#09090b] to-black p-6 space-y-4 shadow-xl">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-black uppercase text-white tracking-wider flex items-center gap-2">
-                      <Trophy className="h-4 w-4 text-amber-400" /> Prize Distribution Breakdown
-                    </h3>
-                    <span className="text-xs font-black text-amber-400">{tournament.prize} Total</span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3 text-center font-mono text-xs">
-                    <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40">
-                      <span className="block text-[9px] font-black text-amber-300 uppercase">1st Place (60%)</span>
-                      <span className="text-sm font-black text-white">Gold Champions</span>
-                    </div>
-                    <div className="p-3 rounded-2xl bg-zinc-800/40 border border-zinc-700">
-                      <span className="block text-[9px] font-black text-zinc-400 uppercase">2nd Place (25%)</span>
-                      <span className="text-sm font-black text-white">Silver Trophy</span>
-                    </div>
-                    <div className="p-3 rounded-2xl bg-amber-900/20 border border-amber-800/50">
-                      <span className="block text-[9px] font-black text-amber-600 uppercase">3rd Place (15%)</span>
-                      <span className="text-sm font-black text-white">Bronze Squad</span>
-                    </div>
+                {/* Map Pool Section */}
+                <div className="rounded-3xl border border-white/10 bg-[#09090b] p-6 sm:p-8 space-y-4 shadow-2xl">
+                  <h3 className="text-lg font-black uppercase tracking-tight text-white flex items-center gap-2">
+                    <Layers className="h-5 w-5 text-indigo-400" /> Competitive Map Pool
+                  </h3>
+                  <div className="flex flex-wrap gap-2.5 pt-2">
+                    {(tournament.map_pool
+                      ? tournament.map_pool.split(',').map((m: string) => m.trim())
+                      : gameMeta.maps
+                    ).map((mapName: string) => (
+                      <span
+                        key={mapName}
+                        className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold text-slate-200 uppercase tracking-wider"
+                      >
+                        {mapName}
+                      </span>
+                    ))}
                   </div>
                 </div>
 
-                {/* Tournament Highlights */}
-                <div className="rounded-3xl border border-white/10 bg-[#09090b] p-8 space-y-6 shadow-2xl">
-                  <h3 className="text-lg font-black uppercase tracking-tight text-white">Key League Features</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="p-4 rounded-2xl border border-white/5 bg-zinc-950 flex items-start gap-3">
-                      <ShieldCheck className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
-                      <div>
-                        <h4 className="text-xs font-bold uppercase text-white">Verified Campus Rosters</h4>
-                        <p className="text-xs text-zinc-400 mt-1">All participants must hold active university student credentials.</p>
-                      </div>
-                    </div>
+                {/* Prize Breakdown Quick Card */}
+                <div className="rounded-3xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 via-[#09090b] to-black p-6 sm:p-8 space-y-4 shadow-xl">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-black uppercase text-white tracking-wider flex items-center gap-2">
+                      <Trophy className="h-4 w-4 text-amber-400" /> Guaranteed Prize Pool Distribution
+                    </h3>
+                    <span className="text-sm font-black text-amber-400">{computedPrizes.total}</span>
+                  </div>
 
-                    <div className="p-4 rounded-2xl border border-white/5 bg-zinc-950 flex items-start gap-3">
-                      <Zap className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
-                      <div>
-                        <h4 className="text-xs font-bold uppercase text-white">Automated Match Dispatch</h4>
-                        <p className="text-xs text-zinc-400 mt-1">Server details and room codes are dispatched directly to team captains.</p>
-                      </div>
+                  <div className="grid grid-cols-3 gap-3 text-center font-mono text-xs pt-2">
+                    <div className="p-4 rounded-2xl bg-amber-500/15 border border-amber-500/40 space-y-1">
+                      <span className="block text-[10px] font-black text-amber-300 uppercase">1st Place</span>
+                      <span className="text-base font-black text-white">{computedPrizes.first}</span>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-zinc-800/40 border border-zinc-700 space-y-1">
+                      <span className="block text-[10px] font-black text-zinc-400 uppercase">2nd Place</span>
+                      <span className="text-base font-black text-white">{computedPrizes.second}</span>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-amber-900/20 border border-amber-800/50 space-y-1">
+                      <span className="block text-[10px] font-black text-amber-600 uppercase">3rd Place</span>
+                      <span className="text-base font-black text-white">{computedPrizes.third}</span>
                     </div>
                   </div>
                 </div>
@@ -394,18 +491,18 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
             {activeTab === 'prizes' && (
               <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
                 
-                <div className="rounded-3xl border border-white/10 bg-[#09090b] p-8 space-y-6 shadow-2xl">
+                <div className="rounded-3xl border border-white/10 bg-[#09090b] p-6 sm:p-8 space-y-6 shadow-2xl">
                   <div className="flex items-center justify-between">
                     <div>
                       <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Guaranteed Rewards</span>
-                      <h2 className="text-2xl font-black uppercase tracking-tight text-white mt-0.5">Prize Distribution</h2>
+                      <h2 className="text-2xl font-black uppercase tracking-tight text-white mt-0.5">Podium Distribution</h2>
                     </div>
                     <span className="px-4 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 text-xs font-black uppercase tracking-wider">
-                      Total: {tournament.prize}
+                      Total: {computedPrizes.total}
                     </span>
                   </div>
 
-                  {/* Podium Display Grid */}
+                  {/* Podium Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 items-end">
                     
                     {/* 2nd Place */}
@@ -415,8 +512,8 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
                       </div>
                       <div>
                         <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">RUNNERS UP</span>
-                        <h3 className="text-xl font-black text-white mt-1">₹45,000</h3>
-                        <p className="text-xs text-zinc-400 mt-1">+ Silver Trophy & Verified Badge</p>
+                        <h3 className="text-2xl font-black text-white mt-1">{computedPrizes.second}</h3>
+                        <p className="text-xs text-zinc-400 mt-1">+ Silver Trophy & Points</p>
                       </div>
                     </div>
 
@@ -427,8 +524,8 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
                       </div>
                       <div>
                         <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">NATIONAL CHAMPIONS</span>
-                        <h3 className="text-3xl font-black text-white mt-1">₹75,000</h3>
-                        <p className="text-xs text-amber-300/80 mt-1">+ Gold Trophy & Varsity Ring</p>
+                        <h3 className="text-3xl sm:text-4xl font-black text-white mt-1">{computedPrizes.first}</h3>
+                        <p className="text-xs text-amber-300/80 mt-1">+ Gold Trophy & Varsity Badges</p>
                       </div>
                     </div>
 
@@ -439,8 +536,8 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
                       </div>
                       <div>
                         <span className="text-[10px] font-black uppercase tracking-widest text-amber-600">3RD PLACE</span>
-                        <h3 className="text-xl font-black text-white mt-1">₹30,000</h3>
-                        <p className="text-xs text-zinc-400 mt-1">+ Bronze Medal & Points</p>
+                        <h3 className="text-2xl font-black text-white mt-1">{computedPrizes.third}</h3>
+                        <p className="text-xs text-zinc-400 mt-1">+ Bronze Medal</p>
                       </div>
                     </div>
 
@@ -450,225 +547,200 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
               </motion.div>
             )}
 
-            {/* TAB 3: SCHEDULE */}
+            {/* TAB 3: SCHEDULE & STAGES */}
             {activeTab === 'schedule' && (
-              <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
-                
-                <div className="rounded-3xl border border-white/10 bg-[#09090b] p-8 space-y-6 shadow-2xl">
-                  <h2 className="text-xl font-black uppercase tracking-tight text-white">Tournament Timeline & Phases</h2>
-                  
-                  <div className="space-y-4">
-                    <div className="flex items-start gap-4 p-5 rounded-2xl border border-white/10 bg-zinc-950">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400 font-black text-sm shrink-0 border border-emerald-500/30">
-                        01
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">PHASE ONE</span>
-                        <h3 className="text-sm font-black text-white uppercase tracking-wider">Registration & Student Credentials Verification</h3>
-                        <p className="text-xs text-zinc-400">Campus squad entries lock. All captain Discord tags and university student IDs are verified by match admins.</p>
-                      </div>
+              <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                <div className="rounded-3xl border border-white/10 bg-[#09090b] p-6 sm:p-8 space-y-6 shadow-2xl">
+                  <h3 className="text-xl font-black uppercase tracking-tight text-white flex items-center gap-2">
+                    <Clock className="h-5 w-5 text-emerald-400" /> Match Schedule & Stages
+                  </h3>
+
+                  {tournament.schedule ? (
+                    <div className="p-5 bg-black/40 rounded-2xl border border-white/10 font-mono text-xs sm:text-sm text-slate-300 leading-relaxed whitespace-pre-line">
+                      {tournament.schedule}
                     </div>
-
-                    <div className="flex items-start gap-4 p-5 rounded-2xl border border-white/10 bg-zinc-950">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/20 text-blue-400 font-black text-sm shrink-0 border border-blue-500/30">
-                        02
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-blue-400">PHASE TWO</span>
-                        <h3 className="text-sm font-black text-white uppercase tracking-wider">Swiss Bracket Qualifiers</h3>
-                        <p className="text-xs text-zinc-400">Best-of-1 Swiss qualifying rounds across regional server hubs to determine the top 8 finalists.</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-4 p-5 rounded-2xl border border-white/10 bg-zinc-950">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400 font-black text-sm shrink-0 border border-amber-500/30">
-                        03
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">PHASE THREE</span>
-                        <h3 className="text-sm font-black text-white uppercase tracking-wider">Grand Finals & Live Stream Telecast</h3>
-                        <p className="text-xs text-zinc-400">Best-of-3 Grand Finals broadcasted live on Xenova Telecaster with professional casters and trophies.</p>
-                      </div>
-                    </div>
-                  </div>
-
-                </div>
-
-              </motion.div>
-            )}
-
-            {/* TAB 4: REGISTERED VARSITY SQUADS */}
-            {activeTab === 'teams' && (
-              <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
-                
-                <div className="rounded-3xl border border-white/10 bg-[#09090b] p-8 space-y-6 shadow-2xl">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Verified Contenders</span>
-                      <h2 className="text-2xl font-black uppercase tracking-tight text-white mt-0.5">Participating Campus Squads</h2>
-                    </div>
-                    <span className="px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase tracking-wider">
-                      48 / 64 Confirmed
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                    {[
-                      { name: 'IIT BOMBAY TITANS', college: 'IIT Bombay', captain: 'Shadow#IND', verified: true },
-                      { name: 'BITS PILANI VIPERS', college: 'BITS Pilani', captain: 'ViperX#444', verified: true },
-                      { name: 'DU ESPORTS HUB', college: 'Delhi University', captain: 'ApexLegend#999', verified: true },
-                      { name: 'ANNA UNIV STRIKERS', college: 'Anna University', captain: 'Kaizen#777', verified: true },
-                    ].map((squad) => (
-                      <div key={squad.name} className="p-5 rounded-2xl border border-white/10 bg-zinc-950 flex items-center justify-between">
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-black text-white uppercase tracking-wider">{squad.name}</h4>
-                          <p className="text-xs text-zinc-400">{squad.college} • Capt: <span className="text-emerald-400">{squad.captain}</span></p>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-start gap-4">
+                        <div className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black shrink-0">
+                          STAGE 1
                         </div>
-                        <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                        <div>
+                          <h4 className="text-sm font-bold text-white uppercase">Squad Check-in & Roster Lock</h4>
+                          <p className="text-xs text-slate-400 mt-1">Captains confirm attendance with all 4 student ID credentials.</p>
+                        </div>
                       </div>
-                    ))}
-                  </div>
 
+                      <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-start gap-4">
+                        <div className="px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-black shrink-0">
+                          STAGE 2
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-white uppercase">Group Stage & Eliminators</h4>
+                          <p className="text-xs text-slate-400 mt-1">Bracketed matches across {tournament.format || 'Double Elimination'}.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-start gap-4">
+                        <div className="px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-black shrink-0">
+                          FINALS
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-white uppercase">Grand Finals Championship</h4>
+                          <p className="text-xs text-slate-400 mt-1">Live broadcast finals with trophy and prize ceremony.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-
               </motion.div>
             )}
 
-            {/* TAB 5: RULES & ANTI-CHEAT */}
-            {activeTab === 'rules' && (
-              <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
-                
-                <div className="rounded-3xl border border-white/10 bg-[#09090b] p-8 space-y-6 shadow-2xl">
-                  <h2 className="text-2xl font-black uppercase tracking-tight text-white">Rulebook & Fair Play Enforcement</h2>
-                  
-                  <div className="space-y-4 text-xs sm:text-sm text-zinc-300 leading-relaxed font-normal">
-                    <div className="p-4 rounded-2xl border border-white/5 bg-zinc-950">
-                      <h4 className="font-bold text-white uppercase tracking-wider mb-1">1. Student ID & Campus Eligibility</h4>
-                      <p className="text-zinc-400">All 5 active players on the roster must be currently enrolled full-time students at a recognized university.</p>
-                    </div>
-
-                    <div className="p-4 rounded-2xl border border-white/5 bg-zinc-950">
-                      <h4 className="font-bold text-white uppercase tracking-wider mb-1">2. Anti-Cheat & Client Integrity</h4>
-                      <p className="text-zinc-400">Xenova Anti-Cheat client monitoring is mandatory during all match sessions. Third-party software or exploits result in immediate team disqualification.</p>
-                    </div>
-
-                    <div className="p-4 rounded-2xl border border-white/5 bg-zinc-950">
-                      <h4 className="font-bold text-white uppercase tracking-wider mb-1">3. Check-In & Punctuality</h4>
-                      <p className="text-zinc-400">Teams must check in 20 minutes prior to scheduled match time on the official Xenova Discord server.</p>
-                    </div>
+            {/* TAB 4: REGISTERED TEAMS */}
+            {activeTab === 'teams' && (
+              <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                <div className="rounded-3xl border border-white/10 bg-[#09090b] p-6 sm:p-8 space-y-6 shadow-2xl">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xl font-black uppercase tracking-tight text-white flex items-center gap-2">
+                      <Users className="h-5 w-5 text-indigo-400" /> Registered Varsity Squads ({registeredTeamsList.length})
+                    </h3>
                   </div>
 
+                  {registeredTeamsList.length === 0 ? (
+                    <div className="py-12 text-center text-slate-500 text-xs font-medium space-y-2">
+                      <Users className="h-8 w-8 mx-auto text-slate-600" />
+                      <p>Be the first squad to register for this tournament!</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {registeredTeamsList.map((reg, idx) => (
+                        <div
+                          key={reg.pass_id || idx}
+                          className="p-4 rounded-2xl bg-black/40 border border-white/10 space-y-2"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-black text-white uppercase">{reg.team_name || reg.teamName}</span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 text-slate-400">
+                              {reg.pass_id || reg.passId}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400">
+                            Captain: <strong className="text-slate-200">{reg.captain_name || reg.captainName}</strong>
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            College: {reg.college || 'Collegiate Campus'}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
+              </motion.div>
+            )}
 
+            {/* TAB 5: RULES & GUIDELINES */}
+            {activeTab === 'rules' && (
+              <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                <div className="rounded-3xl border border-white/10 bg-[#09090b] p-6 sm:p-8 space-y-6 shadow-2xl">
+                  <h3 className="text-xl font-black uppercase tracking-tight text-white flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-rose-400" /> Rules & Tournament Regulations
+                  </h3>
+
+                  {tournament.rules ? (
+                    <div className="p-5 bg-black/40 rounded-2xl border border-white/10 font-mono text-xs sm:text-sm text-slate-300 leading-relaxed whitespace-pre-line">
+                      {tournament.rules}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {gameMeta.defaultRules.map((rule, idx) => (
+                        <div key={idx} className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-start gap-3">
+                          <span className="h-6 w-6 rounded-full bg-rose-500/15 text-rose-400 text-xs font-black flex items-center justify-center shrink-0">
+                            {idx + 1}
+                          </span>
+                          <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-medium">{rule}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </motion.div>
             )}
 
           </div>
 
-          {/* RIGHT COLUMN - STICKY TICKET & REGISTRATION PASS CARD (4 COLS) */}
-          <div className="lg:col-span-4 sticky top-24 z-20">
-            <div className="rounded-3xl border border-white/15 bg-[#09090b] p-6 sm:p-8 backdrop-blur-2xl shadow-2xl space-y-6">
+          {/* RIGHT COLUMN - STICKY 4-PLAYER SQUAD REGISTRATION CTA (4 COLS) */}
+          <div className="lg:col-span-4 sticky top-28 space-y-6">
+            
+            <div className="rounded-3xl border-2 border-emerald-500/40 bg-gradient-to-b from-[#0C111D] via-[#09090b] to-black p-6 sm:p-8 space-y-6 shadow-2xl shadow-emerald-500/10">
               
-              {/* Header */}
-              <div className="border-b border-white/10 pb-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider">
-                    <CheckCircle2 className="h-3 w-3" /> OFFICIAL ENTRY PASS
-                  </span>
-                  <span className="text-xs font-black text-amber-400 uppercase tracking-wider">{tournament.prize}</span>
-                </div>
-                <h3 className="text-xl font-black text-white uppercase tracking-tight">{tournament.title || tournament.name}</h3>
-                <p className="text-xs text-zinc-400">Free registration pass for verified university players.</p>
+              <div className="space-y-1">
+                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Squad Entry Desk</span>
+                <h3 className="text-2xl font-black text-white uppercase tracking-tight">4-Player Squad Registration</h3>
+                <p className="text-xs text-slate-400">
+                  Entry Fee: <strong className="text-white">{tournament.fee || 'Free'}</strong>
+                </p>
               </div>
 
-              {/* Progress & Slots Fill */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs font-bold">
-                  <span className="text-zinc-400 uppercase tracking-wider">Slot Reservations</span>
-                  <span className="text-emerald-400">48 / 64 Teams Filled</span>
-                </div>
-                <div className="h-2 w-full rounded-full bg-zinc-950 overflow-hidden border border-white/10">
-                  <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 w-[75%] rounded-full" />
-                </div>
-              </div>
-
-              {/* Form or Ticket Confirmation */}
-              <div>
-                {alreadyRegistered ? (
-                  <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 space-y-3 text-center">
-                    <CheckCircle2 className="h-10 w-10 text-emerald-400 mx-auto" />
-                    <h4 className="text-sm font-black text-white uppercase tracking-wider">Pass Issued & Locked</h4>
-                    <p className="text-xs text-zinc-300">Your varsity squad is officially registered. Check your Xenova dashboard for match lobby codes.</p>
+              {alreadyRegistered ? (
+                <div className="p-5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 text-center space-y-4">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="h-6 w-6" />
                   </div>
-                ) : registered ? (
-                  <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-6 space-y-3 text-center">
-                    <CheckCircle2 className="h-10 w-10 text-emerald-400 mx-auto" />
-                    <h4 className="text-sm font-black text-white uppercase tracking-wider">Registration Confirmed!</h4>
-                    <p className="text-xs text-zinc-300">Entry pass generated for squad <strong className="text-white">{formValues.teamName}</strong>.</p>
+                  <div>
+                    <h4 className="text-sm font-black text-white uppercase">Squad Registered!</h4>
+                    <p className="text-xs text-slate-400 mt-1">Your 4-player team has been verified for this event.</p>
                   </div>
-                ) : (
-                  <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="space-y-3">
-                      <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                        Team Name
-                        <input
-                          value={formValues.teamName}
-                          onChange={(e) => setFormValues({ ...formValues, teamName: e.target.value })}
-                          placeholder="e.g. TITANS ESPORTS"
-                          required
-                          className="mt-1 w-full rounded-xl border border-white/10 bg-zinc-950 px-3.5 py-3 text-xs text-white outline-none focus:border-emerald-500 transition"
-                        />
-                      </label>
 
-                      <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                        Captain Handle / Name
-                        <input
-                          value={formValues.captainName}
-                          onChange={(e) => setFormValues({ ...formValues, captainName: e.target.value })}
-                          placeholder="Captain name"
-                          required
-                          className="mt-1 w-full rounded-xl border border-white/10 bg-zinc-950 px-3.5 py-3 text-xs text-white outline-none focus:border-emerald-500 transition"
-                        />
-                      </label>
-
-                      <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                        University Email
-                        <input
-                          type="email"
-                          value={formValues.email}
-                          onChange={(e) => setFormValues({ ...formValues, email: e.target.value })}
-                          placeholder="captain@university.edu"
-                          required
-                          className="mt-1 w-full rounded-xl border border-white/10 bg-zinc-950 px-3.5 py-3 text-xs text-white outline-none focus:border-emerald-500 transition"
-                        />
-                      </label>
+                  <Link
+                    href={`/registration/${tournament.slug}/pass?passId=${userPassId || ''}`}
+                    className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer"
+                  >
+                    <Ticket className="h-4 w-4" />
+                    View 4-Player Entry Pass
+                  </Link>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 space-y-2 text-xs text-slate-300">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Team Structure</span>
+                      <span className="font-bold text-emerald-400">Exactly 4 Players</span>
                     </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Emails Required</span>
+                      <span className="font-bold text-white">All 4 Members</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Pass Type</span>
+                      <span className="font-bold text-white">Digital QR Ticket</span>
+                    </div>
+                  </div>
 
-                    {errorMsg && (
-                      <p className="text-xs text-rose-400 font-bold bg-rose-500/10 p-3 rounded-xl border border-rose-500/20">{errorMsg}</p>
-                    )}
+                  <Link
+                    href={`/registration/${tournament.slug}`}
+                    className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-sm uppercase tracking-wider rounded-2xl transition shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    Register 4-Player Squad
+                    <ChevronRight className="h-4 w-4" />
+                  </Link>
+                </div>
+              )}
 
-                    <button
-                      type="submit"
-                      className="w-full rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 py-4 text-xs font-black uppercase tracking-wider shadow-xl shadow-emerald-500/30 hover:scale-[1.02] transition cursor-pointer"
-                    >
-                      Book Free Entry Pass
-                    </button>
-                  </form>
+              {/* Host Support Info */}
+              <div className="pt-4 border-t border-white/10 text-center text-xs text-slate-500 space-y-1">
+                <p>Tournament Organized by <span className="text-slate-300 font-bold">{tournament.host || 'Xenova Arena'}</span></p>
+                {tournament.contact_email && (
+                  <p className="text-emerald-400 font-mono text-[11px]">{tournament.contact_email}</p>
                 )}
               </div>
 
-              <div className="pt-2 text-center">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">🔒 Anti-Cheat & Student Verification System Active</span>
-              </div>
-
             </div>
+
           </div>
 
         </div>
       </div>
 
-      <FinalCTA />
     </main>
   );
 }

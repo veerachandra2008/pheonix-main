@@ -364,16 +364,23 @@ export default function TournamentManagePage() {
               </div>
 
               <Link
+                href={`/organizer/tournament/${rawId}/edit`}
+                className="inline-flex items-center gap-1.5 px-4 py-3 bg-indigo-600 hover:bg-indigo-500 transition text-xs font-black uppercase tracking-wider text-white rounded-xl shadow-lg shadow-indigo-600/20 cursor-pointer"
+              >
+                Edit Rules & Details
+              </Link>
+
+              <Link
                 href={`/organizer/tournament/${rawId}/attendance`}
-                className="inline-flex items-center gap-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 transition text-xs font-black uppercase tracking-wider text-white rounded-xl shadow-lg shadow-emerald-600/20 cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 transition text-xs font-black uppercase tracking-wider text-white rounded-xl shadow-lg shadow-emerald-600/20 cursor-pointer"
               >
                 <ShieldCheck className="h-4 w-4" />
-                Event Attendance Desk
+                Attendance Desk
               </Link>
 
               <button
                 onClick={handleExportCSV}
-                className="inline-flex items-center gap-2 px-3.5 py-3 bg-white/10 hover:bg-white/15 transition text-xs font-bold uppercase tracking-wider text-white rounded-xl cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-3 bg-white/10 hover:bg-white/15 transition text-xs font-bold uppercase tracking-wider text-white rounded-xl cursor-pointer"
               >
                 <Download className="h-4 w-4" />
                 Export
@@ -467,6 +474,34 @@ export default function TournamentManagePage() {
                             {registeredAt}
                           </span>
                         </div>
+
+                        {/* 4-Player Roster Summary */}
+                        {reg.players && Array.isArray(reg.players) && reg.players.length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2 pt-2">
+                            {reg.players.map((p: any) => (
+                              <div
+                                key={p.slot}
+                                className={`px-2.5 py-1.5 rounded-xl border text-[11px] flex flex-col justify-center ${
+                                  p.slot === 1
+                                    ? 'bg-amber-500/10 border-amber-500/30'
+                                    : 'bg-black/40 border-white/10'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="font-bold text-white flex items-center gap-1">
+                                    {p.slot === 1 ? '👑' : `P${p.slot}`}: {p.name}
+                                  </span>
+                                  <span className="text-[9px] font-mono text-indigo-300 font-bold px-1.5 py-0.2 bg-white/5 rounded">
+                                    {p.inGameTag || p.in_game_tag || 'IGN'}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 truncate pt-0.5" title={p.email}>
+                                  {p.email}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
 
