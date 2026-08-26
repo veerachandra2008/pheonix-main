@@ -31,6 +31,7 @@ import {
 import { getUserRegistrations, TournamentRegistrationRecord } from '@/lib/tournaments-db';
 import FinalCTA from '@/components/xenova/FinalCTA';
 import { supabase } from '@/lib/supabase';
+import { getApiBaseUrl } from '@/lib/api-config';
 
 type Player = {
   id?: string | number;
@@ -92,10 +93,7 @@ export default function PlayerProfilePage() {
     }
 
     const loadProfile = async () => {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+      const apiBase = getApiBaseUrl();
 
       const targetIdentifier = isSelf && sessionUser?.email ? sessionUser.email : rawId;
 

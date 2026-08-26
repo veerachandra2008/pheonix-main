@@ -31,6 +31,8 @@ import {
 } from 'lucide-react';
 import { slugify, type XenovaCollege } from '@/lib/xenova-data';
 import FinalCTA from '@/components/xenova/FinalCTA';
+import { getApiBaseUrl } from '@/lib/api-config';
+import { supabase } from '@/lib/supabase';
 
 const stateFilters = ['All States', 'Karnataka', 'Maharashtra', 'Delhi', 'Tamil Nadu', 'Telangana'];
 const typeFilters = ['All Types', 'Engineering', 'Design', 'Commerce', 'Sports', 'University'];
@@ -79,24 +81,48 @@ export default function CollegesPage() {
 
     const loadColleges = async () => {
       try {
-        const apiBase =
-          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-            ? '/api'
-            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+        let loadedList: any[] = [];
 
-        const res = await fetch(`${apiBase}/colleges/`);
-        const data = await res.json();
-        if (data.success && Array.isArray(data.data)) {
-          const mapped = data.data.map((c: any) => ({
-            ...c,
-            slug: c.slug || slugify(c.name),
-            nationalRank: c.national_rank || c.nationalRank || 99,
-            stateRank: c.state_rank || c.stateRank || 99,
-            teams: c.teams ?? c.teams_count ?? 0,
-            teamsCount: c.teams_count ?? c.teams ?? 0,
-            verificationStatus: c.verification_status || c.verificationStatus || (c.verified ? 'approved' : 'pending'),
-          }));
-          setCustomColleges(mapped);
+        // 1. Direct Supabase Query
+        try {
+          const { data: sbColleges } = await supabase.from('colleges').select('*');
+          if (sbColleges && Array.isArray(sbColleges) && sbColleges.length > 0) {
+            loadedList = sbColleges.map((c: any) => ({
+              ...c,
+              slug: c.slug || slugify(c.name),
+              nationalRank: c.national_rank || c.nationalRank || 99,
+              stateRank: c.state_rank || c.stateRank || 99,
+              teams: c.teams ?? c.teams_count ?? 0,
+              teamsCount: c.teams_count ?? c.teams ?? 0,
+              verificationStatus: c.verification_status || c.verificationStatus || (c.verified ? 'approved' : 'pending'),
+            }));
+            setCustomColleges(loadedList);
+          }
+        } catch (sbErr) {
+          console.warn('Supabase colleges notice:', sbErr);
+        }
+
+        // 2. Backend API Query
+        try {
+          const apiBase = getApiBaseUrl();
+          const res = await fetch(`${apiBase}/colleges/`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+              const mapped = data.data.map((c: any) => ({
+                ...c,
+                slug: c.slug || slugify(c.name),
+                nationalRank: c.national_rank || c.nationalRank || 99,
+                stateRank: c.state_rank || c.stateRank || 99,
+                teams: c.teams ?? c.teams_count ?? 0,
+                teamsCount: c.teams_count ?? c.teams ?? 0,
+                verificationStatus: c.verification_status || c.verificationStatus || (c.verified ? 'approved' : 'pending'),
+              }));
+              setCustomColleges(mapped);
+            }
+          }
+        } catch (apiErr) {
+          console.warn('Backend colleges fetch notice:', apiErr);
         }
       } catch (err) {
         console.error('Failed to load colleges from backend:', err);
@@ -186,22 +212,27 @@ export default function CollegesPage() {
     };
 
     try {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+      // 1. Direct Supabase Insert
+      try {
+        await supabase.from('colleges').insert(pendingCollege);
+      } catch (sbErr) {
+        console.warn('Supabase college insert notice:', sbErr);
+      }
 
-      await fetch(`${apiBase}/colleges/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(pendingCollege),
-      });
+      // 2. Backend API Insert
+      try {
+        const apiBase = getApiBaseUrl();
+        await fetch(`${apiBase}/colleges/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pendingCollege),
+        });
+      } catch {}
 
-      // Reload fresh list from backend database
-      const res = await fetch(`${apiBase}/colleges/`);
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) {
-        setCustomColleges(data.data.map((c: any) => ({
+      // Reload fresh list from database
+      const { data: refreshed } = await supabase.from('colleges').select('*');
+      if (refreshed && Array.isArray(refreshed) && refreshed.length > 0) {
+        setCustomColleges(refreshed.map((c: any) => ({
           ...c,
           slug: c.slug || slugify(c.name),
           nationalRank: c.national_rank || c.nationalRank || 99,

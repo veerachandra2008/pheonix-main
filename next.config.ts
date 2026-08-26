@@ -52,7 +52,9 @@ const nextConfig: NextConfig = {
     ];
   },
   async rewrites() {
-    const backendUrl = process.env.NEXT_PUBLIC_FLASK_API_URL || 'http://127.0.0.1:5000';
+    const isProd = process.env.NODE_ENV === 'production';
+    const defaultBackend = isProd ? 'https://pheonix-main.onrender.com/api' : 'http://127.0.0.1:5000/api';
+    const backendUrl = process.env.NEXT_PUBLIC_FLASK_API_URL || defaultBackend;
     const targetUrl = backendUrl.endsWith('/api') ? backendUrl : `${backendUrl}/api`;
     return [
       {

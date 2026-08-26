@@ -29,6 +29,8 @@ import {
 } from 'lucide-react';
 import { defaultColleges, getCustomColleges, getCustomTeams, defaultTeams, slugify, type XenovaCollege, type XenovaTeam } from '@/lib/xenova-data';
 import FinalCTA from '@/components/xenova/FinalCTA';
+import { getApiBaseUrl } from '@/lib/api-config';
+import { supabase } from '@/lib/supabase';
 
 const fallbackTeams = [
   { name: 'Team Titans', college: 'Nexus Institute of Technology', game: 'Valorant', winRate: 86, rank: 2, accent: '#6366f1' },
@@ -54,39 +56,73 @@ export default function CollegeProfilePage({ params }: Props) {
   useEffect(() => {
     const loadBackendData = async () => {
       try {
-        const apiBase =
-          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-            ? '/api'
-            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+        // 1. Direct Supabase Query
+        try {
+          const [sbColRes, sbTeamRes] = await Promise.all([
+            supabase.from('colleges').select('*'),
+            supabase.from('teams').select('*'),
+          ]);
 
-        const [colRes, teamRes] = await Promise.all([
-          fetch(`${apiBase}/colleges/`),
-          fetch(`${apiBase}/teams/`)
-        ]);
-        const colData = await colRes.json();
-        const teamData = await teamRes.json();
+          if (sbColRes.data && Array.isArray(sbColRes.data) && sbColRes.data.length > 0) {
+            setCustomColleges(sbColRes.data.map((c: any) => ({
+              ...c,
+              slug: c.slug || slugify(c.name),
+              nationalRank: c.national_rank || c.nationalRank || 99,
+              stateRank: c.state_rank || c.stateRank || 99,
+              teams: c.teams ?? c.teams_count ?? 0,
+              teamsCount: c.teams_count ?? c.teams ?? 0,
+              verificationStatus: c.verification_status || c.verificationStatus || (c.verified ? 'approved' : 'pending'),
+            })));
+          }
 
-        if (colData.success && Array.isArray(colData.data)) {
-          setCustomColleges(colData.data.map((c: any) => ({
-            ...c,
-            slug: c.slug || slugify(c.name),
-            nationalRank: c.national_rank || c.nationalRank || 99,
-            stateRank: c.state_rank || c.stateRank || 99,
-            teams: c.teams ?? c.teams_count ?? 0,
-            teamsCount: c.teams_count ?? c.teams ?? 0,
-            verificationStatus: c.verification_status || c.verificationStatus || (c.verified ? 'approved' : 'pending'),
-          })));
+          if (sbTeamRes.data && Array.isArray(sbTeamRes.data) && sbTeamRes.data.length > 0) {
+            setCustomTeams(sbTeamRes.data.map((t: any) => ({
+              ...t,
+              slug: t.slug || slugify(t.name),
+              winRate: t.win_rate || t.winRate || 50,
+              recentWins: t.recent_wins || t.recentWins || 0,
+              activeScore: t.active_score || t.activeScore || 75,
+              verificationStatus: t.verification_status || t.verificationStatus || (t.verified ? 'approved' : 'pending'),
+            })));
+          }
+        } catch (sbErr) {
+          console.warn('Supabase college details notice:', sbErr);
         }
 
-        if (teamData.success && Array.isArray(teamData.data)) {
-          setCustomTeams(teamData.data.map((t: any) => ({
-            ...t,
-            slug: t.slug || slugify(t.name),
-            winRate: t.win_rate || t.winRate || 50,
-            recentWins: t.recent_wins || t.recentWins || 0,
-            activeScore: t.active_score || t.activeScore || 75,
-            verificationStatus: t.verification_status || t.verificationStatus || (t.verified ? 'approved' : 'pending'),
-          })));
+        // 2. Backend API Query
+        try {
+          const apiBase = getApiBaseUrl();
+          const [colRes, teamRes] = await Promise.all([
+            fetch(`${apiBase}/colleges/`),
+            fetch(`${apiBase}/teams/`)
+          ]);
+          const colData = await colRes.json();
+          const teamData = await teamRes.json();
+
+          if (colData.success && Array.isArray(colData.data) && colData.data.length > 0) {
+            setCustomColleges(colData.data.map((c: any) => ({
+              ...c,
+              slug: c.slug || slugify(c.name),
+              nationalRank: c.national_rank || c.nationalRank || 99,
+              stateRank: c.state_rank || c.stateRank || 99,
+              teams: c.teams ?? c.teams_count ?? 0,
+              teamsCount: c.teams_count ?? c.teams ?? 0,
+              verificationStatus: c.verification_status || c.verificationStatus || (c.verified ? 'approved' : 'pending'),
+            })));
+          }
+
+          if (teamData.success && Array.isArray(teamData.data) && teamData.data.length > 0) {
+            setCustomTeams(teamData.data.map((t: any) => ({
+              ...t,
+              slug: t.slug || slugify(t.name),
+              winRate: t.win_rate || t.winRate || 50,
+              recentWins: t.recent_wins || t.recentWins || 0,
+              activeScore: t.active_score || t.activeScore || 75,
+              verificationStatus: t.verification_status || t.verificationStatus || (t.verified ? 'approved' : 'pending'),
+            })));
+          }
+        } catch (apiErr) {
+          console.warn('Backend college details notice:', apiErr);
         }
       } catch (err) {
         console.error('Failed to load college from backend:', err);

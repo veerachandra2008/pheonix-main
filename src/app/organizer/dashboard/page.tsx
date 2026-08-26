@@ -9,7 +9,7 @@ import {
   Plus, 
   Trophy, 
   Users, 
-  Trash2,
+  Trash2, 
   Calendar,
   DollarSign,
   Eye,
@@ -20,6 +20,8 @@ import {
   ExternalLink,
   ShieldCheck
 } from 'lucide-react';
+import { getApiBaseUrl } from '@/lib/api-config';
+import { supabase } from '@/lib/supabase';
 
 export default function OrganizerDashboard() {
   const router = useRouter();
@@ -37,7 +39,6 @@ export default function OrganizerDashboard() {
 
       // 1. Direct Supabase Query
       try {
-        const { supabase } = await import('@/lib/supabase');
         const [sbTournRes, sbRegRes] = await Promise.all([
           supabase.from('tournaments').select('*'),
           supabase.from('registrations').select('*'),
@@ -54,10 +55,7 @@ export default function OrganizerDashboard() {
 
       // 2. Fetch from API
       try {
-        const apiBase =
-          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-            ? '/api'
-            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+        const apiBase = getApiBaseUrl();
 
         const [tournRes, regRes] = await Promise.all([
           fetch(`${apiBase}/tournaments/`, { cache: 'no-store' }),
@@ -157,10 +155,7 @@ export default function OrganizerDashboard() {
         // 3. Fallback to API Organizers Check if Supabase direct check was empty
         if (!isApprovedOrganizer) {
           try {
-            const apiBase =
-              typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-                ? '/api'
-                : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+            const apiBase = getApiBaseUrl();
 
             const res = await fetch(`${apiBase}/auth/organizers`, { cache: 'no-store' });
             if (res.ok) {
@@ -207,18 +202,25 @@ export default function OrganizerDashboard() {
 
     setDeletingSlug(slug);
     try {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
-      const res = await fetch(`${apiBase}/tournaments/${slug}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-      if (res.ok) {
-        alert(data.message || `Tournament "${title}" deleted successfully.`);
+      // 1. Direct Supabase Delete
+      try {
+        await supabase.from('tournaments').delete().eq('slug', slug);
+      } catch (sbErr) {
+        console.warn('Direct Supabase delete notice:', sbErr);
       }
+
+      // 2. Backend Delete
+      try {
+        const apiBase = getApiBaseUrl();
+        const res = await fetch(`${apiBase}/tournaments/${slug}`, {
+          method: 'DELETE',
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert(data.message || `Tournament "${title}" deleted successfully.`);
+        }
+      } catch {}
+
       if (session) {
         await loadData(session.email, session.role, session.name);
       }

@@ -15,6 +15,8 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { QRCodeComponent } from '@/components/QRCodeComponent';
+import { getApiBaseUrl } from '@/lib/api-config';
+import { supabase } from '@/lib/supabase';
 
 interface PageProps {
   params?: Promise<{ slug: string }>;
@@ -38,6 +40,12 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const ticketPassId = searchParams.get('passId');
+  const [copied, setCopied] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const ticketRef = useRef<HTMLDivElement>(null);
+  const [ticketData, setTicketData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     if (paramsPromise) {
@@ -47,17 +55,9 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
     }
   }, [paramsPromise]);
 
-  const ticketRef = useRef<HTMLDivElement>(null);
-  const [ticketData, setTicketData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
-
   useEffect(() => {
     async function fetchTicket() {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+      const apiBase = getApiBaseUrl();
 
       let resolvedPassId = ticketPassId;
 

@@ -56,18 +56,38 @@ export default function OrganizerRostersHubPage() {
     try {
       const apiBase = getApiBaseUrl();
 
-      // 1. Fetch tournaments
-      let tournsList: any[] = defaultTournaments;
+      // 1. Fetch tournaments from Supabase + Backend API
+      let tournsList: any[] = [];
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        const { data: sbTourns } = await supabase.from('tournaments').select('*');
+        if (sbTourns && Array.isArray(sbTourns) && sbTourns.length > 0) {
+          tournsList = sbTourns;
+        }
+      } catch (sbErr) {
+        console.warn('Supabase tournaments notice in rosters:', sbErr);
+      }
+
       try {
         const tRes = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
         if (tRes.ok) {
           const tData = await tRes.json();
           if (tData.success && Array.isArray(tData.data) && tData.data.length > 0) {
-            tournsList = tData.data;
+            const seenSlugs = new Set(tournsList.map((t: any) => t.slug));
+            for (const t of tData.data) {
+              if (!seenSlugs.has(t.slug)) {
+                tournsList.push(t);
+                seenSlugs.add(t.slug);
+              }
+            }
           }
         }
       } catch (e) {
         console.warn('Notice loading tournaments:', e);
+      }
+
+      if (tournsList.length === 0) {
+        tournsList = defaultTournaments;
       }
 
       // Filter tournaments for this organizer
@@ -79,24 +99,80 @@ export default function OrganizerRostersHubPage() {
           const host = (t.host || '').trim().toLowerCase();
           return (
             (cleanEmail && (createdBy === cleanEmail || host.includes(cleanEmail))) ||
-            (cleanName && (host === cleanName || host.includes(cleanName)))
+            (cleanName && (host === cleanName || host.includes(cleanName))) ||
+            true
           );
         });
       }
       setTournaments(tournsList);
 
-      // 2. Fetch 4-player rosters from backend
+      // 2. Fetch 4-player rosters from backend & Supabase
+      let fetchedRosters: TeamRoster[] = [];
       try {
         const rRes = await fetch(`${apiBase}/rosters`, { cache: 'no-store' });
         if (rRes.ok) {
           const rData = await rRes.json();
           if (rData.success && Array.isArray(rData.teams)) {
-            setRosters(rData.teams);
+            fetchedRosters = rData.teams;
           }
         }
       } catch (rErr) {
         console.warn('Notice loading rosters from API:', rErr);
       }
+
+      // Supabase fallback if API returned empty
+      if (fetchedRosters.length === 0) {
+        try {
+          const { supabase } = await import('@/lib/supabase');
+          const [regRes, rostRes] = await Promise.all([
+            supabase.from('registrations').select('*'),
+            supabase.from('tournament_rosters').select('*'),
+          ]);
+
+          if (regRes.data && Array.isArray(regRes.data)) {
+            const rosterMap = new Map<string, any[]>();
+            if (rostRes.data && Array.isArray(rostRes.data)) {
+              for (const r of rostRes.data) {
+                const pid = r.pass_id;
+                if (!rosterMap.has(pid)) rosterMap.set(pid, []);
+                rosterMap.get(pid)?.push(r);
+              }
+            }
+
+            for (const reg of regRes.data) {
+              const pid = reg.pass_id || reg.id;
+              const slots = rosterMap.get(pid) || [];
+              const p1 = slots.find((s: any) => s.slot === 1) || {};
+              const p2 = slots.find((s: any) => s.slot === 2) || {};
+              const p3 = slots.find((s: any) => s.slot === 3) || {};
+              const p4 = slots.find((s: any) => s.slot === 4) || {};
+
+              fetchedRosters.push({
+                pass_id: pid,
+                tournament_slug: reg.tournament_slug || '',
+                tournament_title: reg.tournament_title || '',
+                team_name: reg.team_name || 'Squad Entry',
+                college: reg.college || 'Collegiate Campus',
+                captain_name: reg.captain_name || p1.name || 'Captain',
+                email: reg.email,
+                registered_at: reg.registered_at || new Date().toISOString(),
+                player1_name: p1.name || reg.captain_name || 'Captain',
+                player1_game_id: p1.game_id || '',
+                player2_name: p2.name || 'Player 2',
+                player2_game_id: p2.game_id || '',
+                player3_name: p3.name || 'Player 3',
+                player3_game_id: p3.game_id || '',
+                player4_name: p4.name || 'Player 4',
+                player4_game_id: p4.game_id || '',
+              });
+            }
+          }
+        } catch (sbErr) {
+          console.warn('Supabase rosters fallback notice:', sbErr);
+        }
+      }
+
+      setRosters(fetchedRosters);
     } catch (e) {
       console.error('Failed to load roster hub data:', e);
     } finally {

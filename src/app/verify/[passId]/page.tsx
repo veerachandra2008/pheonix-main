@@ -23,19 +23,30 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
+import { getApiBaseUrl } from '@/lib/api-config';
+import { supabase } from '@/lib/supabase';
 
 interface PageProps {
   params?: Promise<{ passId: string }>;
 }
 
-export default function VerifyPassPage({ params }: PageProps) {
-  const routeParams = useParams();
-  const passId = (routeParams?.passId as string) || '';
+export default function VerifyPassPage(props: PageProps) {
+  const urlParams = useParams();
+  const [passId, setPassId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [result, setResult] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [checkingIn, setCheckingIn] = useState(false);
   const [checkInMsg, setCheckInMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchParams = async () => {
+      const p = await props.params;
+      const id = (p?.passId || urlParams?.passId) as string;
+      setPassId(id || '');
+    };
+    fetchParams();
+  }, [props.params, urlParams]);
 
   const verifyTicket = async () => {
     if (!passId) {
@@ -45,25 +56,23 @@ export default function VerifyPassPage({ params }: PageProps) {
 
     setLoading(true);
     try {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+      const apiBase = getApiBaseUrl();
 
       // 1. Check Flask API verification
-      const res = await fetch(`${apiBase}/registrations/verify/${encodeURIComponent(passId)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.valid) {
-          setResult(data);
-          setLoading(false);
-          return;
+      try {
+        const res = await fetch(`${apiBase}/registrations/verify/${encodeURIComponent(passId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.valid) {
+            setResult(data);
+            setLoading(false);
+            return;
+          }
         }
-      }
+      } catch {}
 
       // 2. Direct Supabase Fallback
       try {
-        const { supabase } = await import('@/lib/supabase');
         const [regRes, attRes] = await Promise.all([
           supabase.from('registrations').select('*').eq('pass_id', passId).maybeSingle(),
           supabase.from('event_attendance').select('*').eq('pass_id', passId).maybeSingle(),

@@ -29,27 +29,41 @@ class Config:
 
     @property
     def SUPABASE_URL(self):
-        return os.getenv('SUPABASE_URL', '').strip()
+        return (os.getenv('SUPABASE_URL') or os.getenv('NEXT_PUBLIC_SUPABASE_URL') or 'https://icgqikmzhtynpatntglw.supabase.co').strip()
 
     @property
     def SUPABASE_KEY(self):
-        return (os.getenv('SUPABASE_SERVICE_ROLE_KEY') or os.getenv('SUPABASE_KEY') or os.getenv('SUPABASE_ANON_KEY') or '').strip()
+        return (
+            os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+            or os.getenv('SUPABASE_KEY')
+            or os.getenv('SUPABASE_ANON_KEY')
+            or os.getenv('NEXT_PUBLIC_SUPABASE_ANON_KEY')
+            or 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImljZ3Fpa216aHR5bnBhdG50Z2x3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NjE3MTA2MSwiZXhwIjoyMTAxNzQ3MDYxfQ._D0eCpjbdsr7GlZhy2cFgwZqX5oWp1bVAi-5MmEQd9w'
+        ).strip()
 
     @property
     def SUPABASE_SERVICE_ROLE_KEY(self):
-        return (os.getenv('SUPABASE_SERVICE_ROLE_KEY') or os.getenv('SUPABASE_KEY') or '').strip()
+        return (
+            os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+            or os.getenv('SUPABASE_KEY')
+            or 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImljZ3Fpa216aHR5bnBhdG50Z2x3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NjE3MTA2MSwiZXhwIjoyMTAxNzQ3MDYxfQ._D0eCpjbdsr7GlZhy2cFgwZqX5oWp1bVAi-5MmEQd9w'
+        ).strip()
 
     @property
     def SUPABASE_ANON_KEY(self):
-        return (os.getenv('SUPABASE_ANON_KEY') or os.getenv('SUPABASE_KEY') or '').strip()
+        return (
+            os.getenv('SUPABASE_ANON_KEY')
+            or os.getenv('NEXT_PUBLIC_SUPABASE_ANON_KEY')
+            or 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImljZ3Fpa216aHR5bnBhdG50Z2x3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNzEwNjEsImV4cCI6MjEwMTc0NzA2MX0.pRIjjUIrPt2n7XMJ5RjCSKxjZeyUcZEKoN8Vgvkt0GY'
+        ).strip()
 
     @property
     def RAZORPAY_KEY_ID(self):
-        return os.getenv('RAZORPAY_KEY_ID', '').strip().strip('"\'')
+        return os.getenv('RAZORPAY_KEY_ID', 'rzp_test_TSI4jkwPuDkSCK').strip().strip('"\'')
 
     @property
     def RAZORPAY_KEY_SECRET(self):
-        return os.getenv('RAZORPAY_KEY_SECRET', '').strip().strip('"\'')
+        return os.getenv('RAZORPAY_KEY_SECRET', 'O4pTVTBdzERb40uPz7AWdWY4').strip().strip('"\'')
 
     @property
     def RAZORPAY_WEBHOOK_SECRET(self):
@@ -86,7 +100,7 @@ class SupabaseQueryBuilder:
             "Prefer": "return=representation"
         }
         self.params = {}
-        self.timeout = 3.5
+        self.timeout = 5.0
 
     def select(self, columns="*"):
         self.params["select"] = columns
@@ -100,8 +114,50 @@ class SupabaseQueryBuilder:
         self.params[column] = f"neq.{value}"
         return self
 
+    def gt(self, column, value):
+        self.params[column] = f"gt.{value}"
+        return self
+
+    def gte(self, column, value):
+        self.params[column] = f"gte.{value}"
+        return self
+
+    def lt(self, column, value):
+        self.params[column] = f"lt.{value}"
+        return self
+
+    def lte(self, column, value):
+        self.params[column] = f"lte.{value}"
+        return self
+
+    def like(self, column, pattern):
+        self.params[column] = f"like.{pattern}"
+        return self
+
+    def ilike(self, column, pattern):
+        self.params[column] = f"ilike.{pattern}"
+        return self
+
+    def is_(self, column, value):
+        self.params[column] = f"is.{value}"
+        return self
+
+    def or_(self, filters):
+        self.params["or"] = f"({filters})"
+        return self
+
     def order(self, column, desc=False):
         self.params["order"] = f"{column}.desc" if desc else f"{column}.asc"
+        return self
+
+    def limit(self, count):
+        self.params["limit"] = str(count)
+        return self
+
+    def single(self):
+        return self
+
+    def maybeSingle(self):
         return self
 
     def execute(self):

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import FinalCTA from '@/components/xenova/FinalCTA';
 import { supabase } from '@/lib/supabase';
+import { getApiBaseUrl } from '@/lib/api-config';
 
 const PRESET_AVATARS = [
   { label: 'Valorant Phoenix', src: '/valorant.jpg' },
@@ -45,35 +46,24 @@ const compressImageToDataUrl = (file: File, maxDim = 512, quality = 0.85): Promi
         const canvas = document.createElement('canvas');
         let width = img.width;
         let height = img.height;
-
-        if (width > height) {
-          if (width > maxDim) {
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
             height = Math.round((height * maxDim) / width);
             width = maxDim;
-          }
-        } else {
-          if (height > maxDim) {
+          } else {
             width = Math.round((width * maxDim) / height);
             height = maxDim;
           }
         }
-
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(event.target?.result as string);
-          return;
-        }
-
-        ctx.drawImage(img, 0, 0, width, height);
-        // Export as optimized JPEG (~40KB)
-        const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
-        resolve(compressedBase64);
+        ctx?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
       };
-      img.onerror = () => reject(new Error('Unable to read image.'));
+      img.onerror = () => reject(new Error('Failed to load image for compression'));
     };
-    reader.onerror = () => reject(new Error('File reading error.'));
+    reader.onerror = () => reject(new Error('Failed to read image file'));
   });
 };
 
@@ -82,17 +72,18 @@ export default function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [sessionUser, setSessionUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Form Fields
   const [name, setName] = useState('');
   const [tag, setTag] = useState('');
   const [college, setCollege] = useState('');
   const [team, setTeam] = useState('');
   const [bio, setBio] = useState('');
   const [avatar, setAvatar] = useState('/valorant.jpg');
-  
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [savedMsg, setSavedMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     const raw = localStorage.getItem('xenova_session');
@@ -111,14 +102,33 @@ export default function SettingsPage() {
       setBio(user.bio || '');
       setAvatar(user.avatar || user.avatar_url || '/valorant.jpg');
 
-      // Fetch live fresh profile from Database (/api/auth/profile)
+      // Fetch live fresh profile from Database (/api/auth/profile + Supabase)
       const fetchLiveProfile = async () => {
         try {
-          const apiBase =
-            typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-              ? '/api'
-              : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+          // 1. Direct Supabase Query
+          try {
+            const { data: sbData } = await supabase
+              .from('users')
+              .select('*')
+              .eq('email', user.email.toLowerCase())
+              .maybeSingle();
 
+            if (sbData) {
+              setName(sbData.name || user.name || '');
+              setTag(sbData.tag || user.tag || '');
+              setCollege(sbData.college || user.college || '');
+              setTeam(sbData.team || user.team || '');
+              setBio(sbData.bio || user.bio || '');
+              if (sbData.avatar_url || sbData.avatar) {
+                setAvatar(sbData.avatar_url || sbData.avatar);
+              }
+              const updatedSession = { ...user, ...sbData };
+              localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
+            }
+          } catch {}
+
+          // 2. Backend API Query
+          const apiBase = getApiBaseUrl();
           const res = await fetch(`${apiBase}/auth/profile?email=${encodeURIComponent(user.email)}`, { cache: 'no-store' });
           if (res.ok) {
             const json = await res.json();
@@ -184,32 +194,7 @@ export default function SettingsPage() {
     };
 
     try {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
-      const res = await fetch(`${apiBase}/auth/profile`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      let json: any = {};
-      try {
-        json = await res.json();
-      } catch {
-        const rawText = await res.text().catch(() => '');
-        if (!res.ok) {
-          throw new Error(rawText || `Server responded with status ${res.status}`);
-        }
-      }
-
-      if (!res.ok) {
-        throw new Error(json.message || 'Failed to save profile.');
-      }
-
-      // Also update directly in Supabase table with fallback
+      // 1. Direct Supabase Update
       try {
         const { error: fullErr } = await supabase
           .from('users')
@@ -224,7 +209,7 @@ export default function SettingsPage() {
           .eq('email', sessionUser.email.toLowerCase());
 
         if (fullErr) {
-          // Fallback to core columns if team/tag columns don't exist in Supabase yet
+          // Fallback to core columns
           await supabase
             .from('users')
             .update({
@@ -237,6 +222,18 @@ export default function SettingsPage() {
         }
       } catch (sbErr) {
         console.warn('Direct Supabase update notice:', sbErr);
+      }
+
+      // 2. Backend API Update
+      try {
+        const apiBase = getApiBaseUrl();
+        await fetch(`${apiBase}/auth/profile`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch (apiErr) {
+        console.warn('Backend profile update notice:', apiErr);
       }
 
       // Update session in local storage

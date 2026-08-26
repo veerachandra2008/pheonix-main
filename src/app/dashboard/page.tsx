@@ -73,6 +73,8 @@ const gameLibrary = [
 ];
 
 import { getUserRegistrations, TournamentRegistrationRecord } from '@/lib/tournaments-db';
+import { supabase } from '@/lib/supabase';
+import { getApiBaseUrl } from '@/lib/api-config';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -85,49 +87,127 @@ export default function DashboardPage() {
       localStorage.removeItem('xenova_registrations');
     } catch {}
 
-    const rawSession = localStorage.getItem('xenova_session');
-    if (!rawSession) {
-      router.replace('/login');
-      return;
-    }
-    try {
-      const user = JSON.parse(rawSession);
-      setSession(user);
+    const loadProfileData = async (userEmail: string, initialUser: any) => {
+      const cleanEmail = userEmail.trim().toLowerCase();
 
-      // Instant optimistic passes render from local cache (0ms)
+      // 1. Direct Supabase Query (Fastest, direct from PostgreSQL users table)
       try {
-        const cachedPasses = localStorage.getItem(`xenova_passes_${user.email}`);
-        if (cachedPasses) {
-          setUserRegistrations(JSON.parse(cachedPasses));
-        }
-      } catch {}
-      
-      // Load user registrations strictly from Backend / Supabase
-      getUserRegistrations(user.email).then((regs) => {
-        if (regs && Array.isArray(regs)) {
-          setUserRegistrations(regs);
+        const { data: dbUser, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('email', cleanEmail)
+          .maybeSingle();
+
+        if (!error && dbUser) {
+          const liveData = {
+            id: dbUser.id,
+            name: dbUser.name || cleanEmail.split('@')[0],
+            email: dbUser.email || cleanEmail,
+            college: dbUser.college || 'General Campus',
+            team: dbUser.team || 'Free Agent',
+            tag: dbUser.tag || `@${(dbUser.name || 'player').toUpperCase().replace(/\s+/g, '')}#1337`,
+            bio: dbUser.bio || 'Verified collegiate esports competitor.',
+            role: (dbUser.role || 'PLAYER').toLowerCase(),
+            avatar: dbUser.avatar_url || '/valorant.jpg',
+            avatar_url: dbUser.avatar_url || '/valorant.jpg',
+            rank: dbUser.rank || 1,
+            win_rate: dbUser.win_rate || 84.5,
+            trophies: dbUser.trophies || 5,
+          };
+          setSession((prev: any) => ({ ...(prev || {}), ...liveData }));
           try {
-            localStorage.setItem(`xenova_passes_${user.email}`, JSON.stringify(regs));
+            const raw = localStorage.getItem('xenova_session');
+            const existing = raw ? JSON.parse(raw) : {};
+            localStorage.setItem('xenova_session', JSON.stringify({ ...existing, ...liveData }));
           } catch {}
         }
-      });
+      } catch (sbErr) {
+        console.warn('Dashboard Supabase users fetch notice:', sbErr);
+      }
 
-      // Fetch fresh user profile from Database
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
-      fetch(`${apiBase}/auth/profile?email=${encodeURIComponent(user.email)}`)
-        .then((res) => res.json())
-        .then((data) => {
+      // 2. Fetch fresh user profile from Backend API (/api/auth/profile)
+      try {
+        const apiBase = getApiBaseUrl();
+        const res = await fetch(`${apiBase}/auth/profile?email=${encodeURIComponent(cleanEmail)}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
           if (data.success && data.data) {
-            setSession((prev: any) => ({ ...prev, ...data.data }));
+            setSession((prev: any) => ({ ...(prev || {}), ...data.data }));
+            try {
+              const raw = localStorage.getItem('xenova_session');
+              const existing = raw ? JSON.parse(raw) : {};
+              localStorage.setItem('xenova_session', JSON.stringify({ ...existing, ...data.data }));
+            } catch {}
           }
-        })
-        .catch(() => {});
-    } catch (e) {
-      router.replace('/login');
+        }
+      } catch (apiErr) {
+        // Relative /api fallback
+        try {
+          const fallbackRes = await fetch(`/api/auth/profile?email=${encodeURIComponent(cleanEmail)}`, { cache: 'no-store' });
+          if (fallbackRes.ok) {
+            const data = await fallbackRes.json();
+            if (data.success && data.data) {
+              setSession((prev: any) => ({ ...(prev || {}), ...data.data }));
+            }
+          }
+        } catch {}
+      }
+    };
+
+    const rawSession = localStorage.getItem('xenova_session');
+    if (rawSession) {
+      try {
+        const user = JSON.parse(rawSession);
+        setSession(user);
+
+        // Instant optimistic passes render from local cache (0ms)
+        try {
+          const cachedPasses = localStorage.getItem(`xenova_passes_${user.email}`);
+          if (cachedPasses) {
+            setUserRegistrations(JSON.parse(cachedPasses));
+          }
+        } catch {}
+
+        // Load user registrations strictly from Backend / Supabase
+        getUserRegistrations(user.email).then((regs) => {
+          if (regs && Array.isArray(regs)) {
+            setUserRegistrations(regs);
+            try {
+              localStorage.setItem(`xenova_passes_${user.email}`, JSON.stringify(regs));
+            } catch {}
+          }
+        });
+
+        // Load full user details from Database
+        loadProfileData(user.email, user);
+      } catch (e) {
+        router.replace('/login');
+      }
+    } else {
+      // Check active Supabase Auth session if local storage was cleared
+      supabase.auth.getSession().then(({ data: { session: authSession } }) => {
+        if (authSession?.user?.email) {
+          const email = authSession.user.email;
+          const initialUser = {
+            id: authSession.user.id,
+            email: email,
+            name: authSession.user.user_metadata?.name || email.split('@')[0],
+            college: 'General Campus',
+            role: 'player',
+          };
+          setSession(initialUser);
+          localStorage.setItem('xenova_session', JSON.stringify(initialUser));
+
+          getUserRegistrations(email).then((regs) => {
+            if (regs && Array.isArray(regs)) setUserRegistrations(regs);
+          });
+          loadProfileData(email, initialUser);
+        } else {
+          router.replace('/login');
+        }
+      }).catch(() => {
+        router.replace('/login');
+      });
     }
   }, [router]);
 

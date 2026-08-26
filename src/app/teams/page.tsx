@@ -29,6 +29,8 @@ import {
 } from 'lucide-react';
 import { slugify, type XenovaTeam } from '@/lib/xenova-data';
 import FinalCTA from '@/components/xenova/FinalCTA';
+import { getApiBaseUrl } from '@/lib/api-config';
+import { supabase } from '@/lib/supabase';
 
 const gameFilters = ['All Games', 'BGMI', 'Valorant', 'Free Fire', 'CS2', 'FC24'];
 const sortOptions = ['Top Ranked', 'Win Rate', 'Most Trophies'];
@@ -195,23 +197,46 @@ export default function TeamsPage() {
 
     const loadTeams = async () => {
       try {
-        const apiBase =
-          typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-            ? '/api'
-            : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+        let loadedList: any[] = [];
 
-        const res = await fetch(`${apiBase}/teams/`);
-        const data = await res.json();
-        if (data.success && Array.isArray(data.data)) {
-          const mapped = data.data.map((t: any) => ({
-            ...t,
-            slug: t.slug || slugify(t.name),
-            winRate: t.win_rate || t.winRate || 50,
-            recentWins: t.recent_wins || t.recentWins || 0,
-            activeScore: t.active_score || t.activeScore || 75,
-            verificationStatus: t.verification_status || t.verificationStatus || (t.verified ? 'approved' : 'pending'),
-          }));
-          setCustomTeams(mapped);
+        // 1. Direct Supabase Query
+        try {
+          const { data: sbTeams } = await supabase.from('teams').select('*');
+          if (sbTeams && Array.isArray(sbTeams) && sbTeams.length > 0) {
+            loadedList = sbTeams.map((t: any) => ({
+              ...t,
+              slug: t.slug || slugify(t.name),
+              winRate: t.win_rate || t.winRate || 50,
+              recentWins: t.recent_wins || t.recentWins || 0,
+              activeScore: t.active_score || t.activeScore || 75,
+              verificationStatus: t.verification_status || t.verificationStatus || (t.verified ? 'approved' : 'pending'),
+            }));
+            setCustomTeams(loadedList);
+          }
+        } catch (sbErr) {
+          console.warn('Supabase teams notice:', sbErr);
+        }
+
+        // 2. Backend API Query
+        try {
+          const apiBase = getApiBaseUrl();
+          const res = await fetch(`${apiBase}/teams/`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+              const mapped = data.data.map((t: any) => ({
+                ...t,
+                slug: t.slug || slugify(t.name),
+                winRate: t.win_rate || t.winRate || 50,
+                recentWins: t.recent_wins || t.recentWins || 0,
+                activeScore: t.active_score || t.activeScore || 75,
+                verificationStatus: t.verification_status || t.verificationStatus || (t.verified ? 'approved' : 'pending'),
+              }));
+              setCustomTeams(mapped);
+            }
+          }
+        } catch (apiErr) {
+          console.warn('Backend teams fetch notice:', apiErr);
         }
       } catch (err) {
         console.error('Failed to load teams from backend:', err);
@@ -294,22 +319,27 @@ export default function TeamsPage() {
     };
 
     try {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+      // 1. Direct Supabase Insert
+      try {
+        await supabase.from('teams').insert(pendingTeam);
+      } catch (sbErr) {
+        console.warn('Supabase team insert notice:', sbErr);
+      }
 
-      await fetch(`${apiBase}/teams/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(pendingTeam),
-      });
+      // 2. Backend API Insert
+      try {
+        const apiBase = getApiBaseUrl();
+        await fetch(`${apiBase}/teams/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pendingTeam),
+        });
+      } catch {}
 
-      // Reload fresh list from backend database
-      const res = await fetch(`${apiBase}/teams/`);
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) {
-        setCustomTeams(data.data.map((t: any) => ({
+      // Reload fresh list from database
+      const { data: refreshed } = await supabase.from('teams').select('*');
+      if (refreshed && Array.isArray(refreshed) && refreshed.length > 0) {
+        setCustomTeams(refreshed.map((t: any) => ({
           ...t,
           slug: t.slug || slugify(t.name),
           winRate: t.win_rate || t.winRate || 50,

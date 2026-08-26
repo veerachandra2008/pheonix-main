@@ -17,6 +17,8 @@ import {
   Image as ImageIcon,
   Sparkles
 } from 'lucide-react';
+import { getApiBaseUrl } from '@/lib/api-config';
+import { supabase } from '@/lib/supabase';
 
 const GAME_PRESETS: Record<string, string> = {
   'Valorant': '/valorant.jpg',
@@ -40,15 +42,25 @@ export default function CreateTournamentPage() {
     format: 'Single Elimination',
     teams: '32',
     prize: '₹50,000',
+    prize_1st: '',
+    prize_2nd: '',
+    prize_3rd: '',
     date: '18-20 May 2026',
     region: 'Online',
     fee: 'Free',
     image: '/valorant.jpg',
     status: 'Registering',
+    host: '',
+    description: '',
+    rules: '',
+    schedule: '',
+    map_pool: '',
+    contact_email: '',
+    discord_url: '',
   });
 
   useEffect(() => {
-    async function verifyAndLoad() {
+    async function verifyOrganizer() {
       const rawSession = localStorage.getItem('xenova_session');
       if (!rawSession) {
         router.replace('/login');
@@ -60,13 +72,13 @@ export default function CreateTournamentPage() {
         const email = (user.email || '').trim().toLowerCase();
         const role = (user.role || '').toLowerCase();
 
-        // 1. Root Platform Admin always has full access
+        // Admin always has bypass
         if (role === 'admin' || email === 'admin@xenova.gg') {
           setSession(user);
           setFormData((prev) => ({
             ...prev,
-            organizerName: user.name || 'Platform Admin',
-            organizerEmail: user.email || '',
+            host: user.name || 'Xenova HQ',
+            contact_email: user.email || 'admin@xenova.gg',
           }));
           return;
         }
@@ -74,9 +86,8 @@ export default function CreateTournamentPage() {
         let isApprovedOrganizer = role === 'organizer' || role === 'host';
         let hostName = user.hostName || user.name || 'Verified Host';
 
-        // 2. Real-time Supabase Check
+        // 1. Direct Supabase Query check
         try {
-          const { supabase } = await import('@/lib/supabase');
           const { data } = await supabase
             .from('organizer_applications')
             .select('*')
@@ -90,17 +101,14 @@ export default function CreateTournamentPage() {
               hostName = app.host_name || user.name || 'Verified Host';
             }
           }
-        } catch (sbErr) {
-          console.warn('Create tournament auth check notice:', sbErr);
+        } catch (err) {
+          console.warn('Supabase organizer verification notice:', err);
         }
 
-        // 3. Fallback to API Check
+        // 2. Fallback to API Check
         if (!isApprovedOrganizer) {
           try {
-            const apiBase =
-              typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-                ? '/api'
-                : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+            const apiBase = getApiBaseUrl();
 
             const res = await fetch(`${apiBase}/auth/organizers`, { cache: 'no-store' });
             if (res.ok) {
@@ -116,7 +124,7 @@ export default function CreateTournamentPage() {
               }
             }
           } catch (apiErr) {
-            console.warn('API lookup notice:', apiErr);
+            console.warn('API organizer verification notice:', apiErr);
           }
         }
 
@@ -125,6 +133,7 @@ export default function CreateTournamentPage() {
           delete updatedSession.hostName;
           localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
           window.dispatchEvent(new Event('xenova-auth-change'));
+          alert('You must be an approved Organizer or Host to launch a tournament.');
           router.replace('/organizer/apply');
           return;
         }
@@ -134,25 +143,20 @@ export default function CreateTournamentPage() {
         setSession(validSession);
         setFormData((prev) => ({
           ...prev,
-          organizerName: hostName,
-          organizerEmail: validSession.email || '',
+          host: hostName,
+          contact_email: validSession.email,
         }));
       } catch {
         router.replace('/login');
       }
     }
 
-    verifyAndLoad();
+    verifyOrganizer();
   }, [router]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      alert('Please select a valid image file (PNG, JPG, WEBP).');
-      return;
-    }
 
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -186,47 +190,51 @@ export default function CreateTournamentPage() {
     try {
       const slug = formData.title
         .toLowerCase()
-        .replace(/\s+/g, '-')
-        .replace(/[^a-z0-9-]/g, '');
-
-      const finalImage = formData.image || imagePreview || GAME_PRESETS[formData.game] || '/valorant.jpg';
-      const hostName = session?.hostName || session?.name || session?.email?.split('@')[0] || 'Veera Gaming Society';
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)+/g, '') + '-' + Math.random().toString(36).substring(2, 6);
 
       const newTournament = {
         title: formData.title.trim(),
         name: formData.title.trim(),
-        slug: slug,
+        slug,
+        host: formData.host.trim() || session?.hostName || session?.name || 'Verified Host',
+        organizer_email: session?.email || '',
+        createdBy: session?.email || '',
+        image: formData.image || imagePreview,
         game: formData.game,
-        format: formData.format,
-        teams: `${formData.teams} Teams`,
-        prize: formData.prize.trim(),
-        date: formData.date.trim(),
-        region: formData.region,
-        fee: formData.fee.trim(),
-        host: hostName,
-        createdBy: session?.email,
-        organizer_email: session?.email,
-        image: finalImage,
         status: formData.status,
         status_color: formData.status === 'Live' ? '#EF4444' : formData.status === 'Registering' ? '#10B981' : '#38BDF8',
-        filled: 0,
+        prize: formData.prize.trim(),
+        prize_1st: formData.prize_1st.trim() || formData.prize.trim(),
+        prize_2nd: formData.prize_2nd.trim() || '',
+        prize_3rd: formData.prize_3rd.trim() || '',
+        date: formData.date.trim(),
+        region: formData.region,
+        format: formData.format,
+        teams: `${formData.teams} Teams`,
+        fee: formData.fee.trim(),
+        description: formData.description.trim(),
+        rules: formData.rules.trim(),
+        schedule: formData.schedule.trim(),
+        map_pool: formData.map_pool.trim(),
+        contact_email: formData.contact_email.trim() || session?.email || '',
+        discord_url: formData.discord_url.trim(),
       };
 
-      // 1. Dual sync directly into Supabase tournaments table
+      // 1. Direct Supabase Insert
       try {
-        const { supabase } = await import('@/lib/supabase');
         await supabase.from('tournaments').upsert([
           {
             title: newTournament.title,
             slug: newTournament.slug,
+            host: newTournament.host,
             game: newTournament.game,
-            format: newTournament.format,
-            teams: newTournament.teams,
             prize: newTournament.prize,
+            teams: newTournament.teams,
             date: newTournament.date,
             region: newTournament.region,
+            format: newTournament.format,
             fee: newTournament.fee,
-            host: newTournament.host,
             image: newTournament.image,
             status: newTournament.status,
             status_color: newTournament.status_color,
@@ -238,12 +246,8 @@ export default function CreateTournamentPage() {
       }
 
       // 2. Submit to Backend API
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
       try {
+        const apiBase = getApiBaseUrl();
         const res = await fetch(`${apiBase}/tournaments/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -257,7 +261,7 @@ export default function CreateTournamentPage() {
         console.warn('Backend API tournament create warning:', apiErr);
       }
 
-      alert(`Tournament "${formData.title}" launched successfully! It is now live in the database, user portal, and admin dashboard.`);
+      alert(`Tournament "${formData.title}" launched successfully!`);
       router.push('/organizer/dashboard');
     } catch (err: any) {
       console.error(err);
