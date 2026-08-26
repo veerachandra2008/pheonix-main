@@ -4,13 +4,21 @@
  * while preserving localhost dev server support.
  */
 
+const PRODUCTION_RENDER_BACKEND = 'https://pheonix-main.onrender.com/api';
+
 export function getApiBaseUrl(): string {
+  // If an external deployed backend URL (Render, Railway, Fly.io) is provided in environment variables, use it directly!
+  const envUrl = process.env.NEXT_PUBLIC_FLASK_API_URL || PRODUCTION_RENDER_BACKEND;
+  if (envUrl && (envUrl.includes('render.com') || envUrl.includes('railway.app') || envUrl.includes('railway.internal') || envUrl.includes('fly.dev'))) {
+    return envUrl.endsWith('/') ? envUrl.slice(0, -1) : envUrl;
+  }
+
   if (typeof window === 'undefined') {
     // Server-side environment
     if (process.env.VERCEL_URL) {
       return `https://${process.env.VERCEL_URL}/api`;
     }
-    return process.env.NEXT_PUBLIC_FLASK_API_URL || 'http://localhost:5000/api';
+    return envUrl || PRODUCTION_RENDER_BACKEND;
   }
 
   // Client-side browser:
@@ -18,8 +26,10 @@ export function getApiBaseUrl(): string {
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
 
   if (!isLocalhost) {
-    // In production / Vercel deployment, ALWAYS use relative path '/api'
-    return '/api';
+    if (envUrl && envUrl.startsWith('https://') && !envUrl.includes('localhost')) {
+      return envUrl.endsWith('/') ? envUrl.slice(0, -1) : envUrl;
+    }
+    return PRODUCTION_RENDER_BACKEND;
   }
 
   // Local development
