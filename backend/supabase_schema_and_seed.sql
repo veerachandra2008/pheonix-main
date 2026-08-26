@@ -3,6 +3,33 @@
 -- Run this in your Supabase SQL Editor (https://supabase.com/dashboard)
 -- ====================================================================
 
+-- 0. USERS TABLE (User profiles, avatar pictures, roles)
+CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    college TEXT,
+    role TEXT DEFAULT 'PLAYER',
+    bio TEXT,
+    tag TEXT,
+    team TEXT,
+    avatar_url TEXT DEFAULT '/valorant.jpg',
+    rank INTEGER DEFAULT 1,
+    win_rate NUMERIC DEFAULT 0.0,
+    trophies INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 0.1 USER FOLLOWS TABLE
+CREATE TABLE IF NOT EXISTS user_follows (
+    id BIGSERIAL PRIMARY KEY,
+    follower_email TEXT NOT NULL,
+    target_email TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_user_follow UNIQUE (follower_email, target_email)
+);
+
 -- 1. COLLEGES TABLE
 CREATE TABLE IF NOT EXISTS colleges (
     id BIGSERIAL PRIMARY KEY,
@@ -160,7 +187,8 @@ CREATE TABLE IF NOT EXISTS tournament_rosters (
     CONSTRAINT unique_pass_slot UNIQUE (pass_id, slot)
 );
 
--- Disable RLS for public table operations or enable public read/write
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_follows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE colleges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
@@ -171,6 +199,14 @@ ALTER TABLE event_attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tournament_rosters ENABLE ROW LEVEL SECURITY;
 
 -- Allow public read and write policies
+CREATE POLICY "Allow public read users" ON users FOR SELECT USING (true);
+CREATE POLICY "Allow public insert users" ON users FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update users" ON users FOR UPDATE USING (true);
+
+CREATE POLICY "Allow public read user_follows" ON user_follows FOR SELECT USING (true);
+CREATE POLICY "Allow public insert user_follows" ON user_follows FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public delete user_follows" ON user_follows FOR DELETE USING (true);
+
 CREATE POLICY "Allow public read colleges" ON colleges FOR SELECT USING (true);
 CREATE POLICY "Allow public insert colleges" ON colleges FOR INSERT WITH CHECK (true);
 

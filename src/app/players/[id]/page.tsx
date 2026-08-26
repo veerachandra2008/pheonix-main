@@ -21,40 +21,47 @@ import {
   Check,
   Share2,
   Ticket,
-  ExternalLink
+  ExternalLink,
+  Settings,
+  Sparkles,
+  Award,
+  UserPlus,
+  UserCheck
 } from 'lucide-react';
-import { playerStandings, type LeaderboardEntry } from '../../leaderboards/data';
 import { getUserRegistrations, TournamentRegistrationRecord } from '@/lib/tournaments-db';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
-type Props = {
-  params?: Promise<{ id: string }>;
-};
-
 type Player = {
-  id?: string;
+  id?: string | number;
   name?: string;
   email?: string;
   tag?: string;
   bio?: string;
-  detail?: string;
-  profilePic?: string;
+  avatar?: string;
+  avatar_url?: string;
   college?: string;
   team?: string;
+  role?: string;
+  rank?: number;
+  win_rate?: number;
+  trophies?: number;
   followers?: string[];
   following?: string[];
 };
 
 function slugify(value: string) {
-  return value.toLowerCase().replace(/\s+/g, '-');
+  return (value || '').toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
 }
 
-export default function PlayerProfilePage({ params }: Props) {
+export default function PlayerProfilePage() {
   const routeParams = useParams();
-  const id = (routeParams?.id as string) || '';
+  const rawId = decodeURIComponent((routeParams?.id as string) || '');
   const router = useRouter();
+
   const [currentUser, setCurrentUser] = useState<Player | null>(null);
-  const [targetUser, setTargetUser] = useState<Player | null>(null);
+  const [profileData, setProfileData] = useState<Player | null>(null);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [copiedLink, setCopiedLink] = useState(false);
   const [userPasses, setUserPasses] = useState<TournamentRegistrationRecord[]>([]);
 
@@ -65,39 +72,93 @@ export default function PlayerProfilePage({ params }: Props) {
       try {
         sessionUser = JSON.parse(rawSession);
         setCurrentUser(sessionUser);
-      } catch (e) {
-        console.error(e);
-      }
+      } catch (e) {}
     }
 
-    let foundTarget: Player | null = null;
-    const rawUsers = localStorage.getItem('xenova_users');
-    if (rawUsers) {
+    // 1. INSTANT OPTIMISTIC RENDER (0ms)
+    const isSelf = 
+      rawId === 'me' || 
+      rawId === 'profile' || 
+      (sessionUser && (
+        sessionUser.email?.toLowerCase() === rawId.toLowerCase() ||
+        slugify(sessionUser.name || '') === slugify(rawId) ||
+        (sessionUser.tag && sessionUser.tag.toLowerCase() === rawId.toLowerCase())
+      ));
+
+    if (isSelf && sessionUser) {
+      setProfileData(sessionUser);
+      setLoading(false);
+    }
+
+    const loadProfile = async () => {
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+      const emailToQuery = isSelf && sessionUser?.email ? sessionUser.email : rawId.includes('@') ? rawId : '';
+
+      // Parallel Fetch: Profile + Passes concurrently
       try {
-        const users = JSON.parse(rawUsers);
-        const match = users.find((u: Player) => u.id === id || slugify(u.name || '') === id || u.tag?.toLowerCase() === id.toLowerCase());
-        if (match) {
-          foundTarget = match;
-          setTargetUser(match);
+        const [profileRes, passes] = await Promise.all([
+          emailToQuery
+            ? fetch(`${apiBase}/auth/profile?email=${encodeURIComponent(emailToQuery)}`).then(r => r.ok ? r.json() : null).catch(() => null)
+            : fetch(`${apiBase}/auth/users`).then(r => r.ok ? r.json() : null).catch(() => null),
+          emailToQuery
+            ? getUserRegistrations(emailToQuery).catch(() => [])
+            : Promise.resolve([])
+        ]);
+
+        let matched: Player | null = null;
+        if (profileRes?.success && profileRes?.data) {
+          if (Array.isArray(profileRes.data)) {
+            matched = profileRes.data.find((u: any) =>
+              u.email?.toLowerCase() === rawId.toLowerCase() ||
+              String(u.id) === rawId ||
+              slugify(u.name || '') === slugify(rawId) ||
+              (u.tag && u.tag.toLowerCase() === rawId.toLowerCase())
+            ) || null;
+          } else {
+            matched = profileRes.data;
+          }
         }
-      } catch (e) {
-        console.error(e);
+
+        if (matched) {
+          setProfileData(matched);
+          if (matched.email && isSelf && sessionUser) {
+            localStorage.setItem('xenova_session', JSON.stringify({ ...sessionUser, ...matched }));
+          }
+        }
+
+        if (passes && Array.isArray(passes)) {
+          setUserPasses(passes);
+        }
+      } catch (err) {
+        console.warn('Profile background sync notice:', err);
+      } finally {
+        setLoading(false);
       }
-    }
 
-    // Load registered passes for this athlete
-    const emailToLookup = foundTarget?.email || (sessionUser && (slugify(sessionUser.name || '') === id || sessionUser.tag?.toLowerCase() === id.toLowerCase() || sessionUser.id === id) ? sessionUser.email : undefined) || sessionUser?.email;
-    if (emailToLookup) {
-      getUserRegistrations(emailToLookup).then((regs) => {
-        setUserPasses(regs || []);
-      });
-    }
-  }, [id]);
+      // Check following status
+      try {
+        const rawFollowing = localStorage.getItem('xenova_following');
+        if (rawFollowing && (emailToQuery || rawId)) {
+          const set = new Set(JSON.parse(rawFollowing));
+          setIsFollowing(set.has((emailToQuery || rawId).toLowerCase()));
+        }
+      } catch {}
+    };
 
-  const playerName = targetUser?.name || (currentUser && (slugify(currentUser.name || '') === id || currentUser.tag?.toLowerCase() === id.toLowerCase() || currentUser.id === id) ? currentUser.name : id.replace(/-/g, ' ').toUpperCase()) || 'ATHLETE';
-  const playerTag = targetUser?.tag || (currentUser && (slugify(currentUser.name || '') === id || currentUser.tag?.toLowerCase() === id.toLowerCase() || currentUser.id === id) ? `@${currentUser.tag}` : `@${id.toLowerCase()}`);
-  const playerCollege = targetUser?.college || (currentUser && (slugify(currentUser.name || '') === id || currentUser.tag?.toLowerCase() === id.toLowerCase() || currentUser.id === id) ? currentUser.college : 'Nexus Institute of Technology');
-  const playerTeam = targetUser?.team || (currentUser && (slugify(currentUser.name || '') === id || currentUser.tag?.toLowerCase() === id.toLowerCase() || currentUser.id === id) ? currentUser.team : 'Team Titans');
+    loadProfile();
+  }, [rawId]);
+
+  const playerName = profileData?.name || 'ATHLETE';
+  const playerTag = profileData?.tag || `@${slugify(playerName)}`;
+  const playerCollege = profileData?.college || 'University Campus';
+  const playerTeam = profileData?.team || 'Free Agent';
+  const playerAvatar = profileData?.avatar_url || profileData?.avatar || '/valorant.jpg';
+  const playerBio = profileData?.bio || 'Verified collegiate esports competitor.';
+  const isOwnProfile = currentUser && profileData && (currentUser.email?.toLowerCase() === profileData.email?.toLowerCase());
 
   const handleShare = () => {
     if (typeof window !== 'undefined') {
@@ -117,7 +178,7 @@ export default function PlayerProfilePage({ params }: Props) {
           <img
             src="/apex.jpg"
             alt={playerName}
-            className="w-full h-full object-cover filter brightness-[0.35] saturate-150 scale-105"
+            className="w-full h-full object-cover filter brightness-[0.25] saturate-150 scale-105"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-transparent" />
@@ -133,41 +194,107 @@ export default function PlayerProfilePage({ params }: Props) {
               <ArrowLeft className="h-4 w-4" /> Back to Players
             </Link>
 
-            <button
-              onClick={handleShare}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-bold uppercase tracking-wider text-white transition active:scale-95"
-            >
-              {copiedLink ? <Check className="h-4 w-4 text-emerald-400" /> : <Share2 className="h-4 w-4" />}
-              {copiedLink ? 'Link Copied!' : 'Share Profile'}
-            </button>
+            <div className="flex items-center gap-3">
+              {isOwnProfile ? (
+                <Link
+                  href="/settings"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black uppercase tracking-wider transition shadow-lg shadow-emerald-500/20"
+                >
+                  <Settings className="h-4 w-4" /> Edit Profile & Photo
+                </Link>
+              ) : profileData?.email ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!currentUser) {
+                      router.push('/login');
+                      return;
+                    }
+                    const targetEmail = profileData.email!.toLowerCase();
+                    const rawFollowing = localStorage.getItem('xenova_following');
+                    const set = new Set(rawFollowing ? JSON.parse(rawFollowing) : []);
+                    const nowFollowing = !set.has(targetEmail);
+                    if (nowFollowing) set.add(targetEmail); else set.delete(targetEmail);
+                    localStorage.setItem('xenova_following', JSON.stringify(Array.from(set)));
+                    setIsFollowing(nowFollowing);
+
+                    try {
+                      const apiBase =
+                        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+                          ? '/api'
+                          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+                      await fetch(`${apiBase}/auth/follow`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ follower_email: currentUser.email, target_email: targetEmail }),
+                      });
+                    } catch {}
+                  }}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer active:scale-95 ${
+                    isFollowing
+                      ? 'bg-emerald-500/20 border border-emerald-500/50 text-emerald-400'
+                      : 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black shadow-lg shadow-emerald-500/20'
+                  }`}
+                >
+                  {isFollowing ? (
+                    <>
+                      <BadgeCheck className="h-4 w-4" /> Following
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="h-4 w-4" /> Follow Athlete
+                    </>
+                  )}
+                </button>
+              ) : null}
+
+              <button
+                onClick={handleShare}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-bold uppercase tracking-wider text-white transition active:scale-95 cursor-pointer"
+              >
+                {copiedLink ? <Check className="h-4 w-4 text-emerald-400" /> : <Share2 className="h-4 w-4" />}
+                {copiedLink ? 'Link Copied!' : 'Share Profile'}
+              </button>
+            </div>
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-end gap-6 sm:gap-8">
             
             {/* Avatar Crest */}
-            <div className="relative grid place-items-center h-28 w-28 sm:h-36 sm:w-36 rounded-3xl border-2 border-emerald-500/50 bg-emerald-500/10 font-black text-emerald-400 text-3xl sm:text-4xl shadow-2xl shrink-0">
-              {playerName.slice(0, 2).toUpperCase()}
+            <div className="relative h-28 w-28 sm:h-36 sm:w-36 rounded-3xl border-2 border-emerald-500/60 bg-zinc-950 overflow-hidden shadow-2xl shrink-0 flex items-center justify-center">
+              {playerAvatar ? (
+                <img src={playerAvatar} alt={playerName} className="w-full h-full object-cover" />
+              ) : (
+                <span className="font-black text-emerald-400 text-3xl sm:text-4xl">
+                  {playerName.slice(0, 2).toUpperCase()}
+                </span>
+              )}
             </div>
 
             {/* Meta */}
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2.5">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase">
-                  <ShieldCheck className="h-3.5 w-3.5" /> Verified University Student
+                  <ShieldCheck className="h-3.5 w-3.5" /> Verified Varsity Athlete
                 </span>
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 text-xs font-black uppercase">
-                  <Crown className="h-3.5 w-3.5" /> 4,120 ELO Points
+                  <Crown className="h-3.5 w-3.5" /> Rank #{profileData?.rank || 1}
                 </span>
+                {profileData?.role && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-400 text-xs font-black uppercase">
+                    {profileData.role.toUpperCase()}
+                  </span>
+                )}
               </div>
 
               <h1 className="text-3xl sm:text-5xl font-black uppercase tracking-tight text-white leading-none">
                 {playerName}
               </h1>
 
-              <p className="text-xs sm:text-sm font-semibold text-zinc-300 flex items-center gap-2">
+              <p className="text-xs sm:text-sm font-semibold text-zinc-300 flex flex-wrap items-center gap-2">
                 <span className="text-emerald-400 font-bold">{playerTag}</span>
                 <span>•</span>
-                <Building2 className="h-4 w-4 text-emerald-400" /> {playerCollege}
+                <span className="flex items-center gap-1"><Building2 className="h-4 w-4 text-emerald-400" /> {playerCollege}</span>
                 <span>•</span>
                 <span className="text-zinc-400">Team: <strong className="text-white">{playerTeam}</strong></span>
               </p>
@@ -181,25 +308,38 @@ export default function PlayerProfilePage({ params }: Props) {
       <section className="py-14 sm:py-16 bg-black">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-10">
           
+          {/* Bio Card */}
+          {playerBio && (
+            <div className="p-6 rounded-3xl border border-white/10 bg-[#09090b] space-y-2">
+              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5" /> Athlete Biography
+              </span>
+              <p className="text-sm sm:text-base text-zinc-300 leading-relaxed font-normal">
+                {playerBio}
+              </p>
+            </div>
+          )}
+
+          {/* Metric Bento Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="p-5 rounded-2xl border border-white/10 bg-[#09090b]">
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">K/D Ratio</span>
-              <p className="text-3xl font-black text-emerald-400 mt-1">2.48</p>
-            </div>
-
-            <div className="p-5 rounded-2xl border border-white/10 bg-[#09090b]">
               <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Win Rate</span>
-              <p className="text-3xl font-black text-white mt-1">84%</p>
+              <p className="text-3xl font-black text-emerald-400 mt-1">{profileData?.win_rate || 84.5}%</p>
             </div>
 
             <div className="p-5 rounded-2xl border border-white/10 bg-[#09090b]">
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Tournaments Won</span>
-              <p className="text-3xl font-black text-amber-400 mt-1">7 Titles</p>
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Trophies Earned</span>
+              <p className="text-3xl font-black text-amber-400 mt-1">{profileData?.trophies || 5} Trophies</p>
             </div>
 
             <div className="p-5 rounded-2xl border border-white/10 bg-[#09090b]">
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Followers</span>
-              <p className="text-3xl font-black text-white mt-1">{targetUser?.followers?.length || 142}</p>
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Active Passes</span>
+              <p className="text-3xl font-black text-white mt-1">{userPasses.length} Entries</p>
+            </div>
+
+            <div className="p-5 rounded-2xl border border-white/10 bg-[#09090b]">
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Status</span>
+              <p className="text-3xl font-black text-emerald-400 mt-1">Verified</p>
             </div>
           </div>
 
@@ -239,9 +379,10 @@ export default function PlayerProfilePage({ params }: Props) {
                       <span className="text-[11px] text-zinc-500">
                         {new Date(pass.registeredAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                       </span>
+
                       <Link
                         href={`/registration/${pass.tournamentSlug}/pass?passId=${pass.passId}`}
-                        className="inline-flex items-center gap-1 text-xs font-black text-emerald-400 hover:text-emerald-300 transition uppercase tracking-wider"
+                        className="text-xs font-bold text-emerald-400 hover:underline flex items-center gap-1"
                       >
                         View Pass <ExternalLink className="h-3 w-3" />
                       </Link>
@@ -251,13 +392,6 @@ export default function PlayerProfilePage({ params }: Props) {
               </div>
             </div>
           )}
-
-          <div className="rounded-3xl border border-white/10 bg-[#09090b] p-8 space-y-4 shadow-2xl">
-            <h3 className="text-lg font-black uppercase tracking-tight text-white">Athlete Bio & Competition Specialty</h3>
-            <p className="text-sm text-zinc-300 leading-relaxed font-normal">
-              {targetUser?.bio || `${playerName} is a competitive collegiate esports athlete specializing in tactical 5v5 FPS tournaments. Holding active student credentials, they lead team communications and site execution.`}
-            </p>
-          </div>
 
         </div>
       </section>

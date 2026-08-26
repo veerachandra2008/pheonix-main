@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -13,19 +13,41 @@ import {
   User,
   Zap,
   Building2,
-  Save
+  Save,
+  Camera,
+  Upload,
+  Sparkles,
+  Users,
+  Award,
+  Image as ImageIcon
 } from 'lucide-react';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
+const PRESET_AVATARS = [
+  { label: 'Valorant Phoenix', src: '/valorant.jpg' },
+  { label: 'Apex Legends', src: '/apex.jpg' },
+  { label: 'BGMI Soldier', src: '/bgmi.jpg' },
+  { label: 'CS2 Operative', src: '/cs2.jpg' },
+  { label: 'Cyber Hero', src: '/hero-arena.jpg' },
+  { label: 'FC Striker', src: '/fc.jpg' },
+];
+
 export default function SettingsPage() {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [sessionUser, setSessionUser] = useState<any>(null);
   const [name, setName] = useState('');
   const [tag, setTag] = useState('');
   const [college, setCollege] = useState('');
   const [team, setTeam] = useState('');
   const [bio, setBio] = useState('');
+  const [avatar, setAvatar] = useState('/valorant.jpg');
+  
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     const raw = localStorage.getItem('xenova_session');
@@ -33,6 +55,7 @@ export default function SettingsPage() {
       router.replace('/login');
       return;
     }
+
     try {
       const user = JSON.parse(raw);
       setSessionUser(user);
@@ -41,49 +64,127 @@ export default function SettingsPage() {
       setCollege(user.college || '');
       setTeam(user.team || '');
       setBio(user.bio || '');
+      setAvatar(user.avatar || user.avatar_url || '/valorant.jpg');
+
+      // Fetch live fresh profile from Database (/api/auth/profile)
+      const fetchLiveProfile = async () => {
+        try {
+          const apiBase =
+            typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+              ? '/api'
+              : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+          const res = await fetch(`${apiBase}/auth/profile?email=${encodeURIComponent(user.email)}`, { cache: 'no-store' });
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success && json.data) {
+              const live = json.data;
+              setName(live.name || user.name || '');
+              setTag(live.tag || user.tag || '');
+              setCollege(live.college || user.college || '');
+              setTeam(live.team || user.team || '');
+              setBio(live.bio || user.bio || '');
+              if (live.avatar || live.avatar_url) {
+                setAvatar(live.avatar || live.avatar_url);
+              }
+              // Update local session
+              const updatedSession = { ...user, ...live };
+              localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
+            }
+          }
+        } catch (err) {
+          console.warn('Profile database fetch error:', err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      fetchLiveProfile();
     } catch (e) {
       router.replace('/login');
     }
   }, [router]);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMsg('Image file size must be under 5MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      setAvatar(base64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!sessionUser) return;
 
-    const updated = {
-      ...sessionUser,
-      name,
-      tag,
-      college,
-      team,
-      bio,
+    setSaving(true);
+    setErrorMsg('');
+    setSavedMsg('');
+
+    const payload = {
+      email: sessionUser.email,
+      name: name.trim(),
+      tag: tag.trim(),
+      college: college.trim(),
+      team: team.trim(),
+      bio: bio.trim(),
+      avatar_url: avatar,
+      avatar: avatar,
     };
 
-    localStorage.setItem('xenova_session', JSON.stringify(updated));
-    
-    // Also update in xenova_users
     try {
-      const rawUsers = localStorage.getItem('xenova_users');
-      const users = rawUsers ? JSON.parse(rawUsers) : [];
-      const nextUsers = users.map((u: any) => (u.email === sessionUser.email ? { ...u, ...updated } : u));
-      localStorage.setItem('xenova_users', JSON.stringify(nextUsers));
-    } catch (e) {
-      console.error(e);
-    }
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
 
-    setSavedMsg('Settings updated successfully!');
-    setTimeout(() => setSavedMsg(''), 3000);
+      const res = await fetch(`${apiBase}/auth/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.message || 'Failed to save profile.');
+      }
+
+      // Update session in local storage
+      const nextSession = {
+        ...sessionUser,
+        ...payload,
+      };
+      localStorage.setItem('xenova_session', JSON.stringify(nextSession));
+      window.dispatchEvent(new Event('xenova-auth-change'));
+
+      setSavedMsg('Profile and picture updated successfully in database!');
+      setTimeout(() => setSavedMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error updating profile');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <main className="min-h-screen bg-black text-white font-sans selection:bg-emerald-500 selection:text-zinc-950">
       
+      {/* Hero Header */}
       <section className="relative overflow-hidden border-b border-zinc-900 bg-black py-12 sm:py-16">
         <div className="absolute inset-0 z-0">
           <img
             src="/apex.jpg"
             alt="Gamer Settings"
-            className="w-full h-full object-cover filter brightness-[0.3] saturate-150 scale-105"
+            className="w-full h-full object-cover filter brightness-[0.25] saturate-150 scale-105"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-transparent" />
@@ -102,83 +203,205 @@ export default function SettingsPage() {
           </h1>
 
           <p className="text-sm text-zinc-400 font-normal">
-            Manage your student gamer tag, university affiliation, and verified squad preferences.
+            Customize your avatar photo, student gamer tag, university club affiliation, and varsity credentials.
           </p>
         </div>
       </section>
 
-      <section className="py-14 sm:py-20 bg-black">
+      {/* Main Settings Form */}
+      <section className="py-12 sm:py-16 bg-black">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
           
-          <form onSubmit={handleSave} className="rounded-3xl border border-white/15 bg-[#09090b] p-8 md:p-12 shadow-2xl space-y-6">
+          <form onSubmit={handleSave} className="rounded-3xl border border-white/15 bg-[#09090b] p-6 sm:p-10 md:p-12 shadow-2xl space-y-8">
             
             {savedMsg && (
-              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4" /> {savedMsg}
-              </div>
+              <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 shrink-0" /> {savedMsg}
+              </motion.div>
             )}
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                Full Name
+            {errorMsg && (
+              <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-black uppercase flex items-center gap-2">
+                {errorMsg}
+              </motion.div>
+            )}
+
+            {/* ═══════════════ PROFILE PICTURE / AVATAR PICKER ═══════════════ */}
+            <div className="rounded-2xl border border-white/10 bg-zinc-950/70 p-6 space-y-6">
+              <h3 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
+                <Camera className="h-4 w-4 text-emerald-400" /> Profile Picture & Avatar
+              </h3>
+
+              <div className="flex flex-col sm:flex-row items-center gap-6">
+                
+                {/* Avatar Preview */}
+                <div className="relative group">
+                  <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl overflow-hidden border-2 border-emerald-500/60 bg-zinc-900 shadow-2xl relative flex items-center justify-center">
+                    {avatar ? (
+                      <img src={avatar} alt="Avatar Preview" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-3xl font-black text-emerald-400">
+                        {name ? name.slice(0, 2).toUpperCase() : 'XP'}
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="absolute -bottom-2 -right-2 p-2 bg-emerald-500 hover:bg-emerald-400 text-black rounded-xl shadow-lg transition cursor-pointer"
+                    title="Upload Custom Photo"
+                  >
+                    <Upload className="h-4 w-4" />
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageFileChange}
+                    className="hidden"
+                  />
+                </div>
+
+                {/* Upload Instructions & Preset Avatars */}
+                <div className="space-y-3 flex-1 text-center sm:text-left">
+                  <div>
+                    <p className="text-xs font-bold text-white uppercase">Upload Custom Photo or Choose Preset</p>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">Supports PNG, JPG, WebP up to 5MB.</p>
+                  </div>
+
+                  {/* Preset Options */}
+                  <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
+                    {PRESET_AVATARS.map((p) => (
+                      <button
+                        key={p.src}
+                        type="button"
+                        onClick={() => setAvatar(p.src)}
+                        className={`w-10 h-10 rounded-xl overflow-hidden border-2 transition cursor-pointer ${
+                          avatar === p.src ? 'border-emerald-400 scale-105 shadow-md shadow-emerald-500/30' : 'border-white/10 hover:border-white/30 opacity-70 hover:opacity-100'
+                        }`}
+                        title={p.label}
+                      >
+                        <img src={p.src} alt={p.label} className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Upload className="h-3.5 w-3.5 text-emerald-400" /> Upload File
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Form Fields */}
+            <div className="grid gap-6 md:grid-cols-2">
+              
+              {/* Full Name */}
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                  <User className="h-3.5 w-3.5 text-emerald-400" /> Full Name
+                </label>
                 <input
+                  type="text"
+                  required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-3.5 text-xs text-white outline-none focus:border-emerald-500 transition"
-                  required
+                  placeholder="e.g. Veera Chandra"
+                  className="w-full rounded-2xl border border-white/10 bg-black/80 px-4 py-3.5 text-sm text-white focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
                 />
-              </label>
+              </div>
 
-              <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                Gamer Tag / Handle
+              {/* Gamer Tag */}
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                  <Zap className="h-3.5 w-3.5 text-amber-400" /> In-Game Gamer Tag (IGN)
+                </label>
                 <input
+                  type="text"
                   value={tag}
                   onChange={(e) => setTag(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-3.5 text-xs text-white outline-none focus:border-emerald-500 transition"
-                  required
+                  placeholder="e.g. VEERA#1337"
+                  className="w-full rounded-2xl border border-white/10 bg-black/80 px-4 py-3.5 text-sm text-white focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
                 />
-              </label>
-            </div>
+              </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                University / College Affiliation
+              {/* University / College */}
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                  <Building2 className="h-3.5 w-3.5 text-indigo-400" /> University / College
+                </label>
                 <input
+                  type="text"
                   value={college}
                   onChange={(e) => setCollege(e.target.value)}
-                  placeholder="Nexus Institute of Technology"
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-3.5 text-xs text-white outline-none focus:border-emerald-500 transition"
+                  placeholder="e.g. Malla Reddy University"
+                  className="w-full rounded-2xl border border-white/10 bg-black/80 px-4 py-3.5 text-sm text-white focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
                 />
-              </label>
+              </div>
 
-              <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                Active Squad Team
+              {/* Team Name */}
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                  <Users className="h-3.5 w-3.5 text-sky-400" /> Varsity Esports Team
+                </label>
                 <input
+                  type="text"
                   value={team}
                   onChange={(e) => setTeam(e.target.value)}
-                  placeholder="Team Titans"
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-3.5 text-xs text-white outline-none focus:border-emerald-500 transition"
+                  placeholder="e.g. Team Phoenix"
+                  className="w-full rounded-2xl border border-white/10 bg-black/80 px-4 py-3.5 text-sm text-white focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
                 />
-              </label>
+              </div>
+
+              {/* Email (Read Only) */}
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-xs font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                  <Mail className="h-3.5 w-3.5 text-zinc-500" /> Registered Account Email (Locked)
+                </label>
+                <div className="relative">
+                  <input
+                    type="email"
+                    disabled
+                    value={sessionUser?.email || ''}
+                    className="w-full rounded-2xl border border-white/5 bg-zinc-900/60 px-4 py-3.5 text-sm text-zinc-400 cursor-not-allowed"
+                  />
+                  <Lock className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-600" />
+                </div>
+              </div>
+
+              {/* Bio / Bio Description */}
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-xs font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-emerald-400" /> Athlete Bio & Playstyle
+                </label>
+                <textarea
+                  rows={3}
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                  placeholder="e.g. Duelist main specializing in entry frags and tactical callouts."
+                  className="w-full rounded-2xl border border-white/10 bg-black/80 px-4 py-3.5 text-sm text-white focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
+                />
+              </div>
+
             </div>
 
-            <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
-              Player Bio / Specialty
-              <textarea
-                value={bio}
-                onChange={(e) => setBio(e.target.value)}
-                rows={3}
-                placeholder="Tactical 5v5 IGL specializing in site executes..."
-                className="mt-1 w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-3 text-xs text-white outline-none focus:border-emerald-500 transition"
-              />
-            </label>
+            {/* Save Button */}
+            <div className="pt-4 flex justify-end">
+              <button
+                type="submit"
+                disabled={saving}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 hover:bg-emerald-400 px-8 py-4 text-xs font-black uppercase tracking-wider text-zinc-950 transition shadow-lg shadow-emerald-500/20 cursor-pointer disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" />
+                {saving ? 'Saving Profile...' : 'Save Profile Changes'}
+              </button>
+            </div>
 
-            <button
-              type="submit"
-              className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 py-4 text-xs font-black uppercase tracking-wider shadow-lg shadow-emerald-500/25 transition cursor-pointer"
-            >
-              <Save className="h-4 w-4" /> Save Profile Settings
-            </button>
           </form>
 
         </div>

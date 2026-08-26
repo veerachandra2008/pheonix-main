@@ -222,10 +222,14 @@ export const Navbar = () => {
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setDropdownOpen(!dropdownOpen)}
-                className="flex items-center justify-center p-2.5 rounded-full border border-white/15 bg-black/60 backdrop-blur-2xl text-zinc-200 hover:text-white hover:bg-white/10 transition shadow-lg group cursor-pointer"
+                className="flex items-center justify-center h-9 w-9 rounded-full border border-white/15 bg-black/60 backdrop-blur-2xl text-zinc-200 hover:text-white hover:bg-white/10 transition shadow-lg group cursor-pointer overflow-hidden"
                 title="Gamer Profile"
               >
-                <User className="h-4.5 w-4.5 text-emerald-400 group-hover:scale-110 transition-transform" />
+                {session?.avatar || session?.avatar_url ? (
+                  <img src={session.avatar || session.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <User className="h-4.5 w-4.5 text-emerald-400 group-hover:scale-110 transition-transform" />
+                )}
               </button>
 
               <AnimatePresence>
@@ -259,7 +263,7 @@ export const Navbar = () => {
                     </Link>
 
                     <Link
-                      href={`/players/${encodeURIComponent((session?.tag || session?.name || 'profile').toString().toLowerCase().replace(/\s+/g, '-'))}`}
+                      href={`/players/${encodeURIComponent(session?.email || 'me')}`}
                       className="flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-zinc-200 hover:bg-white/10 hover:text-white rounded-xl transition"
                       onClick={() => setDropdownOpen(false)}
                     >

@@ -1,443 +1,504 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
   Users,
   UserCheck,
-  UserPlus
+  UserPlus,
+  ShieldCheck,
+  Crown,
+  Building2,
+  Trophy,
+  ExternalLink,
+  Sparkles,
+  Zap,
+  ArrowRight,
+  Flame,
+  Heart,
+  UserX
 } from 'lucide-react';
-import Link from 'next/link';
-import { ProfileCard } from '@/components/ui/profile-card';
 import FinalCTA from '@/components/xenova/FinalCTA';
+import { supabase } from '@/lib/supabase';
 
 type Player = {
   id: string;
   name: string;
   email: string;
   tag: string;
-  bio?: string;
   college?: string;
   team?: string;
-  followers: string[];
-  following: string[];
-  bannerImage?: string;
-  avatarImage?: string;
+  bio?: string;
+  role?: string;
+  avatar?: string;
+  avatar_url?: string;
+  rank?: number;
+  win_rate?: number;
+  trophies?: number;
 };
-
-const defaultCampusPlayers: Player[] = [
-  {
-    id: 'p-1',
-    name: 'Aarav "Viper" Rao',
-    email: 'aarav.rao@bits-pilani.ac.in',
-    tag: 'viper_bits',
-    bio: 'Apex Controller & IGL for BITS Titans. 3x National Campus MVP.',
-    college: 'BITS Pilani',
-    team: 'Team Titans',
-    followers: ['u-1', 'u-2', 'u-3'],
-    following: ['u-4'],
-    bannerImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&auto=format&fit=crop&q=80',
-    avatarImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'p-2',
-    name: 'Nisha "Blaze" Menon',
-    email: 'nisha.m@iitb.ac.in',
-    tag: 'blaze_iitb',
-    bio: 'Entry Fragger & Team Captain at IIT Bombay Esports.',
-    college: 'IIT Bombay',
-    team: 'Team Phoenix',
-    followers: ['u-1', 'u-5'],
-    following: [],
-    bannerImage: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=800&auto=format&fit=crop&q=80',
-    avatarImage: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=200&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'p-3',
-    name: 'Rehan "Scope" Khan',
-    email: 'rehan.k@du.ac.in',
-    tag: 'scope_du',
-    bio: 'CS2 Sniper Specialist. National Collegiate Cup Finalist.',
-    college: 'Delhi University Esports Hub',
-    team: 'Cyber Hawks',
-    followers: ['u-2', 'u-3', 'u-6'],
-    following: [],
-    bannerImage: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800&auto=format&fit=crop&q=80',
-    avatarImage: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'p-4',
-    name: 'Kavya "Astra" Sharma',
-    email: 'kavya.s@srm.edu.in',
-    tag: 'astra_srm',
-    bio: 'VALORANT Sentinel Main & Tactical Strategist.',
-    college: 'SRM Institute of Tech',
-    team: 'SRM Strikers',
-    followers: ['u-4'],
-    following: [],
-    bannerImage: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=800&auto=format&fit=crop&q=80',
-    avatarImage: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=200&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'p-5',
-    name: 'Vikram "Ghost" Patel',
-    email: 'vikram.p@anna.edu',
-    tag: 'ghost_anna',
-    bio: 'BGMI Rusher & Clutch Master for Anna Varsity.',
-    college: 'Anna University',
-    team: 'Vanguard Varsity',
-    followers: ['u-1', 'u-7'],
-    following: [],
-    bannerImage: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=800&auto=format&fit=crop&q=80',
-    avatarImage: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=200&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'p-6',
-    name: 'Rohan "Zenith" Verma',
-    email: 'rohan.v@vit.ac.in',
-    tag: 'zenith_vit',
-    bio: 'EA Sports FC24 Collegiate Champion. 1v1 Specialist.',
-    college: 'Vellore Institute of Technology',
-    team: 'VIT Elite',
-    followers: ['u-3'],
-    following: [],
-    bannerImage: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=800&auto=format&fit=crop&q=80',
-    avatarImage: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'p-7',
-    name: 'Ananya "Shadow" Iyer',
-    email: 'ananya.i@iitm.ac.in',
-    tag: 'shadow_iitm',
-    bio: 'Free Fire IGL & Strategic Analyst for IIT Madras.',
-    college: 'IIT Madras',
-    team: 'Madras Mutineers',
-    followers: ['u-2', 'u-5', 'u-8'],
-    following: [],
-    bannerImage: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=800&auto=format&fit=crop&q=80',
-    avatarImage: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'p-8',
-    name: 'Dev "Phantom" Kapoor',
-    email: 'dev.k@dtu.ac.in',
-    tag: 'phantom_dtu',
-    bio: 'Rocket League Freestyle Specialist & Air Dribble King.',
-    college: 'Delhi Technological University',
-    team: 'DTU Dynamos',
-    followers: ['u-1'],
-    following: [],
-    bannerImage: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=800&auto=format&fit=crop&q=80',
-    avatarImage: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=200&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'p-9',
-    name: 'Siddharth "Blitz" Nair',
-    email: 'siddharth.n@manipal.edu',
-    tag: 'blitz_manipal',
-    bio: 'COD Mobile Slayer & Ranked Leaderboard Top 100.',
-    college: 'Manipal Academy of Higher Ed',
-    team: 'Manipal Mavericks',
-    followers: ['u-6', 'u-7'],
-    following: [],
-    bannerImage: 'https://images.unsplash.com/photo-1501196354995-cbb51c65aaea?w=800&auto=format&fit=crop&q=80',
-    avatarImage: 'https://images.unsplash.com/photo-1501196354995-cbb51c65aaea?w=200&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'p-10',
-    name: 'Meera "Cypher" Deshmukh',
-    email: 'meera.d@vjti.ac.in',
-    tag: 'cypher_vjti',
-    bio: 'VALORANT Initiator & Setup Genius for VJTI Mumbai.',
-    college: 'VJTI Mumbai',
-    team: 'VJTI Warriors',
-    followers: ['u-2'],
-    following: [],
-    bannerImage: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=800&auto=format&fit=crop&q=80',
-    avatarImage: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'p-11',
-    name: 'Tarun "Spectre" Gupta',
-    email: 'tarun.g@iiith.ac.in',
-    tag: 'spectre_iiit',
-    bio: 'CS2 Rifler & Headshot Machine. IIIT Hyderabad Captain.',
-    college: 'IIIT Hyderabad',
-    team: 'Hyderabad Falcons',
-    followers: ['u-4', 'u-9'],
-    following: [],
-    bannerImage: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=800&auto=format&fit=crop&q=80',
-    avatarImage: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'p-12',
-    name: 'Yash "Frost" Singhania',
-    email: 'yash.s@ju.ac.in',
-    tag: 'frost_jadavpur',
-    bio: 'BGMI Support & Scout for Jadavpur Varsity Squad.',
-    college: 'Jadavpur University',
-    team: 'Jadavpur Jaguars',
-    followers: ['u-1', 'u-10'],
-    following: [],
-    bannerImage: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=800&auto=format&fit=crop&q=80',
-    avatarImage: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=200&auto=format&fit=crop&q=80',
-  }
-];
 
 export default function PlayersPage() {
   const router = useRouter();
-  const [session, setSession] = useState<Player | null>(null);
+  const [session, setSession] = useState<any>(null);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [filteredPlayers, setFilteredPlayers] = useState<Player[]>([]);
+  const [followingSet, setFollowingSet] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'following'>('all');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'following' | 'player' | 'organizer'>('all');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let currentEmail = '';
     const rawSession = localStorage.getItem('xenova_session');
-    let user = rawSession ? JSON.parse(rawSession) : null;
-    if (!user) {
-      user = {
-        id: 'guest-user',
-        name: 'Guest Athlete',
-        email: 'guest@xenova.com',
-        tag: 'guest_gamer',
-        followers: [],
-        following: [],
-      };
+    if (rawSession) {
+      try {
+        const parsed = JSON.parse(rawSession);
+        setSession(parsed);
+        currentEmail = (parsed.email || '').toLowerCase();
+      } catch (e) {
+        console.error(e);
+      }
     }
-    setSession(user);
 
+    // Load initial following from localStorage
     try {
-      const rawUsers = localStorage.getItem('xenova_users');
-      const storedUsers: Player[] = rawUsers ? JSON.parse(rawUsers) : [];
-      
-      // Combine stored users with default campus players, ensuring uniqueness by ID & Email
-      const seenIds = new Set<string>();
-      const seenEmails = new Set<string>();
-      const combined: Player[] = [];
-
-      for (const u of storedUsers) {
-        if (u && u.id && !seenIds.has(u.id)) {
-          seenIds.add(u.id);
-          if (u.email) seenEmails.add(u.email);
-          combined.push(u);
-        }
+      const rawFollowing = localStorage.getItem('xenova_following');
+      if (rawFollowing) {
+        setFollowingSet(new Set(JSON.parse(rawFollowing)));
       }
+    } catch {}
 
-      for (const dp of defaultCampusPlayers) {
-        if (!seenIds.has(dp.id) && (!dp.email || !seenEmails.has(dp.email)) && dp.email !== user.email && dp.id !== user.id) {
-          seenIds.add(dp.id);
-          if (dp.email) seenEmails.add(dp.email);
-          combined.push(dp);
-        }
-      }
-
-      const otherPlayers = combined.filter((u: Player) => u.email !== user.email && u.id !== user.id);
-      setPlayers(otherPlayers);
-      setFilteredPlayers(otherPlayers);
-      setLoading(false);
-    } catch (error) {
-      setPlayers(defaultCampusPlayers);
-      setFilteredPlayers(defaultCampusPlayers);
-      setLoading(false);
+    // Load following list directly from Supabase user_follows
+    if (currentEmail) {
+      try {
+        supabase
+          .from('user_follows')
+          .select('target_email')
+          .eq('follower_email', currentEmail)
+          .then(({ data }) => {
+            if (data && data.length > 0) {
+              const set = new Set(data.map((r: any) => (r.target_email || '').toLowerCase()));
+              setFollowingSet(set);
+              localStorage.setItem('xenova_following', JSON.stringify(Array.from(set)));
+            }
+          });
+      } catch {}
     }
+
+    const loadPlayersFromDatabase = async () => {
+      setLoading(true);
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+      let dbPlayers: Player[] = [];
+
+      // 1. Fetch from Backend /api/auth/users
+      try {
+        const res = await fetch(`${apiBase}/auth/users`, { cache: 'no-store' });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data)) {
+            dbPlayers = json.data;
+          }
+        }
+      } catch (err) {
+        console.warn('Backend users fetch notice:', err);
+      }
+
+      // 2. Direct Supabase Fallback if Backend API returned empty
+      if (dbPlayers.length === 0) {
+        try {
+          const { data, error } = await supabase.from('users').select('*').order('created_at', { ascending: false });
+          if (!error && data && Array.isArray(data)) {
+            dbPlayers = data.map((u: any) => ({
+              id: String(u.id),
+              name: u.name || 'Varsity Athlete',
+              email: u.email || '',
+              college: u.college || 'University Campus',
+              role: (u.role || 'PLAYER').toLowerCase(),
+              bio: u.bio || '',
+              tag: u.tag || `@${(u.name || 'player').toLowerCase().replace(/\s+/g, '')}`,
+              avatar: u.avatar_url || '/valorant.jpg',
+              avatar_url: u.avatar_url || '/valorant.jpg',
+              rank: u.rank || 1,
+              win_rate: u.win_rate || 0.0,
+              trophies: u.trophies || 0,
+            }));
+          }
+        } catch (sbErr) {
+          console.warn('Direct Supabase users fallback notice:', sbErr);
+        }
+      }
+
+      // STRICTLY EXCLUDE CURRENT LOGGED-IN USER'S OWN PROFILE
+      const otherPlayers = dbPlayers.filter(
+        (p) => p.email && p.email.toLowerCase() !== currentEmail
+      );
+
+      setPlayers(otherPlayers);
+      setLoading(false);
+    };
+
+    loadPlayersFromDatabase();
   }, []);
 
-  useEffect(() => {
-    if (!session) return;
-
-    let filtered = players;
-
-    if (selectedFilter === 'following') {
-      filtered = players.filter((p) => session.following?.includes(p.id));
+  const handleToggleFollow = async (targetEmail: string) => {
+    let currentEmail = (session?.email || '').trim().toLowerCase();
+    if (!currentEmail) {
+      try {
+        const raw = localStorage.getItem('xenova_session');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          currentEmail = (parsed.email || '').trim().toLowerCase();
+        }
+      } catch {}
     }
 
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (p) =>
-          p.name.toLowerCase().includes(term) ||
-          p.tag.toLowerCase().includes(term) ||
-          p.college?.toLowerCase().includes(term) ||
-          p.team?.toLowerCase().includes(term)
-      );
+    if (!currentEmail) {
+      router.push('/login');
+      return;
     }
 
-    setFilteredPlayers(filtered);
-  }, [searchTerm, selectedFilter, players, session]);
+    const emailNorm = targetEmail.trim().toLowerCase();
+    const isCurrentlyFollowing = followingSet.has(emailNorm);
 
-  const toggleFollow = (playerId: string) => {
-    if (!session) return;
+    const nextSet = new Set(followingSet);
+    if (isCurrentlyFollowing) {
+      nextSet.delete(emailNorm);
+    } else {
+      nextSet.add(emailNorm);
+    }
 
-    const isFollowing = session.following?.includes(playerId);
-    const updatedFollowing = isFollowing
-      ? session.following.filter((id) => id !== playerId)
-      : [...(session.following || []), playerId];
+    setFollowingSet(nextSet);
+    localStorage.setItem('xenova_following', JSON.stringify(Array.from(nextSet)));
 
-    const updatedUser = { ...session, following: updatedFollowing };
-    localStorage.setItem('xenova_session', JSON.stringify(updatedUser));
-    setSession(updatedUser);
+    // Primary Backend API sync with Supabase persistence
+    try {
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
 
-    const updatedPlayers = players.map((p) => {
-      if (p.id === playerId) {
-        const hasFollower = p.followers?.includes(session.id);
-        const updatedFollowers = hasFollower
-          ? p.followers.filter((id) => id !== session.id)
-          : [...(p.followers || []), session.id];
-        return { ...p, followers: updatedFollowers };
+      const res = await fetch(`${apiBase}/auth/follow`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          follower_email: currentEmail,
+          target_email: emailNorm,
+        }),
+      });
+
+      if (!res.ok) {
+        // Fallback directly to Supabase client if API returned error
+        if (isCurrentlyFollowing) {
+          await supabase
+            .from('user_follows')
+            .delete()
+            .eq('follower_email', currentEmail)
+            .eq('target_email', emailNorm);
+        } else {
+          await supabase.from('user_follows').insert({
+            follower_email: currentEmail,
+            target_email: emailNorm,
+          });
+        }
       }
-      return p;
-    });
-
-    setPlayers(updatedPlayers);
+    } catch {
+      // Offline fallback directly to Supabase client
+      if (isCurrentlyFollowing) {
+        await supabase
+          .from('user_follows')
+          .delete()
+          .eq('follower_email', currentEmail)
+          .eq('target_email', emailNorm);
+      } else {
+        await supabase.from('user_follows').insert({
+          follower_email: currentEmail,
+          target_email: emailNorm,
+        });
+      }
+    }
   };
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-black text-white">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
-      </div>
-    );
-  }
+  const filteredPlayers = useMemo(() => {
+    return players.filter((p) => {
+      const pEmail = (p.email || '').toLowerCase();
+
+      // Following filter
+      if (selectedFilter === 'following' && !followingSet.has(pEmail)) {
+        return false;
+      }
+
+      // Role filter
+      if (selectedFilter === 'player' && (p.role || 'player').toLowerCase() !== 'player') {
+        return false;
+      }
+      if (selectedFilter === 'organizer' && (p.role || '').toLowerCase() !== 'organizer') {
+        return false;
+      }
+
+      // Search filter
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        const matchesName = (p.name || '').toLowerCase().includes(term);
+        const matchesEmail = (p.email || '').toLowerCase().includes(term);
+        const matchesCollege = (p.college || '').toLowerCase().includes(term);
+        const matchesTag = (p.tag || '').toLowerCase().includes(term);
+        return matchesName || matchesEmail || matchesCollege || matchesTag;
+      }
+
+      return true;
+    });
+  }, [players, searchTerm, selectedFilter, followingSet]);
 
   return (
     <main className="min-h-screen bg-black text-white font-sans selection:bg-emerald-500 selection:text-zinc-950">
       
-      {/* ═══════════════ HERO BANNER ═══════════════ */}
-      <section className="relative overflow-hidden border-b border-zinc-900 bg-black py-12 sm:py-16">
-        
+      {/* ═══════════════ 1. HERO HEADER ═══════════════ */}
+      <section className="relative overflow-hidden border-b border-zinc-900 bg-black py-16 sm:py-20">
         <div className="absolute inset-0 z-0">
           <img
-            src="/freefire.jpg"
-            alt="Campus Athletes"
-            className="w-full h-full object-cover filter brightness-[0.35] saturate-150 scale-105"
+            src="/hero-arena.jpg"
+            alt="Varsity Athletes"
+            className="w-full h-full object-cover filter brightness-[0.22] saturate-150 scale-105"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-transparent" />
         </div>
 
         <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-8">
-            <div className="max-w-3xl space-y-3">
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
+            
+            <div className="space-y-4 max-w-2xl">
               <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase tracking-wider">
-                <Users className="h-4 w-4" /> Varsity Athlete Roster ({filteredPlayers.length} Connected)
+                <Users className="h-3.5 w-3.5" /> Collegiate Athletes Directory
               </div>
 
               <h1 className="text-4xl sm:text-6xl font-black uppercase tracking-tight text-white leading-none">
-                Campus <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-emerald-500 bg-clip-text text-transparent">Athletes</span>
+                Varsity <span className="text-emerald-400">Athletes</span>
               </h1>
 
-              <p className="text-sm sm:text-base text-zinc-300 font-normal leading-relaxed max-w-2xl">
-                Connect with verified university gamers across India. Follow squad leaders, discover top duellists, and explore collegiate rosters.
+              <p className="text-sm sm:text-base text-zinc-400 font-normal">
+                Discover, network with, and follow collegiate competitors and team captains from other universities across India.
               </p>
             </div>
 
+            {/* Quick Metrics */}
+            <div className="flex items-center gap-4 border border-white/10 bg-zinc-950/80 backdrop-blur-xl p-4 rounded-3xl shrink-0">
+              <div className="px-3 text-center">
+                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Other Athletes</span>
+                <p className="text-2xl sm:text-3xl font-black text-white">{players.length}</p>
+              </div>
+              <div className="h-8 w-px bg-white/10" />
+              <div className="px-3 text-center">
+                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Following</span>
+                <p className="text-2xl sm:text-3xl font-black text-emerald-400">{followingSet.size}</p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════════════ 2. SEARCH & FOLLOWING FILTERS ═══════════════ */}
+      <section className="sticky top-16 z-30 border-b border-white/10 bg-black/90 backdrop-blur-2xl py-4">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            
+            {/* Search Bar */}
+            <div className="relative w-full sm:w-80 md:w-96">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search other athletes by name, college, IGN..."
+                className="w-full rounded-2xl border border-white/10 bg-zinc-900/80 pl-11 pr-4 py-3 text-xs sm:text-sm text-white placeholder:text-zinc-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
+              />
+            </div>
+
             {/* Filter Tabs */}
-            <div className="flex bg-[#09090b] p-1.5 rounded-2xl border border-white/15 backdrop-blur-xl shadow-2xl shrink-0">
+            <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-zinc-900/80 border border-white/10 overflow-x-auto max-w-full">
               <button
-                type="button"
                 onClick={() => setSelectedFilter('all')}
-                className={`px-6 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl transition cursor-pointer ${
-                  selectedFilter === 'all' ? 'bg-emerald-500 text-zinc-950 shadow-md' : 'text-zinc-400 hover:text-white'
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${
+                  selectedFilter === 'all'
+                    ? 'bg-emerald-500 text-zinc-950 shadow-md shadow-emerald-500/20'
+                    : 'text-zinc-400 hover:text-white hover:bg-white/5'
                 }`}
               >
                 All Athletes ({players.length})
               </button>
+
               <button
-                type="button"
                 onClick={() => setSelectedFilter('following')}
-                className={`px-6 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl transition cursor-pointer ${
-                  selectedFilter === 'following' ? 'bg-emerald-500 text-zinc-950 shadow-md' : 'text-zinc-400 hover:text-white'
+                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${
+                  selectedFilter === 'following'
+                    ? 'bg-emerald-500 text-zinc-950 shadow-md shadow-emerald-500/20'
+                    : 'text-zinc-400 hover:text-white hover:bg-white/5'
                 }`}
               >
-                Following ({session?.following?.length || 0})
+                <Heart className="h-3.5 w-3.5" /> Following ({followingSet.size})
+              </button>
+
+              <button
+                onClick={() => setSelectedFilter('player')}
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${
+                  selectedFilter === 'player'
+                    ? 'bg-emerald-500 text-zinc-950 shadow-md shadow-emerald-500/20'
+                    : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                Players
+              </button>
+
+              <button
+                onClick={() => setSelectedFilter('organizer')}
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${
+                  selectedFilter === 'organizer'
+                    ? 'bg-emerald-500 text-zinc-950 shadow-md shadow-emerald-500/20'
+                    : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                Organizers
               </button>
             </div>
-          </div>
 
-          {/* Search Input */}
-          <div className="mt-8 pt-6 border-t border-zinc-900 relative max-w-xl">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-            <input
-              type="search"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search athlete tag, name, team or university..."
-              className="w-full rounded-2xl border border-white/10 bg-[#09090b] pl-11 pr-4 py-3.5 text-xs text-white placeholder:text-zinc-500 outline-none focus:border-emerald-500/50 transition shadow-inner"
-            />
           </div>
-
         </div>
       </section>
 
-      {/* ═══════════════ PLAYERS GRID WITH REDESIGNED PROFILE CARDS ═══════════════ */}
-      <section className="py-14 sm:py-20 bg-black">
+      {/* ═══════════════ 3. ATHLETES GRID ═══════════════ */}
+      <section className="py-12 sm:py-16 bg-black min-h-[50vh]">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           
-          {filteredPlayers.length === 0 ? (
-            <div className="rounded-3xl border border-white/10 bg-[#09090b] p-16 text-center text-zinc-400 text-sm">
-              {selectedFilter === 'following'
-                ? 'You are not following any campus athletes yet.'
-                : 'No athletes match your search criteria.'}
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+            </div>
+          ) : filteredPlayers.length === 0 ? (
+            <div className="rounded-3xl border border-white/10 bg-[#09090b] p-12 text-center max-w-xl mx-auto space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mx-auto">
+                <Users className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-black uppercase text-white">No Athletes Found</h3>
+              <p className="text-xs text-zinc-400">
+                {selectedFilter === 'following'
+                  ? "You haven't followed any other athletes yet. Browse 'All Athletes' to follow collegiate rivals!"
+                  : searchTerm
+                  ? `No athletes match "${searchTerm}".`
+                  : 'No other registered athletes found in the database yet.'}
+              </p>
             </div>
           ) : (
-            <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filteredPlayers.map((player, idx) => {
-                const isFollowing = session?.following?.includes(player.id);
-                
-                const bannerImages = [
-                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=800&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=800&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=800&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=800&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=800&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=800&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1501196354995-cbb51c65aaea?w=800&auto=format&fit=crop&q=80'
-                ];
-                
-                const avatarImages = [
-                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=200&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=200&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=200&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&auto=format&fit=crop&q=80',
-                  'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=200&auto=format&fit=crop&q=80'
-                ];
-
-                const cardBanner = player.bannerImage || bannerImages[idx % bannerImages.length];
-                const cardAvatar = player.avatarImage || avatarImages[idx % avatarImages.length];
-
-                const gameMains = ['VALORANT MAIN', 'BGMI IGL', 'CS2 SNIPER', 'FC24 PRO', 'APEX CONTROLLER', 'FREE FIRE IGL', 'ROCKET LEAGUE', 'CODM SLAYER'];
-                const cardGameMain = gameMains[idx % gameMains.length];
+                const avatarSrc = player.avatar_url || player.avatar || '/valorant.jpg';
+                const isFollowing = followingSet.has((player.email || '').toLowerCase());
+                const roleBadgeColor =
+                  player.role === 'admin'
+                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                    : player.role === 'organizer'
+                    ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
+                    : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
 
                 return (
                   <motion.div
-                    key={`${player.id}-${idx}`}
-                    initial={{ opacity: 0, y: 20 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ duration: 0.35, delay: (idx % 3) * 0.08 }}
+                    key={player.email || player.id || `p-${idx}`}
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.04 }}
+                    className="group rounded-3xl border border-white/10 bg-[#09090b] hover:border-emerald-500/40 p-6 flex flex-col justify-between transition-all duration-300 shadow-xl hover:shadow-2xl hover:shadow-emerald-500/5 relative overflow-hidden"
                   >
-                    <ProfileCard
-                      name={player.name}
-                      tag={player.tag}
-                      timeAgo={`${player.followers?.length || 0} Followers`}
-                      image={cardBanner}
-                      avatar={cardAvatar}
-                      college={player.college}
-                      team={player.team}
-                      gameMain={cardGameMain}
-                      isFollowing={isFollowing}
-                      onFollowToggle={() => toggleFollow(player.id)}
-                      onViewProfile={() => router.push(`/players/${player.id}`)}
-                    />
+                    {/* Top Glow Accent */}
+                    <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+
+                    <div className="space-y-4">
+                      {/* Header Avatar & Follow Button */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="relative">
+                          <div className="w-16 h-16 rounded-2xl overflow-hidden border border-white/15 group-hover:border-emerald-500 transition-colors bg-zinc-900 shrink-0 flex items-center justify-center">
+                            {avatarSrc ? (
+                              <img src={avatarSrc} alt={player.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="text-xl font-black text-emerald-400">
+                                {player.name.slice(0, 2).toUpperCase()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Follow / Following Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleFollow(player.email)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider transition cursor-pointer active:scale-95 ${
+                            isFollowing
+                              ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 hover:bg-rose-500/20 hover:border-rose-500/40 hover:text-rose-400'
+                              : 'bg-white/5 border border-white/15 text-white hover:bg-emerald-500 hover:text-black hover:border-emerald-500 shadow-md'
+                          }`}
+                        >
+                          {isFollowing ? (
+                            <>
+                              <UserCheck className="h-3.5 w-3.5 group-hover:hidden" />
+                              <UserX className="h-3.5 w-3.5 hidden group-hover:inline" />
+                              <span>Following</span>
+                            </>
+                          ) : (
+                            <>
+                              <UserPlus className="h-3.5 w-3.5 text-emerald-400" />
+                              <span>Follow</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Name, Tag & Role */}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-lg font-black uppercase text-white tracking-tight truncate group-hover:text-emerald-400 transition-colors">
+                            {player.name}
+                          </h3>
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border ${roleBadgeColor}`}>
+                            {player.role || 'PLAYER'}
+                          </span>
+                        </div>
+                        <p className="text-xs font-bold text-emerald-400 font-mono truncate">
+                          {player.tag || `@${player.name.toLowerCase().replace(/\s+/g, '')}`}
+                        </p>
+                      </div>
+
+                      {/* College */}
+                      <div className="flex items-center gap-1.5 text-xs text-zinc-400 font-semibold truncate pt-1">
+                        <Building2 className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+                        <span className="truncate">{player.college || 'General Campus'}</span>
+                      </div>
+
+                      {/* Bio */}
+                      {player.bio && (
+                        <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed pt-1">
+                          {player.bio}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Footer CTA */}
+                    <div className="pt-5 mt-4 border-t border-white/5 flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-zinc-500 uppercase">
+                        Rank #{player.rank || 1}
+                      </span>
+
+                      <Link
+                        href={`/players/${encodeURIComponent(player.email || player.id)}`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-emerald-500 hover:text-black border border-white/10 hover:border-emerald-500 text-xs font-black uppercase tracking-wider text-slate-200 transition"
+                      >
+                        Profile <ArrowRight className="h-3.5 w-3.5" />
+                      </Link>
+                    </div>
                   </motion.div>
                 );
               })}
@@ -447,7 +508,6 @@ export default function PlayersPage() {
         </div>
       </section>
 
-      {/* Final CTA */}
       <FinalCTA />
     </main>
   );

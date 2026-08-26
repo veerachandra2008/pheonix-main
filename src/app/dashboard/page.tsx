@@ -98,6 +98,21 @@ export default function DashboardPage() {
       getUserRegistrations(user.email).then((regs) => {
         setUserRegistrations(regs || []);
       });
+
+      // Fetch fresh user profile from Database
+      const apiBase =
+        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? '/api'
+          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+      fetch(`${apiBase}/auth/profile?email=${encodeURIComponent(user.email)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.data) {
+            setSession((prev: any) => ({ ...prev, ...data.data }));
+          }
+        })
+        .catch(() => {});
     } catch (e) {
       router.replace('/login');
     }
@@ -125,8 +140,12 @@ export default function DashboardPage() {
             <div className="flex flex-col sm:flex-row sm:items-center gap-6">
               
               {/* Avatar Crest */}
-              <div className="h-24 w-24 sm:h-28 sm:w-28 rounded-3xl border-2 border-emerald-500/50 bg-emerald-500/10 flex items-center justify-center font-black text-emerald-400 text-3xl shadow-2xl shrink-0">
-                {session?.name?.slice(0, 2).toUpperCase() || 'XP'}
+              <div className="h-24 w-24 sm:h-28 sm:w-28 rounded-3xl border-2 border-emerald-500/50 bg-emerald-500/10 overflow-hidden flex items-center justify-center font-black text-emerald-400 text-3xl shadow-2xl shrink-0">
+                {session?.avatar || session?.avatar_url ? (
+                  <img src={session.avatar || session.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  session?.name?.slice(0, 2).toUpperCase() || 'XP'
+                )}
               </div>
 
               <div className="space-y-2">

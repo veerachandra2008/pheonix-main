@@ -2,6 +2,7 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, request, jsonify
 from config import get_supabase_client
+from cache import api_cache
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -323,26 +324,275 @@ def delete_organizer(email=None):
 @auth_bp.route('/users', methods=['GET'])
 def get_all_users():
     """
-    Fetch all registered users from Supabase and memory store.
+    Fetch all registered users strictly from Supabase users table with caching.
     """
     try:
-        users = []
+        cached = api_cache.get('users:all')
+        if cached is not None:
+            return jsonify({'success': True, 'data': cached, 'total': len(cached), 'cached': True}), 200
+
+        raw_users = []
         try:
             supabase = get_supabase_client()
-            res = supabase.table('users').select('*').execute()
-            if res.data and len(res.data) > 0:
-                users = res.data
+            res = supabase.table('users').select('*').order('created_at', desc=True).execute()
+            if res.data is not None:
+                raw_users = res.data
         except Exception as sb_err:
             print(f"Supabase users fetch warning: {sb_err}")
 
-        # Merge with memory store
-        seen_emails = {u.get('email', '').lower() for u in users if u.get('email')}
-        for email, user in IN_MEMORY_USERS.items():
-            if email.lower() not in seen_emails:
-                users.append(user)
-                seen_emails.add(email.lower())
+        # If Supabase returned rows, map them
+        formatted_users = []
+        seen_emails = set()
+        for u in raw_users:
+            em = (u.get('email') or '').strip().lower()
+            if em and em not in seen_emails:
+                seen_emails.add(em)
+                formatted_users.append({
+                    'id': str(u.get('id', '')),
+                    'name': u.get('name', 'Athlete'),
+                    'email': em,
+                    'college': u.get('college', 'University Campus'),
+                    'role': (u.get('role') or 'PLAYER').lower(),
+                    'bio': u.get('bio', ''),
+                    'tag': u.get('tag') or f"{u.get('name', 'Gamer').upper().replace(' ', '')}#1337",
+                    'avatar': u.get('avatar_url') or '/valorant.jpg',
+                    'avatar_url': u.get('avatar_url') or '/valorant.jpg',
+                    'rank': u.get('rank', 1),
+                    'win_rate': u.get('win_rate', 0.0),
+                    'trophies': u.get('trophies', 0),
+                    'created_at': u.get('created_at')
+                })
 
-        return jsonify({'success': True, 'data': users, 'total': len(users)}), 200
+        api_cache.set('users:all', formatted_users, ttl_seconds=30)
+        return jsonify({'success': True, 'data': formatted_users, 'total': len(formatted_users)}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@auth_bp.route('/profile', methods=['GET', 'OPTIONS'])
+@auth_bp.route('/user/<path:email>', methods=['GET', 'OPTIONS'])
+def get_user_profile(email=None):
+    """
+    Fetch single user profile directly from Supabase users table with sub-millisecond caching.
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({'success': True}), 200
+
+    try:
+        target_email = (email or request.args.get('email') or '').strip().lower()
+        if not target_email:
+            return jsonify({'success': False, 'message': 'Email query parameter is required.'}), 400
+
+        cache_key = f"profile:{target_email}"
+        cached = api_cache.get(cache_key)
+        if cached is not None:
+            return jsonify({'success': True, 'data': cached, 'cached': True}), 200
+
+        user = None
+        try:
+            supabase = get_supabase_client()
+            res = supabase.table('users').select('*').eq('email', target_email).execute()
+            if res.data and len(res.data) > 0:
+                user = res.data[0]
+        except Exception as sb_err:
+            print(f"Supabase profile fetch notice: {sb_err}")
+
+        if not user and target_email in IN_MEMORY_USERS:
+            user = IN_MEMORY_USERS[target_email]
+
+        if not user:
+            user = {
+                'name': target_email.split('@')[0].capitalize(),
+                'email': target_email,
+                'college': 'General Campus',
+                'role': 'PLAYER',
+                'avatar_url': '/valorant.jpg',
+                'tag': f"{target_email.split('@')[0].upper()}#1337"
+            }
+
+        profile_data = {
+            'id': user.get('id'),
+            'name': user.get('name'),
+            'email': user.get('email'),
+            'college': user.get('college'),
+            'team': user.get('team', ''),
+            'tag': user.get('tag') or f"{user.get('name', 'Gamer').upper().replace(' ', '')}#1337",
+            'bio': user.get('bio', ''),
+            'role': (user.get('role') or 'PLAYER').lower(),
+            'avatar': user.get('avatar_url') or user.get('avatar') or '/valorant.jpg',
+            'avatar_url': user.get('avatar_url') or user.get('avatar') or '/valorant.jpg',
+            'rank': user.get('rank', 1),
+            'win_rate': user.get('win_rate', 0.0),
+            'trophies': user.get('trophies', 0)
+        }
+
+        api_cache.set(cache_key, profile_data, ttl_seconds=30)
+        return jsonify({'success': True, 'data': profile_data}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@auth_bp.route('/profile', methods=['PUT', 'PATCH', 'POST', 'OPTIONS'])
+def update_user_profile():
+    """
+    Update user profile & avatar directly in Supabase users table.
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({'success': True}), 200
+
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        if not email:
+            return jsonify({'success': False, 'message': 'Email is required.'}), 400
+
+        name = (data.get('name') or '').strip()
+        tag = (data.get('tag') or '').strip()
+        college = (data.get('college') or '').strip()
+        team = (data.get('team') or '').strip()
+        bio = (data.get('bio') or '').strip()
+        avatar = data.get('avatar') or data.get('avatar_url') or data.get('avatarUrl') or ''
+
+        update_fields = {}
+        if name: update_fields['name'] = name
+        if tag: update_fields['tag'] = tag
+        if college: update_fields['college'] = college
+        if team is not None: update_fields['team'] = team
+        if bio is not None: update_fields['bio'] = bio
+        if avatar: update_fields['avatar_url'] = avatar
+
+        # Strict column filter for Supabase users table
+        VALID_USER_COLUMNS = {'name', 'college', 'bio', 'avatar_url', 'rank', 'win_rate', 'trophies', 'role'}
+        db_payload = {k: v for k, v in update_fields.items() if k in VALID_USER_COLUMNS}
+
+        # Update in Supabase users table
+        try:
+            supabase = get_supabase_client()
+            existing = supabase.table('users').select('id').eq('email', email).execute()
+            if existing.data and len(existing.data) > 0:
+                supabase.table('users').update(db_payload).eq('email', email).execute()
+            else:
+                new_payload = {
+                    'email': email,
+                    'name': name or email.split('@')[0].capitalize(),
+                    'college': college or 'General Campus',
+                    'role': (data.get('role') or 'PLAYER').upper(),
+                    'avatar_url': avatar or '/valorant.jpg',
+                    **db_payload
+                }
+                supabase.table('users').insert(new_payload).execute()
+        except Exception as sb_err:
+            print(f"Supabase update profile error: {sb_err}")
+
+        # Invalidate caches
+        api_cache.delete(f"profile:{email}")
+        api_cache.delete('users:all')
+
+        # Update memory store
+        if email not in IN_MEMORY_USERS:
+            IN_MEMORY_USERS[email] = {'email': email}
+        IN_MEMORY_USERS[email].update(update_fields)
+
+        return jsonify({
+            'success': True,
+            'message': 'Profile updated successfully in database!',
+            'data': {
+                'name': name,
+                'email': email,
+                'college': college,
+                'team': team,
+                'tag': tag,
+                'bio': bio,
+                'avatar': avatar or '/valorant.jpg',
+                'avatar_url': avatar or '/valorant.jpg'
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+# Follow Store
+FOLLOW_STORE = {}
+
+@auth_bp.route('/follow', methods=['POST', 'OPTIONS'])
+def toggle_follow():
+    """
+    Toggle follow/unfollow for an athlete in Supabase user_follows table.
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({'success': True}), 200
+
+    try:
+        data = request.get_json() or {}
+        follower_email = (data.get('follower_email') or data.get('followerEmail') or '').strip().lower()
+        target_email = (data.get('target_email') or data.get('targetEmail') or '').strip().lower()
+
+        if not follower_email or not target_email:
+            return jsonify({'success': False, 'message': 'follower_email and target_email are required.'}), 400
+
+        if follower_email == target_email:
+            return jsonify({'success': False, 'message': 'Cannot follow yourself.'}), 400
+
+        print(f"[FOLLOW DEBUG] follower_email='{follower_email}', target_email='{target_email}'")
+
+        is_following = False
+        try:
+            supabase = get_supabase_client()
+            existing = supabase.table('user_follows').select('id').eq('follower_email', follower_email).eq('target_email', target_email).execute()
+            if existing.data and len(existing.data) > 0:
+                del_res = supabase.table('user_follows').delete().eq('follower_email', follower_email).eq('target_email', target_email).execute()
+                print(f"[FOLLOW DEBUG] Deleted follow: {del_res.data}")
+                is_following = False
+                msg = f"Unfollowed {target_email}"
+            else:
+                ins_res = supabase.table('user_follows').insert({'follower_email': follower_email, 'target_email': target_email}).execute()
+                print(f"[FOLLOW DEBUG] Inserted follow: {ins_res.data}")
+                is_following = True
+                msg = f"Now following {target_email}"
+        except Exception as sb_err:
+            print(f"[FOLLOW ERROR] Supabase user_follows operation failed: {sb_err}")
+            if follower_email not in FOLLOW_STORE:
+                FOLLOW_STORE[follower_email] = set()
+            if target_email in FOLLOW_STORE[follower_email]:
+                FOLLOW_STORE[follower_email].remove(target_email)
+                is_following = False
+                msg = f"Unfollowed {target_email}"
+            else:
+                FOLLOW_STORE[follower_email].add(target_email)
+                is_following = True
+                msg = f"Now following {target_email}"
+
+        return jsonify({
+            'success': True,
+            'is_following': is_following,
+            'isFollowing': is_following,
+            'message': msg
+        }), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@auth_bp.route('/following/<path:email>', methods=['GET', 'OPTIONS'])
+@auth_bp.route('/following', methods=['GET', 'OPTIONS'])
+def get_following(email=None):
+    """
+    Get list of followed athlete emails from Supabase user_follows table.
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({'success': True}), 200
+
+    try:
+        target_email = (email or request.args.get('email') or '').strip().lower()
+        followed = []
+        try:
+            supabase = get_supabase_client()
+            res = supabase.table('user_follows').select('target_email').eq('follower_email', target_email).execute()
+            if res.data:
+                followed = [r['target_email'] for r in res.data if r.get('target_email')]
+        except Exception:
+            followed = list(FOLLOW_STORE.get(target_email, set()))
+
+        return jsonify({'success': True, 'following': followed, 'count': len(followed)}), 200
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
