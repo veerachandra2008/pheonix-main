@@ -47,5 +47,11 @@ def create_app():
 app = create_app()
 
 if __name__ == '__main__':
-    print(f"🚀 Starting High-Performance Flask Server on port {Config.PORT}...")
-    app.run(host='0.0.0.0', port=Config.PORT, debug=False, threaded=True)
+    port = Config.PORT
+    try:
+        from waitress import serve
+        print(f"🚀 Starting High-Performance Multi-Threaded Waitress Server (16 Threads) on port {port}...")
+        serve(app, host='0.0.0.0', port=port, threads=16, connection_limit=200, channel_timeout=30)
+    except ImportError:
+        print(f"🚀 Starting Threaded Flask Server on port {port}...")
+        app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
