@@ -41,6 +41,7 @@ backend/.env.*
 # vercel
 .vercel
 scripts/sync_vercel_env.py
+scripts/set_framework.py
 
 # typescript
 *.tsbuildinfo
