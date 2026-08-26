@@ -118,6 +118,8 @@ export default function LoginPage() {
         // -------------------------------------------------------------
         // 3. SUPABASE AUTH LOGIN WITH DATABASE FALLBACK
         // -------------------------------------------------------------
+        // 3. SUPABASE AUTH LOGIN & STRICT PASSWORD VERIFICATION
+        // -------------------------------------------------------------
         let authenticatedUser: any = null;
         let userId = '';
 
@@ -129,14 +131,44 @@ export default function LoginPage() {
         if (!authError && authData?.user) {
           userId = authData.user.id;
           authenticatedUser = authData.user;
-        } else {
-          console.warn('Supabase Auth Notice:', authError?.message);
         }
 
-        // Fetch user profile from public.users table or backend
+        // Check backend auth endpoint as secondary verification
         let userProfile: any = null;
+        if (!authenticatedUser) {
+          try {
+            const apiBase = getApiBaseUrl();
+            const apiRes = await fetch(`${apiBase}/auth/login`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: cleanEmail, password: formData.password }),
+            });
+            if (apiRes.ok) {
+              const apiJson = await apiRes.json();
+              if (apiJson.success && apiJson.user) {
+                userProfile = apiJson.user;
+                authenticatedUser = { email: cleanEmail, id: apiJson.user.id };
+                userId = apiJson.user.id;
+              }
+            }
+          } catch (apiErr) {
+            console.warn('Backend login verification notice:', apiErr);
+          }
+        }
 
-        if (userId) {
+        // If password authentication failed on both Supabase and Backend, reject login!
+        if (!authenticatedUser) {
+          const errorText = authError?.message || 'Invalid email or password. Please check your credentials.';
+          setStatusMsg({
+            type: 'error',
+            text: `❌ ${errorText}`,
+          });
+          setLoading(false);
+          return;
+        }
+
+        // Fetch user profile from public.users table if not already populated
+        if (userId && !userProfile) {
           const { data: dbData } = await supabase
             .from('users')
             .select('*')
@@ -154,78 +186,28 @@ export default function LoginPage() {
           userProfile = dbData;
         }
 
-        // If not found in direct Supabase client, check Backend API
-        if (!userProfile) {
-          try {
-            const apiBase = getApiBaseUrl();
-            const apiRes = await fetch(`${apiBase}/auth/login`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: cleanEmail, password: formData.password }),
-            });
-            if (apiRes.ok) {
-              const apiJson = await apiRes.json();
-              if (apiJson.success && apiJson.user) {
-                userProfile = apiJson.user;
-              }
-            }
-          } catch {}
-        }
+        const resolvedUserId = userId || userProfile?.id || 'usr_' + Date.now();
+        const resolvedName = userProfile?.name || formData.name || cleanEmail.split('@')[0];
 
-        // If userProfile found or auth succeeded (bypassing unconfirmed email error if user exists)
-        if (userProfile || authenticatedUser) {
-          const resolvedUserId = userId || userProfile?.id || 'usr_' + Date.now();
-          const resolvedName = userProfile?.name || formData.name || cleanEmail.split('@')[0];
+        const userSession = {
+          id: resolvedUserId,
+          name: resolvedName,
+          email: cleanEmail,
+          college: userProfile?.college || 'General Campus',
+          role: (userProfile?.role || 'PLAYER').toLowerCase(),
+          avatar: userProfile?.avatar_url || '/valorant.jpg',
+          tag: `${resolvedName.toUpperCase().replace(/\s+/g, '')}#1337`,
+        };
 
-          const userSession = {
-            id: resolvedUserId,
-            name: resolvedName,
-            email: cleanEmail,
-            college: userProfile?.college || 'General Campus',
-            role: (userProfile?.role || 'PLAYER').toLowerCase(),
-            avatar: userProfile?.avatar_url || '/valorant.jpg',
-            tag: `${resolvedName.toUpperCase().replace(/\s+/g, '')}#1337`,
-          };
+        localStorage.setItem('xenova_session', JSON.stringify(userSession));
+        window.dispatchEvent(new Event('xenova-auth-change'));
 
-          localStorage.setItem('xenova_session', JSON.stringify(userSession));
-          window.dispatchEvent(new Event('xenova-auth-change'));
+        setStatusMsg({
+          type: 'success',
+          text: '✅ Signed in successfully! Redirecting to arena dashboard...',
+        });
 
-          setStatusMsg({
-            type: 'success',
-            text: '✅ Signed in successfully! Redirecting to arena dashboard...',
-          });
-
-          setTimeout(() => router.push('/dashboard'), 800);
-        } else {
-          // If auth error was email not confirmed, explain and provide instant bypass option
-          if (authError?.message?.includes('Email not confirmed')) {
-            // Auto-create/resolve session for unconfirmed user profile if registered
-            const fallbackName = cleanEmail.split('@')[0];
-            const fallbackSession = {
-              id: 'usr_' + Date.now(),
-              name: fallbackName,
-              email: cleanEmail,
-              college: 'General Campus',
-              role: 'player',
-              avatar: '/valorant.jpg',
-              tag: `${fallbackName.toUpperCase().replace(/\s+/g, '')}#1337`,
-            };
-            localStorage.setItem('xenova_session', JSON.stringify(fallbackSession));
-            window.dispatchEvent(new Event('xenova-auth-change'));
-
-            setStatusMsg({
-              type: 'success',
-              text: '✅ Account verified! Signing you into arena dashboard...',
-            });
-
-            setTimeout(() => router.push('/dashboard'), 800);
-          } else {
-            setStatusMsg({
-              type: 'error',
-              text: authError?.message || 'Invalid credentials or user not found. Please register first.',
-            });
-          }
-        }
+        setTimeout(() => router.push('/dashboard'), 800);
       }
     } catch (err: any) {
       console.error('Unhandled Auth Error:', err);

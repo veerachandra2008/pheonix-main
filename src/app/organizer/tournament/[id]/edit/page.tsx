@@ -40,7 +40,7 @@ const GAME_PRESETS: Record<string, string> = {
 export default function EditTournamentPage() {
   const router = useRouter();
   const params = useParams();
-  const rawId = (params?.id as string) || '';
+  const rawId = decodeURIComponent((params?.id as string) || '').trim();
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -75,16 +75,23 @@ export default function EditTournamentPage() {
     setLoading(true);
     try {
       let found: any = null;
-      const cleanId = (rawId || '').trim().toLowerCase();
+      const cleanId = (rawId || '').toLowerCase().trim();
 
       // 1. Direct Supabase Query (Fastest)
       try {
         const { data: sbData } = await supabase.from('tournaments').select('*');
         if (sbData && Array.isArray(sbData)) {
           found = sbData.find((t: any) => {
-            const s = (t.slug || '').toLowerCase();
-            const idStr = String(t.id || '').toLowerCase();
-            return s === cleanId || idStr === cleanId || s.includes(cleanId) || cleanId.includes(s);
+            const s = (t.slug || '').toLowerCase().trim();
+            const idStr = String(t.id || '').toLowerCase().trim();
+            const title = (t.title || t.name || '').toLowerCase().trim();
+            return (
+              s === cleanId ||
+              idStr === cleanId ||
+              title === cleanId ||
+              (cleanId && s.includes(cleanId)) ||
+              (s && cleanId.includes(s))
+            );
           });
         }
       } catch (sbErr) {
@@ -99,9 +106,16 @@ export default function EditTournamentPage() {
           const data = await res.json();
           if (data.success && Array.isArray(data.data)) {
             const match = data.data.find((t: any) => {
-              const s = (t.slug || '').toLowerCase();
-              const idStr = String(t.id || '').toLowerCase();
-              return s === cleanId || idStr === cleanId || s.includes(cleanId) || cleanId.includes(s);
+              const s = (t.slug || '').toLowerCase().trim();
+              const idStr = String(t.id || '').toLowerCase().trim();
+              const title = (t.title || t.name || '').toLowerCase().trim();
+              return (
+                s === cleanId ||
+                idStr === cleanId ||
+                title === cleanId ||
+                (cleanId && s.includes(cleanId)) ||
+                (s && cleanId.includes(s))
+              );
             });
             if (match) {
               found = { ...(found || {}), ...match };
@@ -112,22 +126,22 @@ export default function EditTournamentPage() {
         console.warn('Edit page API fetch notice:', apiErr);
       }
 
-      // 3. Graceful Fallback Tournament if not found in database yet
+      // 3. Fallback Tournament if not found in database yet
       if (!found) {
         found = {
           slug: rawId,
           title: rawId.replace(/[-_]/g, ' ').toUpperCase(),
           name: rawId.replace(/[-_]/g, ' ').toUpperCase(),
-          game: 'Competitive Esports',
+          game: 'BGMI',
           format: 'Single Elimination',
           teams: '32',
           prize: '₹50,000',
-          date: 'Upcoming',
-          region: 'Online',
-          fee: 'Free',
-          image: '/hero-arena.jpg',
+          date: '18-20 May 2026',
+          region: 'Malla Reddy University',
+          fee: '₹1000/team',
+          image: '/bgmi.jpg',
           status: 'Registering',
-          host: userName || 'Verified Host',
+          host: userName || 'veera',
           description: '',
           rules: '',
           schedule: '',

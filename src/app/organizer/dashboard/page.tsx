@@ -65,7 +65,6 @@ export default function OrganizerDashboard() {
         if (tournRes.ok) {
           const tournData = await tournRes.json();
           if (tournData.success && Array.isArray(tournData.data) && tournData.data.length > 0) {
-            // Merge unique
             const seenSlugs = new Set(allTournaments.map((t: any) => t.slug));
             for (const t of tournData.data) {
               if (!seenSlugs.has(t.slug)) {
@@ -79,7 +78,14 @@ export default function OrganizerDashboard() {
         if (regRes.ok) {
           const regData = await regRes.json();
           if (regData.success && Array.isArray(regData.data)) {
-            allRegistrations = regData.data;
+            const seenPassIds = new Set(allRegistrations.map((r: any) => r.pass_id || r.passId));
+            for (const r of regData.data) {
+              const pid = r.pass_id || r.passId;
+              if (pid && !seenPassIds.has(pid)) {
+                allRegistrations.push(r);
+                seenPassIds.add(pid);
+              }
+            }
           }
         }
       } catch (apiErr) {
@@ -403,11 +409,23 @@ export default function OrganizerDashboard() {
           ) : (
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {tournaments.map((tournament, index) => {
-                const tournamentSlug = tournament.slug;
-                const regCount = registrations.filter((r) => {
-                  const rSlug = (r.tournament_slug || r.tournamentSlug || '').toLowerCase();
-                  return rSlug === (tournamentSlug || '').toLowerCase();
-                }).length;
+                const tournamentSlug = tournament.slug || '';
+                const targetSlug = (tournament.slug || '').toLowerCase().trim();
+                const targetTitle = (tournament.title || tournament.name || '').toLowerCase().trim();
+                const tournamentId = String(tournament.id || '').toLowerCase().trim();
+
+                const matchingRegs = registrations.filter((r) => {
+                  const rSlug = (r.tournament_slug || r.tournamentSlug || '').toLowerCase().trim();
+                  const rTitle = (r.tournament_title || r.tournamentTitle || '').toLowerCase().trim();
+                  const rTournId = String(r.tournament_id || r.tournamentId || '').toLowerCase().trim();
+                  return (
+                    (targetSlug && (rSlug === targetSlug || rSlug.includes(targetSlug) || targetSlug.includes(rSlug))) ||
+                    (targetTitle && (rTitle === targetTitle || rTitle.includes(targetTitle) || targetTitle.includes(rTitle))) ||
+                    (tournamentId && rTournId === tournamentId)
+                  );
+                });
+                const regCount = matchingRegs.length;
+                const isFree = !tournament.fee || tournament.fee.toLowerCase().includes('free') || tournament.fee === '0';
 
                 return (
                   <motion.article
@@ -418,32 +436,46 @@ export default function OrganizerDashboard() {
                   >
                     <div>
                       {/* Image Banner */}
-                      <div className="relative h-44 w-full overflow-hidden bg-black">
+                      <div className="relative h-48 w-full overflow-hidden bg-black">
                         <img
                           src={tournament.image || '/hero-arena.jpg'}
                           alt={tournament.title || tournament.name}
                           className="h-full w-full object-cover filter brightness-90 group-hover:scale-105 transition duration-500"
                           onError={(e) => { (e.target as HTMLImageElement).src = '/hero-arena.jpg'; }}
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#0C111D] via-black/30 to-transparent" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#0C111D] via-black/40 to-transparent" />
                         
-                        <div className="absolute top-3 left-3 flex items-center gap-1.5">
-                          <span className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider rounded-full bg-black/80 backdrop-blur-md text-indigo-400 border border-indigo-500/30">
-                            {tournament.game}
-                          </span>
-                          <span
-                            className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider rounded-full text-white"
-                            style={{ backgroundColor: tournament.status_color || '#10B981' }}
-                          >
-                            {tournament.status || 'Registering'}
+                        {/* Top Badges */}
+                        <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider rounded-full bg-black/80 backdrop-blur-md text-indigo-400 border border-indigo-500/30">
+                              {tournament.game}
+                            </span>
+                            <span
+                              className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider rounded-full text-white shadow"
+                              style={{ backgroundColor: tournament.status_color || '#10B981' }}
+                            >
+                              {tournament.status || 'Registering'}
+                            </span>
+                          </div>
+
+                          {/* Fee Badge */}
+                          <span className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-wider rounded-full backdrop-blur-md ${
+                            isFree 
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                          }`}>
+                            {isFree ? 'Free Entry' : tournament.fee}
                           </span>
                         </div>
 
+                        {/* Bottom Stats on Banner */}
                         <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
-                          <span className="text-[11px] font-black text-amber-400 bg-black/80 backdrop-blur-md px-2.5 py-1 rounded-md border border-amber-500/30">
-                            Prize: {tournament.prize}
+                          <span className="text-[11px] font-black text-amber-400 bg-black/85 backdrop-blur-md px-3 py-1 rounded-lg border border-amber-500/30">
+                            Prize: {tournament.prize || '₹50,000'}
                           </span>
-                          <span className="text-[11px] font-bold text-white bg-black/80 backdrop-blur-md px-2.5 py-1 rounded-md border border-white/10 flex items-center gap-1">
+                          <span className="text-[11px] font-bold text-white bg-black/85 backdrop-blur-md px-3 py-1 rounded-lg border border-white/10 flex items-center gap-1.5">
+                            <span className={`h-2 w-2 rounded-full ${regCount > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
                             <Users className="h-3 w-3 text-emerald-400" />
                             {regCount} Registered
                           </span>
@@ -457,21 +489,21 @@ export default function OrganizerDashboard() {
                         </h3>
 
                         <div className="grid grid-cols-2 gap-2 text-xs text-slate-400 font-semibold pt-1">
-                          <span className="flex items-center gap-1.5">
-                            <Calendar className="h-3.5 w-3.5 text-slate-500" />
-                            {tournament.date || 'Upcoming'}
+                          <span className="flex items-center gap-1.5 truncate">
+                            <Calendar className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                            {tournament.date || '18-20 May 2026'}
                           </span>
-                          <span className="flex items-center gap-1.5">
-                            <MapPin className="h-3.5 w-3.5 text-slate-500" />
+                          <span className="flex items-center gap-1.5 truncate">
+                            <MapPin className="h-3.5 w-3.5 text-slate-500 shrink-0" />
                             {tournament.region || 'Online'}
                           </span>
-                          <span className="flex items-center gap-1.5">
-                            <Gamepad2 className="h-3.5 w-3.5 text-slate-500" />
-                            {tournament.format || 'Tournament'}
+                          <span className="flex items-center gap-1.5 truncate">
+                            <Gamepad2 className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                            {tournament.format || 'Single Elimination'}
                           </span>
-                          <span className="flex items-center gap-1.5">
-                            <Users className="h-3.5 w-3.5 text-slate-500" />
-                            Slots: {tournament.teams}
+                          <span className="flex items-center gap-1.5 truncate">
+                            <Users className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                            Slots: {tournament.teams || '32 Teams'}
                           </span>
                         </div>
                       </div>
@@ -481,22 +513,23 @@ export default function OrganizerDashboard() {
                     <div className="p-5 pt-0 border-t border-white/5 mt-3 flex flex-wrap items-center justify-between gap-2">
                       <Link
                         href={`/organizer/tournament/${tournamentSlug}/attendance`}
-                        className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 transition text-xs font-black uppercase tracking-wider text-white text-center rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1.5"
+                        className="flex-1 min-w-[130px] py-2.5 bg-emerald-600 hover:bg-emerald-500 transition text-xs font-black uppercase tracking-wider text-white text-center rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <ShieldCheck className="h-3.5 w-3.5" />
-                        Event Attendance
+                        Attendance Desk
                       </Link>
 
                       <Link
                         href={`/organizer/tournament/${tournamentSlug}`}
-                        className="py-2.5 px-3 bg-white/10 hover:bg-white/15 transition text-xs font-bold uppercase tracking-wider text-slate-200 text-center rounded-xl"
+                        className="py-2.5 px-3.5 bg-white/10 hover:bg-white/15 transition text-xs font-black uppercase tracking-wider text-slate-200 text-center rounded-xl flex items-center gap-1.5 border border-white/10 cursor-pointer"
                       >
+                        <Users className="h-3.5 w-3.5 text-emerald-400" />
                         Rosters ({regCount})
                       </Link>
 
                       <Link
                         href={`/organizer/tournament/${tournamentSlug}/edit`}
-                        className="py-2.5 px-3 bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 hover:border-indigo-500 transition text-xs font-bold uppercase tracking-wider text-indigo-300 hover:text-white text-center rounded-xl"
+                        className="py-2.5 px-3.5 bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 hover:border-indigo-500 transition text-xs font-black uppercase tracking-wider text-indigo-300 hover:text-white text-center rounded-xl cursor-pointer"
                         title="Edit Rules & Details"
                       >
                         Edit

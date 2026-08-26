@@ -30,7 +30,7 @@ import { supabase } from '@/lib/supabase';
 export default function TournamentManagePage() {
   const router = useRouter();
   const params = useParams();
-  const rawId = (params?.id as string) || '';
+  const rawId = decodeURIComponent((params?.id as string) || '').trim();
   const [session, setSession] = useState<any>(null);
   const [tournament, setTournament] = useState<any | null>(null);
   const [registrations, setRegistrations] = useState<any[]>([]);
@@ -43,7 +43,7 @@ export default function TournamentManagePage() {
     try {
       let foundTournament: any = null;
       let allRegistrations: any[] = [];
-      const cleanId = (rawId || '').trim().toLowerCase();
+      const cleanId = (rawId || '').toLowerCase().trim();
 
       // 1. Direct Supabase Query (Fastest, direct PostgreSQL)
       try {
@@ -54,9 +54,16 @@ export default function TournamentManagePage() {
 
         if (sbTournRes.data && Array.isArray(sbTournRes.data)) {
           foundTournament = sbTournRes.data.find((t: any) => {
-            const s = (t.slug || '').toLowerCase();
-            const idStr = String(t.id || '').toLowerCase();
-            return s === cleanId || idStr === cleanId || s.includes(cleanId) || cleanId.includes(s);
+            const s = (t.slug || '').toLowerCase().trim();
+            const idStr = String(t.id || '').toLowerCase().trim();
+            const title = (t.title || t.name || '').toLowerCase().trim();
+            return (
+              s === cleanId ||
+              idStr === cleanId ||
+              title === cleanId ||
+              (cleanId && s.includes(cleanId)) ||
+              (s && cleanId.includes(s))
+            );
           });
         }
 
@@ -79,9 +86,16 @@ export default function TournamentManagePage() {
           const tournData = await tournRes.json();
           if (tournData.success && Array.isArray(tournData.data)) {
             const match = tournData.data.find((t: any) => {
-              const s = (t.slug || '').toLowerCase();
-              const idStr = String(t.id || '').toLowerCase();
-              return s === cleanId || idStr === cleanId || s.includes(cleanId) || cleanId.includes(s);
+              const s = (t.slug || '').toLowerCase().trim();
+              const idStr = String(t.id || '').toLowerCase().trim();
+              const title = (t.title || t.name || '').toLowerCase().trim();
+              return (
+                s === cleanId ||
+                idStr === cleanId ||
+                title === cleanId ||
+                (cleanId && s.includes(cleanId)) ||
+                (s && cleanId.includes(s))
+              );
             });
             if (match) {
               foundTournament = { ...(foundTournament || {}), ...match };
@@ -92,7 +106,6 @@ export default function TournamentManagePage() {
         if (regRes.ok) {
           const regData = await regRes.json();
           if (regData.success && Array.isArray(regData.data)) {
-            // Merge registrations uniquely
             const seenPassIds = new Set(allRegistrations.map((r: any) => r.pass_id || r.passId));
             for (const r of regData.data) {
               const pid = r.pass_id || r.passId;
@@ -107,22 +120,22 @@ export default function TournamentManagePage() {
         console.warn('Backend API tournament rosters fetch notice:', apiErr);
       }
 
-      // 3. Graceful Fallback Tournament if not found in database yet
+      // 3. Fallback Tournament if not found in database yet
       if (!foundTournament) {
         foundTournament = {
           slug: rawId,
           title: rawId.replace(/[-_]/g, ' ').toUpperCase(),
           name: rawId.replace(/[-_]/g, ' ').toUpperCase(),
           game: 'Competitive Esports',
-          format: 'Tournament',
+          format: 'Single Elimination',
           region: 'Online',
-          date: 'Upcoming',
+          date: '18-20 May 2026',
           prize: '₹50,000',
-          teams: '32',
-          image: '/hero-arena.jpg',
+          teams: '32 Teams',
+          image: '/bgmi.jpg',
           status: 'Registering',
           status_color: '#10B981',
-          host: userName || 'Verified Host',
+          host: userName || 'veera',
           createdBy: userEmail,
         };
       }
@@ -130,13 +143,23 @@ export default function TournamentManagePage() {
       setTournament(foundTournament);
 
       // Filter registrations for this tournament
-      const targetSlug = (foundTournament.slug || rawId).toLowerCase();
-      const filtered = allRegistrations.filter((r: any) => {
-        const rSlug = (r.tournament_slug || r.tournamentSlug || '').toLowerCase();
-        return rSlug === targetSlug || rSlug.includes(targetSlug) || targetSlug.includes(rSlug);
-      });
-      setRegistrations(filtered);
+      const targetSlug = (foundTournament.slug || rawId).toLowerCase().trim();
+      const targetTitle = (foundTournament.title || foundTournament.name || '').toLowerCase().trim();
 
+      const filtered = allRegistrations.filter((r: any) => {
+        const rSlug = (r.tournament_slug || r.tournamentSlug || '').toLowerCase().trim();
+        const rTitle = (r.tournament_title || r.tournamentTitle || '').toLowerCase().trim();
+        return (
+          rSlug === targetSlug ||
+          (targetSlug && rSlug.includes(targetSlug)) ||
+          (rSlug && targetSlug.includes(rSlug)) ||
+          (targetTitle && rTitle === targetTitle) ||
+          (targetTitle && rTitle.includes(targetTitle)) ||
+          (rTitle && targetTitle.includes(rTitle))
+        );
+      });
+
+      setRegistrations(filtered);
     } catch (e) {
       console.error('Failed to load tournament management data:', e);
     } finally {
