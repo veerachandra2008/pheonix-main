@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { saveRegistration } from '@/lib/tournaments-db';
 import { tournaments } from '@/app/tournaments/data';
+import { getApiBaseUrl } from '@/lib/api-config';
 
 interface PageProps {
   params?: Promise<{ slug: string }>;
@@ -63,10 +64,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
         let found: any = tournaments.find((t) => t.slug === resolvedSlug);
         if (!found) {
           try {
-            const apiBase =
-              typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-                ? '/api'
-                : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+            const apiBase = getApiBaseUrl();
             const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
             const data = await res.json();
             if (data.success && Array.isArray(data.data)) {
@@ -176,8 +174,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
 
     setErrorMessage('');
     const numericAmount = parseFeeAmount(selection.tournamentFee);
-    const envUrl = process.env.NEXT_PUBLIC_FLASK_API_URL;
-    const apiBase = envUrl ? (envUrl.endsWith('/') ? envUrl.slice(0, -1) : envUrl) : '/api';
+    const apiBase = getApiBaseUrl();
 
     // ─── CASE A: FREE TOURNAMENT (Amount = 0) ───
     if (numericAmount === 0) {

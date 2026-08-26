@@ -1,10 +1,8 @@
 // src/lib/flask-api.ts
 import { supabase } from './supabase';
+import { getApiBaseUrl } from './api-config';
 
-const FLASK_API_BASE =
-  typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-    ? '/api'
-    : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+const FLASK_API_BASE = getApiBaseUrl();
 
 export interface CreateOrderParams {
   tournamentId?: string;

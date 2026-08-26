@@ -21,6 +21,7 @@ import {
   Filter
 } from 'lucide-react';
 import { tournaments as defaultTournaments } from '@/app/tournaments/data';
+import { getApiBaseUrl } from '@/lib/api-config';
 
 interface Player {
   slot: number;
@@ -53,7 +54,7 @@ export default function OrganizerRostersHubPage() {
   const loadData = async (userEmail: string, userRole: string, userName?: string) => {
     setLoading(true);
     try {
-      const apiBase = process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+      const apiBase = getApiBaseUrl();
 
       // 1. Fetch tournaments
       let tournsList: any[] = defaultTournaments;

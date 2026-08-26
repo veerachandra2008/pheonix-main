@@ -31,6 +31,8 @@ import {
 import { tournaments as defaultTournaments } from '../data';
 import { getUserRegistrations } from '@/lib/tournaments-db';
 import { flaskApi } from '@/lib/flask-api';
+import { supabase } from '@/lib/supabase';
+import { getApiBaseUrl } from '@/lib/api-config';
 
 interface TournamentPageParams {
   params?: Promise<{
@@ -118,7 +120,7 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
 
   useEffect(() => {
     async function loadTournamentData() {
-      const apiBase = process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+      const apiBase = getApiBaseUrl();
       const targetSlug = slug || rawSlug;
       if (!targetSlug) return;
 
@@ -143,7 +145,7 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
         console.warn('Session check notice:', e);
       }
 
-      // 2. Fetch tournament from database
+      // 2. Fetch tournament from database (Backend API or direct Supabase)
       let found: any = null;
       try {
         const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
@@ -159,6 +161,22 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
         }
       } catch (e) {
         console.warn('Backend tournament fetch notice:', e);
+      }
+
+      // Direct Supabase query fallback
+      if (!found) {
+        try {
+          const { data: sbTournament } = await supabase
+            .from('tournaments')
+            .select('*')
+            .or(`slug.eq.${targetSlug.toLowerCase()},id.eq.${Number(targetSlug) || 0}`)
+            .maybeSingle();
+          if (sbTournament) {
+            found = sbTournament;
+          }
+        } catch (err) {
+          console.warn('Direct Supabase tournament lookup notice:', err);
+        }
       }
 
       if (!found) {

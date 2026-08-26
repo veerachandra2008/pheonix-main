@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { tournaments as defaultMockTournaments, Tournament } from '@/app/tournaments/data';
+import { getApiBaseUrl } from './api-config';
 
 export interface TournamentRegistrationRecord {
   tournamentSlug: string;
@@ -20,27 +21,36 @@ export interface TournamentRegistrationRecord {
   registeredAt: string;
 }
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
 /**
- * Fetch all tournaments directly from Backend Database
+ * Fetch all tournaments directly from Backend Database with direct Supabase fallback
  */
 export async function getAllTournaments(): Promise<Tournament[]> {
+  // 1. Try Backend API
   try {
-    const apiBase =
-      typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-        ? '/api'
-        : BACKEND_URL;
-
+    const apiBase = getApiBaseUrl();
     const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
     if (res.ok) {
       const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
         return json.data.map(mapSupabaseTournament);
       }
     }
   } catch (err) {
-    console.error('Failed to load tournaments from database:', err);
+    console.warn('Backend API tournaments fetch error:', err);
+  }
+
+  // 2. Direct Supabase Query Fallback (Ensures 100% database data in deployment even if serverless API has cold-start)
+  try {
+    const { data, error } = await supabase
+      .from('tournaments')
+      .select('*')
+      .order('id', { ascending: true });
+
+    if (!error && data && Array.isArray(data) && data.length > 0) {
+      return data.map(mapSupabaseTournament);
+    }
+  } catch (err) {
+    console.warn('Direct Supabase tournaments query fallback error:', err);
   }
 
   return defaultMockTournaments;
@@ -54,7 +64,8 @@ export async function saveRegistration(record: TournamentRegistrationRecord): Pr
 
   // 1. Save to Backend API (/api/tournaments/register)
   try {
-    const res = await fetch(`${BACKEND_URL}/tournaments/register`, {
+    const apiBase = getApiBaseUrl();
+    const res = await fetch(`${apiBase}/tournaments/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(record),
@@ -105,10 +116,7 @@ export async function getUserRegistrations(email?: string): Promise<TournamentRe
 
   // 1. Fetch from Flask Backend API (/api/registrations?email=...)
   try {
-    const apiBase =
-      typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-        ? '/api'
-        : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+    const apiBase = getApiBaseUrl();
 
     const res = await fetch(`${apiBase}/registrations?email=${encodeURIComponent(cleanEmail)}`, { cache: 'no-store' });
     if (res.ok) {

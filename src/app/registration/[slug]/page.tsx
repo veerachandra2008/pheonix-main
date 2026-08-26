@@ -23,6 +23,8 @@ import {
   ChevronRight,
   School
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { getApiBaseUrl } from '@/lib/api-config';
 import { tournaments } from '../../tournaments/data';
 
 interface PlayerSlot {
@@ -83,17 +85,30 @@ export default function RegistrationStepOne() {
     ]);
 
     async function loadTournamentData() {
-      const apiBase = process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+      const apiBase = getApiBaseUrl();
+      let found: any = null;
       try {
         const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
         const data = await res.json();
         if (data.success && Array.isArray(data.data)) {
-          const found = data.data.find((t: any) => t.slug === slug || String(t.id) === slug);
-          if (found) setTournament(found);
+          found = data.data.find((t: any) => t.slug === slug || String(t.id) === slug);
         }
       } catch (e) {
-        console.error('Failed to load tournament:', e);
+        console.warn('Failed to load tournament from API:', e);
       }
+
+      if (!found) {
+        try {
+          const { data: sbT } = await supabase
+            .from('tournaments')
+            .select('*')
+            .or(`slug.eq.${slug},id.eq.${Number(slug) || 0}`)
+            .maybeSingle();
+          if (sbT) found = sbT;
+        } catch {}
+      }
+
+      if (found) setTournament(found);
     }
 
     loadTournamentData();

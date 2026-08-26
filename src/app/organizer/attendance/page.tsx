@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 import { tournaments as defaultTournaments } from '@/app/tournaments/data';
+import { getApiBaseUrl } from '@/lib/api-config';
 
 export default function OrganizerAttendanceHubPage() {
   const router = useRouter();
@@ -46,7 +47,7 @@ export default function OrganizerAttendanceHubPage() {
         setAuthLoading(false);
 
         // Load tournaments and registrations
-        const apiBase = process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+        const apiBase = getApiBaseUrl();
         
         let tournsList: any[] = defaultTournaments;
         try {

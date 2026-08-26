@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 import { supabase } from '@/lib/supabase';
+import { getApiBaseUrl } from '@/lib/api-config';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -80,7 +81,7 @@ export default function LoginPage() {
         }
 
         try {
-          const apiBase = process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+          const apiBase = getApiBaseUrl();
           await fetch(`${apiBase}/auth/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -156,7 +157,7 @@ export default function LoginPage() {
         // If not found in direct Supabase client, check Backend API
         if (!userProfile) {
           try {
-            const apiBase = process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+            const apiBase = getApiBaseUrl();
             const apiRes = await fetch(`${apiBase}/auth/login`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
