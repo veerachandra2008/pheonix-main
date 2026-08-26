@@ -1,4 +1,14 @@
+import sys
 import os
+
+# Ensure backend directory is in sys.path when running on Vercel Serverless
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+root_dir = os.path.dirname(current_dir)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
 from flask import Flask, jsonify
 from flask_cors import CORS
 from config import Config
@@ -34,6 +44,8 @@ def create_app():
     app.register_blueprint(notifications_bp, url_prefix='/api/notifications')
     app.register_blueprint(applications_bp, url_prefix='/api/applications')
 
+    @app.route('/', methods=['GET'])
+    @app.route('/health', methods=['GET'])
     @app.route('/api/health', methods=['GET'])
     def health_check():
         return jsonify({
