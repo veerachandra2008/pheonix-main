@@ -22,6 +22,7 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import FinalCTA from '@/components/xenova/FinalCTA';
+import { supabase } from '@/lib/supabase';
 
 const PRESET_AVATARS = [
   { label: 'Valorant Phoenix', src: '/valorant.jpg' },
@@ -31,6 +32,50 @@ const PRESET_AVATARS = [
   { label: 'Cyber Hero', src: '/hero-arena.jpg' },
   { label: 'FC Striker', src: '/fc.jpg' },
 ];
+
+// Helper to auto-resize and compress images to max 512x512 (~35KB-50KB)
+const compressImageToDataUrl = (file: File, maxDim = 512, quality = 0.85): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(event.target?.result as string);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        // Export as optimized JPEG (~40KB)
+        const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressedBase64);
+      };
+      img.onerror = () => reject(new Error('Unable to read image.'));
+    };
+    reader.onerror = () => reject(new Error('File reading error.'));
+  });
+};
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -105,21 +150,18 @@ export default function SettingsPage() {
     }
   }, [router]);
 
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      setErrorMsg('Image file size must be under 5MB.');
-      return;
+    setErrorMsg('');
+    try {
+      // Auto-compress photo to max 512x512 (~40KB) to prevent 413 Payload Too Large
+      const compressedDataUrl = await compressImageToDataUrl(file, 512, 0.85);
+      setAvatar(compressedDataUrl);
+    } catch (err) {
+      setErrorMsg('Could not process this image. Please select another image.');
     }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result as string;
-      setAvatar(base64);
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -153,10 +195,32 @@ export default function SettingsPage() {
         body: JSON.stringify(payload),
       });
 
-      const json = await res.json();
+      let json: any = {};
+      try {
+        json = await res.json();
+      } catch {
+        const rawText = await res.text().catch(() => '');
+        if (!res.ok) {
+          throw new Error(rawText || `Server responded with status ${res.status}`);
+        }
+      }
+
       if (!res.ok) {
         throw new Error(json.message || 'Failed to save profile.');
       }
+
+      // Also update directly in Supabase table
+      try {
+        await supabase
+          .from('users')
+          .update({
+            name: name.trim(),
+            college: college.trim(),
+            bio: bio.trim(),
+            avatar_url: avatar,
+          })
+          .eq('email', sessionUser.email.toLowerCase());
+      } catch {}
 
       // Update session in local storage
       const nextSession = {
