@@ -93,10 +93,23 @@ export default function DashboardPage() {
     try {
       const user = JSON.parse(rawSession);
       setSession(user);
+
+      // Instant optimistic passes render from local cache (0ms)
+      try {
+        const cachedPasses = localStorage.getItem(`xenova_passes_${user.email}`);
+        if (cachedPasses) {
+          setUserRegistrations(JSON.parse(cachedPasses));
+        }
+      } catch {}
       
       // Load user registrations strictly from Backend / Supabase
       getUserRegistrations(user.email).then((regs) => {
-        setUserRegistrations(regs || []);
+        if (regs && Array.isArray(regs)) {
+          setUserRegistrations(regs);
+          try {
+            localStorage.setItem(`xenova_passes_${user.email}`, JSON.stringify(regs));
+          } catch {}
+        }
       });
 
       // Fetch fresh user profile from Database

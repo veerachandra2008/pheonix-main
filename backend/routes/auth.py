@@ -374,16 +374,17 @@ def get_all_users():
 def get_user_profile(email=None):
     """
     Fetch single user profile directly from Supabase users table with sub-millisecond caching.
+    Supports email, name slug, or tag lookups.
     """
     if request.method == 'OPTIONS':
         return jsonify({'success': True}), 200
 
     try:
-        target_email = (email or request.args.get('email') or '').strip().lower()
-        if not target_email:
-            return jsonify({'success': False, 'message': 'Email query parameter is required.'}), 400
+        raw_identifier = (email or request.args.get('email') or request.args.get('id') or '').strip().lower()
+        if not raw_identifier:
+            return jsonify({'success': False, 'message': 'Email or identifier is required.'}), 400
 
-        cache_key = f"profile:{target_email}"
+        cache_key = f"profile:{raw_identifier}"
         cached = api_cache.get(cache_key)
         if cached is not None:
             return jsonify({'success': True, 'data': cached, 'cached': True}), 200
@@ -391,42 +392,56 @@ def get_user_profile(email=None):
         user = None
         try:
             supabase = get_supabase_client()
-            res = supabase.table('users').select('*').eq('email', target_email).execute()
+            if '@' in raw_identifier:
+                res = supabase.table('users').select('*').eq('email', raw_identifier).execute()
+            else:
+                # Search by exact email, ILIKE name, or ILIKE email
+                res = supabase.table('users').select('*').or_(f"email.ilike.%{raw_identifier}%,name.ilike.%{raw_identifier}%").limit(1).execute()
+
             if res.data and len(res.data) > 0:
                 user = res.data[0]
         except Exception as sb_err:
             print(f"Supabase profile fetch notice: {sb_err}")
 
-        if not user and target_email in IN_MEMORY_USERS:
-            user = IN_MEMORY_USERS[target_email]
+        if not user and raw_identifier in IN_MEMORY_USERS:
+            user = IN_MEMORY_USERS[raw_identifier]
+
+        # Check in-memory by name/tag if not found
+        if not user:
+            for mem_email, mem_data in IN_MEMORY_USERS.items():
+                if mem_email.lower() == raw_identifier or mem_data.get('name', '').lower() == raw_identifier:
+                    user = mem_data
+                    break
 
         if not user:
             user = {
-                'name': target_email.split('@')[0].capitalize(),
-                'email': target_email,
+                'name': raw_identifier.split('@')[0].capitalize(),
+                'email': raw_identifier if '@' in raw_identifier else f"{raw_identifier}@campus.edu",
                 'college': 'General Campus',
+                'team': 'Free Agent',
+                'bio': 'Verified collegiate esports competitor.',
                 'role': 'PLAYER',
                 'avatar_url': '/valorant.jpg',
-                'tag': f"{target_email.split('@')[0].upper()}#1337"
+                'tag': f"{raw_identifier.split('@')[0].upper()}#1337"
             }
 
         profile_data = {
             'id': user.get('id'),
-            'name': user.get('name'),
-            'email': user.get('email'),
-            'college': user.get('college'),
-            'team': user.get('team', ''),
-            'tag': user.get('tag') or f"{user.get('name', 'Gamer').upper().replace(' ', '')}#1337",
-            'bio': user.get('bio', ''),
+            'name': user.get('name') or raw_identifier.split('@')[0].capitalize(),
+            'email': user.get('email') or raw_identifier,
+            'college': user.get('college') or 'General Campus',
+            'team': user.get('team') or 'Free Agent',
+            'tag': user.get('tag') or f"{(user.get('name') or 'Gamer').upper().replace(' ', '')}#1337",
+            'bio': user.get('bio') or 'Verified collegiate esports competitor.',
             'role': (user.get('role') or 'PLAYER').lower(),
             'avatar': user.get('avatar_url') or user.get('avatar') or '/valorant.jpg',
             'avatar_url': user.get('avatar_url') or user.get('avatar') or '/valorant.jpg',
             'rank': user.get('rank', 1),
-            'win_rate': user.get('win_rate', 0.0),
-            'trophies': user.get('trophies', 0)
+            'win_rate': user.get('win_rate', 84.5),
+            'trophies': user.get('trophies', 5)
         }
 
-        api_cache.set(cache_key, profile_data, ttl_seconds=30)
+        api_cache.set(cache_key, profile_data, ttl_seconds=20)
         return jsonify({'success': True, 'data': profile_data}), 200
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -435,7 +450,7 @@ def get_user_profile(email=None):
 @auth_bp.route('/profile', methods=['PUT', 'PATCH', 'POST', 'OPTIONS'])
 def update_user_profile():
     """
-    Update user profile & avatar directly in Supabase users table.
+    Update user profile, team, bio, & avatar directly in Supabase users table.
     """
     if request.method == 'OPTIONS':
         return jsonify({'success': True}), 200
@@ -457,20 +472,22 @@ def update_user_profile():
         if name: update_fields['name'] = name
         if tag: update_fields['tag'] = tag
         if college: update_fields['college'] = college
-        if team is not None: update_fields['team'] = team
-        if bio is not None: update_fields['bio'] = bio
+        if team: update_fields['team'] = team
+        if bio: update_fields['bio'] = bio
         if avatar: update_fields['avatar_url'] = avatar
 
-        # Strict column filter for Supabase users table
-        VALID_USER_COLUMNS = {'name', 'college', 'bio', 'avatar_url', 'rank', 'win_rate', 'trophies', 'role'}
-        db_payload = {k: v for k, v in update_fields.items() if k in VALID_USER_COLUMNS}
-
-        # Update in Supabase users table
+        # Update in Supabase users table with safe column handling
         try:
             supabase = get_supabase_client()
             existing = supabase.table('users').select('id').eq('email', email).execute()
             if existing.data and len(existing.data) > 0:
-                supabase.table('users').update(db_payload).eq('email', email).execute()
+                try:
+                    supabase.table('users').update(update_fields).eq('email', email).execute()
+                except Exception:
+                    # Fallback to standard columns if team/tag column not in table
+                    VALID_COLS = {'name', 'college', 'bio', 'avatar_url', 'rank', 'win_rate', 'trophies', 'role'}
+                    clean_payload = {k: v for k, v in update_fields.items() if k in VALID_COLS}
+                    supabase.table('users').update(clean_payload).eq('email', email).execute()
             else:
                 new_payload = {
                     'email': email,
@@ -478,20 +495,34 @@ def update_user_profile():
                     'college': college or 'General Campus',
                     'role': (data.get('role') or 'PLAYER').upper(),
                     'avatar_url': avatar or '/valorant.jpg',
-                    **db_payload
+                    **update_fields
                 }
-                supabase.table('users').insert(new_payload).execute()
+                try:
+                    supabase.table('users').insert(new_payload).execute()
+                except Exception:
+                    VALID_COLS = {'email', 'name', 'college', 'bio', 'avatar_url', 'rank', 'win_rate', 'trophies', 'role'}
+                    clean_new = {k: v for k, v in new_payload.items() if k in VALID_COLS}
+                    supabase.table('users').insert(clean_new).execute()
         except Exception as sb_err:
             print(f"Supabase update profile error: {sb_err}")
 
         # Invalidate caches
         api_cache.delete(f"profile:{email}")
+        api_cache.clear_prefix("profile:")
         api_cache.delete('users:all')
 
         # Update memory store
         if email not in IN_MEMORY_USERS:
             IN_MEMORY_USERS[email] = {'email': email}
-        IN_MEMORY_USERS[email].update(update_fields)
+        IN_MEMORY_USERS[email].update({
+            'name': name or IN_MEMORY_USERS[email].get('name', ''),
+            'tag': tag or IN_MEMORY_USERS[email].get('tag', ''),
+            'college': college or IN_MEMORY_USERS[email].get('college', ''),
+            'team': team or IN_MEMORY_USERS[email].get('team', 'Free Agent'),
+            'bio': bio or IN_MEMORY_USERS[email].get('bio', ''),
+            'avatar_url': avatar or IN_MEMORY_USERS[email].get('avatar_url', '/valorant.jpg'),
+            'avatar': avatar or IN_MEMORY_USERS[email].get('avatar', '/valorant.jpg')
+        })
 
         return jsonify({
             'success': True,

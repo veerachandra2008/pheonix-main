@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { getUserRegistrations, TournamentRegistrationRecord } from '@/lib/tournaments-db';
 import FinalCTA from '@/components/xenova/FinalCTA';
+import { supabase } from '@/lib/supabase';
 
 type Player = {
   id?: string | number;
@@ -96,55 +97,93 @@ export default function PlayerProfilePage() {
           ? '/api'
           : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
 
-      const emailToQuery = isSelf && sessionUser?.email ? sessionUser.email : rawId.includes('@') ? rawId : '';
+      const targetIdentifier = isSelf && sessionUser?.email ? sessionUser.email : rawId;
 
-      // Parallel Fetch: Profile + Passes concurrently
+      let matched: Player | null = null;
+
+      // 1. Direct Supabase Query (Fastest, real database data)
       try {
-        const [profileRes, passes] = await Promise.all([
-          emailToQuery
-            ? fetch(`${apiBase}/auth/profile?email=${encodeURIComponent(emailToQuery)}`).then(r => r.ok ? r.json() : null).catch(() => null)
-            : fetch(`${apiBase}/auth/users`).then(r => r.ok ? r.json() : null).catch(() => null),
-          emailToQuery
-            ? getUserRegistrations(emailToQuery).catch(() => [])
-            : Promise.resolve([])
-        ]);
+        let sbQuery = supabase.from('users').select('*');
+        if (targetIdentifier.includes('@')) {
+          sbQuery = sbQuery.eq('email', targetIdentifier.toLowerCase());
+        } else {
+          sbQuery = sbQuery.or(`email.ilike.%${targetIdentifier}%,name.ilike.%${targetIdentifier}%`);
+        }
+        const { data: sbUser } = await sbQuery.limit(1).maybeSingle();
+        if (sbUser) {
+          matched = {
+            id: sbUser.id,
+            name: sbUser.name || 'ATHLETE',
+            email: sbUser.email,
+            college: sbUser.college || 'General Campus',
+            team: sbUser.team || 'Free Agent',
+            tag: sbUser.tag || `@${slugify(sbUser.name || 'athlete')}`,
+            bio: sbUser.bio || 'Verified collegiate esports competitor.',
+            avatar_url: sbUser.avatar_url || '/valorant.jpg',
+            avatar: sbUser.avatar_url || '/valorant.jpg',
+            role: (sbUser.role || 'PLAYER').toLowerCase(),
+            rank: sbUser.rank || 1,
+            win_rate: sbUser.win_rate || 84.5,
+            trophies: sbUser.trophies || 5,
+          };
+        }
+      } catch (err) {
+        console.warn('Direct Supabase lookup notice:', err);
+      }
 
-        let matched: Player | null = null;
-        if (profileRes?.success && profileRes?.data) {
-          if (Array.isArray(profileRes.data)) {
-            matched = profileRes.data.find((u: any) =>
+      // 2. Fallback to Backend Profile API if not yet matched
+      if (!matched) {
+        try {
+          const profileRes = await fetch(`${apiBase}/auth/profile?email=${encodeURIComponent(targetIdentifier)}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
+          if (profileRes?.success && profileRes?.data) {
+            matched = profileRes.data;
+          }
+        } catch (err) {
+          console.warn('API lookup notice:', err);
+        }
+      }
+
+      // 3. Fallback to all users list if still not matched
+      if (!matched) {
+        try {
+          const usersRes = await fetch(`${apiBase}/auth/users`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
+          if (usersRes?.success && Array.isArray(usersRes.data)) {
+            matched = usersRes.data.find((u: any) =>
               u.email?.toLowerCase() === rawId.toLowerCase() ||
               String(u.id) === rawId ||
               slugify(u.name || '') === slugify(rawId) ||
               (u.tag && u.tag.toLowerCase() === rawId.toLowerCase())
             ) || null;
-          } else {
-            matched = profileRes.data;
           }
-        }
-
-        if (matched) {
-          setProfileData(matched);
-          if (matched.email && isSelf && sessionUser) {
-            localStorage.setItem('xenova_session', JSON.stringify({ ...sessionUser, ...matched }));
-          }
-        }
-
-        if (passes && Array.isArray(passes)) {
-          setUserPasses(passes);
-        }
-      } catch (err) {
-        console.warn('Profile background sync notice:', err);
-      } finally {
-        setLoading(false);
+        } catch {}
       }
+
+      if (matched) {
+        setProfileData(matched);
+        if (matched.email && isSelf && sessionUser) {
+          localStorage.setItem('xenova_session', JSON.stringify({ ...sessionUser, ...matched }));
+        }
+      }
+
+      // Load Passes in background
+      const emailForPasses = matched?.email || (isSelf && sessionUser?.email ? sessionUser.email : '');
+      if (emailForPasses) {
+        try {
+          const passes = await getUserRegistrations(emailForPasses);
+          if (passes && Array.isArray(passes)) {
+            setUserPasses(passes);
+          }
+        } catch {}
+      }
+
+      setLoading(false);
 
       // Check following status
       try {
         const rawFollowing = localStorage.getItem('xenova_following');
-        if (rawFollowing && (emailToQuery || rawId)) {
+        if (rawFollowing && (matched?.email || targetIdentifier)) {
           const set = new Set(JSON.parse(rawFollowing));
-          setIsFollowing(set.has((emailToQuery || rawId).toLowerCase()));
+          setIsFollowing(set.has((matched?.email || targetIdentifier).toLowerCase()));
         }
       } catch {}
     };

@@ -3,6 +3,7 @@ import time
 from flask import Blueprint, request, jsonify
 from config import get_supabase_client
 from routes.payments import IN_MEMORY_REGISTRATIONS, generate_pass_id
+from cache import api_cache
 
 registrations_bp = Blueprint('registrations', __name__)
 
@@ -136,18 +137,32 @@ def create_registration():
 @registrations_bp.route('', methods=['GET'])
 @registrations_bp.route('/', methods=['GET'])
 def get_all_registrations():
-    """Fetch all registrations with optional tournament_slug and email filtering"""
+    """Fetch registrations with indexed filtering and sub-ms caching"""
     try:
         email = request.args.get('email')
         tournament_slug = request.args.get('tournament_slug') or request.args.get('tournamentSlug')
 
+        clean_email = (email or '').strip().lower()
+        clean_slug = (tournament_slug or '').strip().lower()
+
+        cache_key = f"regs:{clean_email}:{clean_slug}"
+        cached = api_cache.get(cache_key)
+        if cached is not None:
+            return jsonify({'success': True, 'data': cached, 'cached': True}), 200
+
         supabase_records = []
         try:
             supabase = get_supabase_client()
-            res = supabase.table('registrations').select('*').execute()
+            q = supabase.table('registrations').select('*')
+            if clean_email:
+                q = q.eq('email', clean_email)
+            if clean_slug:
+                q = q.eq('tournament_slug', clean_slug)
+            
+            res = q.order('created_at', desc=True).execute() if hasattr(q, 'order') else q.execute()
             supabase_records = res.data or []
         except Exception as sb_err:
-            print(f"Supabase all registrations warning: {sb_err}")
+            print(f"Supabase registrations query warning: {sb_err}")
             
         memory_records = list(IN_MEMORY_REGISTRATIONS.values())
         
@@ -157,6 +172,14 @@ def get_all_registrations():
             if not pid:
                 continue
             
+            rec_email = (r.get('email') or '').strip().lower()
+            rec_slug = (r.get('tournament_slug') or r.get('tournamentSlug') or '').strip().lower()
+
+            if clean_email and rec_email != clean_email:
+                continue
+            if clean_slug and rec_slug != clean_slug:
+                continue
+
             att_status = (r.get('attendance_status') or r.get('attendanceStatus') or 'NOT_MARKED').upper()
             if att_status not in ['NOT_MARKED', 'PRESENT', 'ABSENT']:
                 att_status = 'NOT_MARKED'
@@ -165,8 +188,8 @@ def get_all_registrations():
                 'id': r.get('id') or pid,
                 'pass_id': pid,
                 'passId': pid,
-                'tournament_slug': r.get('tournament_slug') or r.get('tournamentSlug'),
-                'tournamentSlug': r.get('tournament_slug') or r.get('tournamentSlug'),
+                'tournament_slug': rec_slug,
+                'tournamentSlug': rec_slug,
                 'tournament_title': r.get('tournament_title') or r.get('tournamentTitle'),
                 'tournamentTitle': r.get('tournament_title') or r.get('tournamentTitle'),
                 'team_id': r.get('team_id') or r.get('teamId'),
@@ -176,7 +199,7 @@ def get_all_registrations():
                 'college': r.get('college'),
                 'captain_name': r.get('captain_name') or r.get('captainName'),
                 'captainName': r.get('captain_name') or r.get('captainName'),
-                'email': (r.get('email') or '').strip().lower(),
+                'email': rec_email,
                 'payment_status': r.get('payment_status') or r.get('paymentStatus', 'SUCCESS'),
                 'paymentStatus': r.get('payment_status') or r.get('paymentStatus', 'SUCCESS'),
                 'order_id': r.get('order_id') or r.get('orderId', ''),
@@ -192,45 +215,42 @@ def get_all_registrations():
             }
             combined_dict[pid] = normalized
 
-        # Query tournament_rosters table to attach all 4 individual players
-        try:
-            supabase = get_supabase_client()
-            r_query = supabase.table('tournament_rosters').select('*')
-            if tournament_slug:
-                r_query = r_query.eq('tournament_slug', tournament_slug.strip().lower())
-            r_res = r_query.order('slot').execute()
-            if r_res.data:
-                roster_map = {}
-                for row in r_res.data:
-                    p_id = row.get('pass_id')
-                    if p_id not in roster_map:
-                        roster_map[p_id] = []
-                    roster_map[p_id].append({
-                        'slot': row.get('slot'),
-                        'name': row.get('player_name'),
-                        'inGameTag': row.get('in_game_tag'),
-                        'email': row.get('email'),
-                        'phone': row.get('phone', ''),
-                        'isCaptain': row.get('is_captain', row.get('slot') == 1)
-                    })
-                for rec in combined_dict.values():
-                    p_id = rec.get('pass_id')
-                    if p_id in roster_map:
-                        rec['players'] = roster_map[p_id]
-                        rec['player_emails'] = [p['email'] for p in roster_map[p_id]]
-        except Exception as rost_err:
-            print(f"Notice fetching tournament_rosters join: {rost_err}")
+        # Query tournament_rosters for matched pass_ids only
+        matched_pids = list(combined_dict.keys())
+        if matched_pids:
+            try:
+                supabase = get_supabase_client()
+                r_query = supabase.table('tournament_rosters').select('*')
+                if len(matched_pids) <= 20:
+                    r_query = r_query.in_('pass_id', matched_pids)
+                elif clean_slug:
+                    r_query = r_query.eq('tournament_slug', clean_slug)
+                
+                r_res = r_query.order('slot').execute()
+                if r_res.data:
+                    roster_map = {}
+                    for row in r_res.data:
+                        p_id = row.get('pass_id')
+                        if p_id not in roster_map:
+                            roster_map[p_id] = []
+                        roster_map[p_id].append({
+                            'slot': row.get('slot'),
+                            'name': row.get('player_name'),
+                            'inGameTag': row.get('in_game_tag'),
+                            'email': row.get('email'),
+                            'phone': row.get('phone', ''),
+                            'isCaptain': row.get('is_captain', row.get('slot') == 1)
+                        })
+                    for rec in combined_dict.values():
+                        p_id = rec.get('pass_id')
+                        if p_id in roster_map:
+                            rec['players'] = roster_map[p_id]
+                            rec['player_emails'] = [p['email'] for p in roster_map[p_id]]
+            except Exception as rost_err:
+                print(f"Notice fetching tournament_rosters join: {rost_err}")
 
         all_records = list(combined_dict.values())
-        
-        if email:
-            clean_email = email.strip().lower()
-            all_records = [r for r in all_records if r.get('email') == clean_email or clean_email in (r.get('player_emails') or [])]
-
-        if tournament_slug:
-            clean_slug = tournament_slug.strip().lower()
-            all_records = [r for r in all_records if (r.get('tournament_slug') or '').strip().lower() == clean_slug]
-
+        api_cache.set(cache_key, all_records, ttl_seconds=20)
         return jsonify({'success': True, 'data': all_records}), 200
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500

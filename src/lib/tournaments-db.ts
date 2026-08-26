@@ -87,14 +87,21 @@ export async function saveRegistration(record: TournamentRegistrationRecord): Pr
   return isSaved;
 }
 
+const REG_CACHE = new Map<string, { data: TournamentRegistrationRecord[]; expires: number }>();
+
 /**
- * Get all registrations stored for the current user strictly from Backend / Supabase
+ * Get all registrations stored for the current user strictly from Backend / Supabase with instant client caching
  */
 export async function getUserRegistrations(email?: string): Promise<TournamentRegistrationRecord[]> {
   const records: TournamentRegistrationRecord[] = [];
   if (!email) return records;
 
   const cleanEmail = email.trim().toLowerCase();
+
+  const cached = REG_CACHE.get(cleanEmail);
+  if (cached && Date.now() < cached.expires) {
+    return cached.data;
+  }
 
   // 1. Fetch from Flask Backend API (/api/registrations?email=...)
   try {
@@ -127,6 +134,7 @@ export async function getUserRegistrations(email?: string): Promise<TournamentRe
           });
         }
         if (records.length > 0) {
+          REG_CACHE.set(cleanEmail, { data: records, expires: Date.now() + 20000 });
           return records;
         }
       }
@@ -167,6 +175,7 @@ export async function getUserRegistrations(email?: string): Promise<TournamentRe
     console.warn('Supabase registrations fallback error:', err);
   }
 
+  REG_CACHE.set(cleanEmail, { data: records, expires: Date.now() + 20000 });
   return records;
 }
 

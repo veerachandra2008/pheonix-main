@@ -209,18 +209,35 @@ export default function SettingsPage() {
         throw new Error(json.message || 'Failed to save profile.');
       }
 
-      // Also update directly in Supabase table
+      // Also update directly in Supabase table with fallback
       try {
-        await supabase
+        const { error: fullErr } = await supabase
           .from('users')
           .update({
             name: name.trim(),
             college: college.trim(),
+            team: team.trim() || 'Free Agent',
+            tag: tag.trim(),
             bio: bio.trim(),
             avatar_url: avatar,
           })
           .eq('email', sessionUser.email.toLowerCase());
-      } catch {}
+
+        if (fullErr) {
+          // Fallback to core columns if team/tag columns don't exist in Supabase yet
+          await supabase
+            .from('users')
+            .update({
+              name: name.trim(),
+              college: college.trim(),
+              bio: bio.trim(),
+              avatar_url: avatar,
+            })
+            .eq('email', sessionUser.email.toLowerCase());
+        }
+      } catch (sbErr) {
+        console.warn('Direct Supabase update notice:', sbErr);
+      }
 
       // Update session in local storage
       const nextSession = {
