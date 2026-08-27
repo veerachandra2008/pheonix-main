@@ -94,6 +94,24 @@ export default function LoginPage() {
           });
         } catch {}
 
+        // Store in local storage xenova_users for offline fallback
+        try {
+          const rawUsers = localStorage.getItem('xenova_users');
+          let users = rawUsers ? JSON.parse(rawUsers) : [];
+          if (!Array.isArray(users)) users = [];
+          if (!users.some((u: any) => u.email === cleanEmail)) {
+            users.push({
+              id: userId,
+              email: cleanEmail,
+              name: formData.name.trim(),
+              password: formData.password,
+              college: formData.college.trim() || 'General Campus',
+              role: 'player',
+            });
+            localStorage.setItem('xenova_users', JSON.stringify(users));
+          }
+        } catch {}
+
         // Auto login session setup
         const userSession = {
           id: userId,
@@ -116,24 +134,30 @@ export default function LoginPage() {
 
       } else {
         // -------------------------------------------------------------
-        // 3. SUPABASE AUTH LOGIN WITH DATABASE FALLBACK
-        // -------------------------------------------------------------
-        // 3. SUPABASE AUTH LOGIN & STRICT PASSWORD VERIFICATION
+        // 3. STRICT SIGNIN: VERIFY BOTH EMAIL AND PASSWORD
         // -------------------------------------------------------------
         let authenticatedUser: any = null;
         let userId = '';
+        let authErrorMessage = '';
 
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password: formData.password,
-        });
+        // 3a. Attempt Supabase Auth signInWithPassword
+        try {
+          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password: formData.password,
+          });
 
-        if (!authError && authData?.user) {
-          userId = authData.user.id;
-          authenticatedUser = authData.user;
+          if (!authError && authData?.user) {
+            userId = authData.user.id;
+            authenticatedUser = authData.user;
+          } else if (authError) {
+            authErrorMessage = authError.message;
+          }
+        } catch (sbAuthErr: any) {
+          console.warn('Supabase Auth verification notice:', sbAuthErr);
         }
 
-        // Check backend auth endpoint as secondary verification
+        // 3b. Secondary verification: Backend API /auth/login with credentials
         let userProfile: any = null;
         if (!authenticatedUser) {
           try {
@@ -143,22 +167,38 @@ export default function LoginPage() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email: cleanEmail, password: formData.password }),
             });
-            if (apiRes.ok) {
-              const apiJson = await apiRes.json();
-              if (apiJson.success && apiJson.user) {
-                userProfile = apiJson.user;
-                authenticatedUser = { email: cleanEmail, id: apiJson.user.id };
-                userId = apiJson.user.id;
-              }
+            const apiJson = await apiRes.json();
+            if (apiRes.ok && apiJson.success && apiJson.user) {
+              userProfile = apiJson.user;
+              authenticatedUser = { email: cleanEmail, id: apiJson.user.id };
+              userId = String(apiJson.user.id);
+            } else if (apiJson.message) {
+              authErrorMessage = apiJson.message;
             }
           } catch (apiErr) {
             console.warn('Backend login verification notice:', apiErr);
           }
         }
 
-        // If password authentication failed on both Supabase and Backend, reject login!
+        // 3c. Fallback verification for offline local storage accounts
         if (!authenticatedUser) {
-          const errorText = authError?.message || 'Invalid email or password. Please check your credentials.';
+          try {
+            const rawUsers = localStorage.getItem('xenova_users');
+            const localUsers = rawUsers ? JSON.parse(rawUsers) : [];
+            const foundLocal = Array.isArray(localUsers) && localUsers.find(
+              (u: any) => u.email?.toLowerCase() === cleanEmail && u.password === formData.password
+            );
+            if (foundLocal) {
+              authenticatedUser = foundLocal;
+              userId = foundLocal.id || 'usr_' + Date.now();
+              userProfile = foundLocal;
+            }
+          } catch {}
+        }
+
+        // 3d. If password authentication failed across all sources, REJECT LOGIN!
+        if (!authenticatedUser) {
+          const errorText = authErrorMessage || 'Invalid email or password. Please check your credentials.';
           setStatusMsg({
             type: 'error',
             text: `❌ ${errorText}`,

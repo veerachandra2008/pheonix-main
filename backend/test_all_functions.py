@@ -81,7 +81,7 @@ class TestPhoenixEsportsBackend(unittest.TestCase):
             'password': 'mypassword',
             'college': 'BITS Pilani'
         })
-        # Login
+        # Login with correct password
         res = self.client.post('/api/auth/login', json={'email': email, 'password': 'mypassword'})
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
@@ -89,12 +89,32 @@ class TestPhoenixEsportsBackend(unittest.TestCase):
         self.assertEqual(data['user']['email'], email)
         self.assertEqual(data['user']['role'], 'player')
 
+    def test_05b_login_wrong_password(self):
+        email = f"login_wp_{int(time.time()*1000)}@test.com"
+        self.client.post('/api/auth/register', json={
+            'name': 'Player Wrong Pass',
+            'email': email,
+            'password': 'CorrectPassword123!',
+            'college': 'IIT Delhi'
+        })
+        # Attempt login with wrong password
+        res = self.client.post('/api/auth/login', json={'email': email, 'password': 'IncorrectPassword!'})
+        self.assertEqual(res.status_code, 401)
+        data = res.get_json()
+        self.assertFalse(data.get('success'))
+
     def test_06_login_admin(self):
         res = self.client.post('/api/auth/login', json={'email': 'admin@xenova.gg', 'password': 'admin'})
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
         self.assertTrue(data.get('success'))
         self.assertEqual(data['user']['role'], 'admin')
+
+    def test_06b_login_admin_wrong_password(self):
+        res = self.client.post('/api/auth/login', json={'email': 'admin@xenova.gg', 'password': 'completelyWrongPassword'})
+        self.assertEqual(res.status_code, 401)
+        data = res.get_json()
+        self.assertFalse(data.get('success'))
 
     def test_07_login_non_existent_user(self):
         res = self.client.post('/api/auth/login', json={'email': 'ghost_user_999@test.com', 'password': '123'})

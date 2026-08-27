@@ -1,10 +1,17 @@
 import hashlib
+import requests
 from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, request, jsonify
-from config import get_supabase_client
+from config import Config, get_supabase_client
 from cache import api_cache
 
 auth_bp = Blueprint('auth', __name__)
+
+def hash_password(password: str) -> str:
+    """Computes SHA-256 hash for secure password verification."""
+    if not password:
+        return ""
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 IN_MEMORY_USERS = {
     'admin@xenova.gg': {
@@ -14,8 +21,15 @@ IN_MEMORY_USERS = {
         'college': 'Xenova HQ',
         'role': 'ADMIN',
         'avatar_url': '/valorant.jpg',
-        'tag': 'ADMIN#1337'
+        'tag': 'ADMIN#1337',
+        'password_hash': hash_password('admin123'),
+        'passwords': ['admin', 'admin123', 'admin@123']
     }
+}
+
+# Dedicated credential store for fast in-memory password verification fallback
+USER_CREDENTIALS = {
+    'admin@xenova.gg': hash_password('admin123'),
 }
 
 @auth_bp.route('/register', methods=['POST'])
@@ -33,6 +47,8 @@ def register():
 
         if not email or not password or not name:
             return jsonify({'success': False, 'message': 'Name, email, and password are required.'}), 400
+
+        pwd_hash = hash_password(password)
 
         # Check memory store
         if email in IN_MEMORY_USERS:
@@ -55,7 +71,11 @@ def register():
             'avatar_url': '/valorant.jpg'
         }
 
-        IN_MEMORY_USERS[email] = user_payload
+        IN_MEMORY_USERS[email] = {
+            **user_payload,
+            'password_hash': pwd_hash
+        }
+        USER_CREDENTIALS[email] = pwd_hash
 
         # Try inserting into Supabase
         try:
@@ -67,16 +87,42 @@ def register():
                     'already_registered': True,
                     'message': 'Account already exists for this email! Please sign in.'
                 }), 400
-            res = supabase.table('users').insert(user_payload).execute()
+
+            # Try inserting with password_hash first if schema supports it
+            try:
+                db_payload = {**user_payload, 'password_hash': pwd_hash}
+                res = supabase.table('users').insert(db_payload).execute()
+            except Exception:
+                res = supabase.table('users').insert(user_payload).execute()
+
             if res.data:
                 user_payload = res.data[0]
         except Exception as sb_err:
             print(f"Supabase user insert warning: {sb_err}")
 
+        # Try registering user in Supabase Auth (GoTrue)
+        try:
+            auth_url = f"{Config.SUPABASE_URL.rstrip('/')}/auth/v1/signup"
+            headers = {
+                "apikey": Config.SUPABASE_KEY,
+                "Content-Type": "application/json"
+            }
+            requests.post(auth_url, headers=headers, json={"email": email, "password": password}, timeout=3.0)
+        except Exception:
+            pass
+
         return jsonify({
             'success': True,
             'message': 'Registration successful! You are registered as PLAYER. You can now sign in.',
-            'user': user_payload
+            'user': {
+                'id': user_payload.get('id'),
+                'name': user_payload.get('name'),
+                'email': user_payload.get('email'),
+                'college': user_payload.get('college'),
+                'role': (user_payload.get('role') or 'PLAYER').lower(),
+                'avatar': user_payload.get('avatar_url') or '/valorant.jpg',
+                'tag': f"{user_payload.get('name', 'Gamer').upper().replace(' ', '')}#1337"
+            }
         }), 201
 
     except Exception as e:
@@ -87,7 +133,8 @@ def register():
 @auth_bp.route('/login', methods=['POST'])
 def login():
     """
-    Sign in user. Queries Supabase or in-memory fallback.
+    Sign in user. Strictly validates BOTH email and password against
+    Supabase Auth, Supabase users table (password_hash), and memory store.
     """
     try:
         data = request.get_json() or {}
@@ -97,41 +144,110 @@ def login():
         if not email or not password:
             return jsonify({'success': False, 'message': 'Email and password are required.'}), 400
 
+        pwd_hash = hash_password(password)
         user = None
+        password_verified = False
 
-        # 1. Try Supabase
+        # 1. Special Admin check
+        if email == 'admin@xenova.gg':
+            admin_data = IN_MEMORY_USERS.get('admin@xenova.gg', {})
+            valid_admin_passwords = admin_data.get('passwords', ['admin', 'admin123', 'admin@123'])
+            if password in valid_admin_passwords or pwd_hash == USER_CREDENTIALS.get(email):
+                password_verified = True
+                user = admin_data
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'Invalid password for admin account. Please check your credentials.'
+                }), 401
+
+        # 2. Try Supabase Auth API (GoTrue token endpoint)
+        if not password_verified:
+            try:
+                auth_url = f"{Config.SUPABASE_URL.rstrip('/')}/auth/v1/token?grant_type=password"
+                headers = {
+                    "apikey": Config.SUPABASE_KEY,
+                    "Content-Type": "application/json"
+                }
+                r = requests.post(auth_url, headers=headers, json={"email": email, "password": password}, timeout=3.5)
+                if r.status_code == 200:
+                    password_verified = True
+            except Exception as e:
+                print(f"Supabase GoTrue auth verification notice: {e}")
+
+        # 3. Query Supabase users table for profile and DB password_hash verification
         try:
             supabase = get_supabase_client()
             res = supabase.table('users').select('*').eq('email', email).execute()
             if res.data and len(res.data) > 0:
                 user = res.data[0]
+                db_hash = user.get('password_hash') or user.get('password')
+                if db_hash:
+                    if db_hash == pwd_hash or db_hash == password:
+                        password_verified = True
+                    elif not password_verified:
+                        # Password hash present in database and does not match
+                        return jsonify({
+                            'success': False,
+                            'message': 'Invalid password. Please check your credentials and try again.'
+                        }), 401
         except Exception as sb_err:
             print(f"Supabase login lookup warning: {sb_err}")
 
-        # 2. Check in-memory store if not found in Supabase
+        # 4. Check in-memory store
         if not user and email in IN_MEMORY_USERS:
             user = IN_MEMORY_USERS[email]
 
-        if not user:
+        # 5. Check in-memory credentials store
+        stored_hash = USER_CREDENTIALS.get(email) or (user.get('password_hash') if isinstance(user, dict) else None)
+        if stored_hash:
+            if stored_hash == pwd_hash or stored_hash == password:
+                password_verified = True
+            elif not password_verified:
+                return jsonify({
+                    'success': False,
+                    'message': 'Invalid password. Please check your credentials and try again.'
+                }), 401
+
+        # If user not found anywhere
+        if not user and not password_verified:
             return jsonify({
                 'success': False,
                 'requires_registration': True,
                 'message': 'No account found with this email! You must register first before signing in.'
             }), 404
 
-        active_role = user.get('role', 'PLAYER').upper()
+        # If user was found by email, but password was not verified
+        if not password_verified:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid password. Please check your credentials and try again.'
+            }), 401
+
+        # If verified through Supabase Auth but user record not yet created in table
+        if not user:
+            user = {
+                'id': f"usr_{abs(hash(email)) % 100000}",
+                'name': email.split('@')[0].capitalize(),
+                'email': email,
+                'college': 'General Campus',
+                'role': 'PLAYER',
+                'avatar_url': '/valorant.jpg'
+            }
+
+        active_role = (user.get('role') or 'PLAYER').upper()
 
         return jsonify({
             'success': True,
             'message': 'Signed in successfully!',
             'user': {
                 'id': user.get('id'),
-                'name': user.get('name'),
-                'email': user.get('email'),
-                'college': user.get('college'),
+                'name': user.get('name') or email.split('@')[0].capitalize(),
+                'email': user.get('email') or email,
+                'college': user.get('college') or 'General Campus',
                 'role': active_role.lower(),  # 'player', 'organizer', or 'admin'
                 'avatar': user.get('avatar_url') or '/valorant.jpg',
-                'tag': f"{user.get('name', 'Gamer').upper().replace(' ', '')}#1337"
+                'tag': user.get('tag') or f"{(user.get('name') or 'Gamer').upper().replace(' ', '')}#1337"
             }
         }), 200
 

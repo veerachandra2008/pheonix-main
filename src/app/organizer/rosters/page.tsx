@@ -36,8 +36,12 @@ interface Player {
 interface TeamRoster {
   pass_id: string;
   tournament_slug: string;
+  tournament_title?: string;
   team_name: string;
   college: string;
+  captain_name?: string;
+  email?: string;
+  registered_at?: string;
   players: Player[];
 }
 
@@ -147,23 +151,47 @@ export default function OrganizerRostersHubPage() {
               const p3 = slots.find((s: any) => s.slot === 3) || {};
               const p4 = slots.find((s: any) => s.slot === 4) || {};
 
+              const playersList: Player[] = [
+                {
+                  slot: 1,
+                  player_name: p1.player_name || p1.name || reg.captain_name || reg.name || 'Captain',
+                  in_game_tag: p1.in_game_tag || p1.game_id || p1.inGameTag || reg.in_game_id || 'IGN_1',
+                  email: p1.email || reg.email || 'captain@squad.gg',
+                  is_captain: true,
+                },
+                {
+                  slot: 2,
+                  player_name: p2.player_name || p2.name || 'Player 2',
+                  in_game_tag: p2.in_game_tag || p2.game_id || p2.inGameTag || 'IGN_2',
+                  email: p2.email || 'p2@squad.gg',
+                  is_captain: false,
+                },
+                {
+                  slot: 3,
+                  player_name: p3.player_name || p3.name || 'Player 3',
+                  in_game_tag: p3.in_game_tag || p3.game_id || p3.inGameTag || 'IGN_3',
+                  email: p3.email || 'p3@squad.gg',
+                  is_captain: false,
+                },
+                {
+                  slot: 4,
+                  player_name: p4.player_name || p4.name || 'Player 4',
+                  in_game_tag: p4.in_game_tag || p4.game_id || p4.inGameTag || 'IGN_4',
+                  email: p4.email || 'p4@squad.gg',
+                  is_captain: false,
+                },
+              ];
+
               fetchedRosters.push({
                 pass_id: pid,
                 tournament_slug: reg.tournament_slug || '',
                 tournament_title: reg.tournament_title || '',
                 team_name: reg.team_name || 'Squad Entry',
                 college: reg.college || 'Collegiate Campus',
-                captain_name: reg.captain_name || p1.name || 'Captain',
+                captain_name: reg.captain_name || p1.player_name || p1.name || 'Captain',
                 email: reg.email,
                 registered_at: reg.registered_at || new Date().toISOString(),
-                player1_name: p1.name || reg.captain_name || 'Captain',
-                player1_game_id: p1.game_id || '',
-                player2_name: p2.name || 'Player 2',
-                player2_game_id: p2.game_id || '',
-                player3_name: p3.name || 'Player 3',
-                player3_game_id: p3.game_id || '',
-                player4_name: p4.name || 'Player 4',
-                player4_game_id: p4.game_id || '',
+                players: playersList,
               });
             }
           }

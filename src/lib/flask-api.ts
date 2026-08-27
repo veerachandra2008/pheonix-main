@@ -151,7 +151,7 @@ export const flaskApi = {
     }
   },
 
-  // Login user (tries Flask API first, falls back to direct Supabase query)
+  // Login user (tries Flask API first, falls back to direct Supabase query with strict password check)
   async loginUser(params: LoginUserParams) {
     try {
       const res = await fetch(`${FLASK_API_BASE}/auth/login`, {
@@ -159,16 +159,42 @@ export const flaskApi = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
       });
-      if (res.ok || res.status === 404 || res.status === 401) {
+      if (res.ok || res.status === 404 || res.status === 401 || res.status === 400) {
         return await res.json();
       }
     } catch (e) {
       console.warn('Flask server not reachable, falling back to direct Supabase connection:', e);
     }
 
-    // Direct Supabase Fallback
+    // Direct Supabase Fallback with strict password verification
     try {
       const email = params.email.trim().toLowerCase();
+      const password = params.password || '';
+
+      if (!email || !password) {
+        return {
+          success: false,
+          message: 'Email and password are required.',
+        };
+      }
+
+      // Verify password via Supabase Auth
+      let authVerified = false;
+      let authErrorMsg = '';
+      try {
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (!authError && authData?.user) {
+          authVerified = true;
+        } else if (authError) {
+          authErrorMsg = authError.message;
+        }
+      } catch (authErr: any) {
+        authErrorMsg = authErr.message;
+      }
+
       const { data, error } = await supabase.from('users').select('*').eq('email', email);
       
       if (error) {
@@ -179,11 +205,27 @@ export const flaskApi = {
         return {
           success: false,
           requires_registration: true,
-          message: 'No account found with this email in Supabase! You must register first before signing in.',
+          message: 'No account found with this email! You must register first before signing in.',
         };
       }
 
       const user = data[0];
+
+      // If user row has password/password_hash column
+      if (user.password_hash || user.password) {
+        const stored = user.password_hash || user.password;
+        if (stored === password) {
+          authVerified = true;
+        }
+      }
+
+      if (!authVerified) {
+        return {
+          success: false,
+          message: authErrorMsg || 'Invalid email or password. Please check your credentials.',
+        };
+      }
+
       return {
         success: true,
         message: 'Signed in successfully!',
