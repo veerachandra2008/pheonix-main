@@ -4,33 +4,35 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Trophy, ArrowRight, Zap, ChevronRight } from 'lucide-react';
+import { Trophy, ArrowRight, Zap, ChevronRight, Phone, Mail, Headphones, ShieldCheck, MessageCircle } from 'lucide-react';
 import Ferrofluid from '@/components/ui/Ferrofluid';
 
 const footerLinks = {
   platform: [
     { label: 'Tournaments', href: '/tournaments' },
     { label: 'Leaderboards', href: '/leaderboards' },
+    { label: 'Colleges', href: '/colleges' },
     { label: 'Teams', href: '/teams' },
     { label: 'Players', href: '/players' },
   ],
   games: [
-    { label: 'VALORANT', href: '#' },
-    { label: 'CS2', href: '#' },
-    { label: 'BGMI', href: '#' },
-    { label: 'Apex Legends', href: '#' },
+    { label: 'VALORANT', href: '/tournaments?game=Valorant' },
+    { label: 'BGMI', href: '/tournaments?game=BGMI' },
+    { label: 'CS2', href: '/tournaments?game=CS2' },
+    { label: 'Free Fire', href: '/tournaments?game=Free Fire' },
+    { label: 'Apex Legends', href: '/tournaments?game=Apex Legends' },
   ],
   company: [
-    { label: 'About Us', href: '#' },
-    { label: 'Careers', href: '#' },
-    { label: 'Partners', href: '#' },
-    { label: 'Press Kit', href: '#' },
+    { label: 'About Us', href: '/about' },
+    { label: 'Partners', href: '/partners' },
+    { label: 'Host Tournament', href: '/host' },
   ],
   support: [
-    { label: 'Help Center', href: '#' },
-    { label: 'Contact', href: '#' },
-    { label: 'Terms of Service', href: '#' },
-    { label: 'Privacy Policy', href: '#' },
+    { label: 'Help Center', href: '/help' },
+    { label: 'Contact Us', href: '/contact' },
+    { label: 'Ticket Verification', href: '/verify' },
+    { label: 'Terms of Service', href: '/terms' },
+    { label: 'Privacy Policy', href: '/privacy' },
   ],
 };
 
@@ -59,10 +61,10 @@ const InstagramIcon = () => (
 );
 
 const socialLinks = [
-  { icon: DiscordIcon, href: '#', label: 'Discord' },
-  { icon: TwitterIcon, href: '#', label: 'Twitter' },
-  { icon: YoutubeIcon, href: '#', label: 'YouTube' },
-  { icon: InstagramIcon, href: '#', label: 'Instagram' },
+  { icon: DiscordIcon, href: 'https://discord.gg', label: 'Discord' },
+  { icon: TwitterIcon, href: 'https://twitter.com', label: 'Twitter' },
+  { icon: YoutubeIcon, href: 'https://youtube.com', label: 'YouTube' },
+  { icon: InstagramIcon, href: 'https://instagram.com', label: 'Instagram' },
 ];
 
 interface FinalCTAProps {
@@ -166,7 +168,7 @@ export default function FinalCTA({ showCTA }: FinalCTAProps) {
       <div className="relative z-10 border-t border-zinc-900 bg-black overflow-hidden">
         
         {/* 🌊 REACT BITS FERROFLUID EFFECT BACKGROUND (FOOTER ONLY) 🌊 */}
-        <div className="absolute inset-0 z-0 pointer-events-none opacity-40">
+        <div className="absolute inset-0 z-0 pointer-events-none opacity-30">
           <Ferrofluid
             colors={["#ffffff", "#ffffff", "#ffffff"]}
             speed={0.5}
@@ -186,17 +188,65 @@ export default function FinalCTA({ showCTA }: FinalCTAProps) {
         </div>
 
         <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">
+          
+          {/* ═══════════════ DIRECT HELP & SUPPORT BAR ═══════════════ */}
+          <div className="mb-12 p-6 rounded-2xl border border-emerald-500/20 bg-emerald-950/20 backdrop-blur-xl flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl">
+            <div className="flex items-center gap-4 text-left w-full md:w-auto">
+              <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0">
+                <Headphones className="w-6 h-6 text-emerald-400" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-extrabold uppercase tracking-wider text-white">XENOVA Support & Tournament Desk</h4>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-[10px] font-bold text-emerald-400 border border-emerald-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> 24/7 ACTIVE
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 mt-0.5">Need help with match check-in, ticket passes, disputes, or campus partnerships?</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-start md:justify-end">
+              <a
+                href="tel:+917993728522"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-bold uppercase tracking-wider transition shadow-lg hover:scale-105"
+                title="Call Support Hotline"
+              >
+                <Phone className="w-3.5 h-3.5" />
+                <span>+91 79937 28522</span>
+              </a>
+
+              <a
+                href="mailto:veerachandra2008@gmail.com"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-white text-xs font-bold tracking-wide transition shadow-lg hover:scale-105"
+                title="Send Support Email"
+              >
+                <Mail className="w-3.5 h-3.5 text-emerald-400" />
+                <span>veerachandra2008@gmail.com</span>
+              </a>
+
+              <Link
+                href="/help"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-black uppercase tracking-wider transition shadow-lg shadow-emerald-500/20 hover:scale-105"
+              >
+                <span>Help Center</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 md:grid-cols-5 gap-8 mb-12">
             
             {/* Brand */}
             <div className="col-span-2 md:col-span-1 space-y-4">
-              <div className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 w-fit">
+              <Link href="/" className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 w-fit hover:bg-emerald-500/20 transition">
                 <Zap className="h-4 w-4 fill-emerald-400" />
                 <span className="text-xs font-black uppercase tracking-widest text-white">XENOVA</span>
-              </div>
+              </Link>
               <p className="text-zinc-400 text-xs leading-relaxed">
-                The official collegiate esports infrastructure for varsity squads and campus champions.
+                The official collegiate esports infrastructure for varsity squads and campus champions across India.
               </p>
+              
               {/* Social Links */}
               <div className="flex gap-2 pt-1">
                 {socialLinks.map((social) => {
@@ -205,6 +255,8 @@ export default function FinalCTA({ showCTA }: FinalCTAProps) {
                     <a
                       key={social.label}
                       href={social.href}
+                      target="_blank"
+                      rel="noreferrer"
                       className="w-9 h-9 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-emerald-500/40 hover:text-emerald-400 flex items-center justify-center text-zinc-400 transition"
                       aria-label={social.label}
                     >
@@ -220,20 +272,20 @@ export default function FinalCTA({ showCTA }: FinalCTAProps) {
               { title: 'Platform', links: footerLinks.platform },
               { title: 'Games', links: footerLinks.games },
               { title: 'Company', links: footerLinks.company },
-              { title: 'Support', links: footerLinks.support },
+              { title: 'Support & Help', links: footerLinks.support },
             ].map((section) => (
               <div key={section.title}>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-300 mb-4">{section.title}</h4>
+                <h4 className="text-xs font-black uppercase tracking-wider text-zinc-200 mb-4">{section.title}</h4>
                 <ul className="space-y-2.5">
                   {section.links.map((link) => (
                     <li key={link.label}>
-                      <a
+                      <Link
                         href={link.href}
                         className="text-zinc-400 hover:text-white text-xs transition inline-flex items-center gap-1 group"
                       >
                         {link.label}
                         <ChevronRight className="w-3 h-3 opacity-0 group-hover:opacity-100 text-emerald-400 transition" />
-                      </a>
+                      </Link>
                     </li>
                   ))}
                 </ul>
@@ -245,12 +297,22 @@ export default function FinalCTA({ showCTA }: FinalCTAProps) {
           {/* Bottom Copyright */}
           <div className="pt-8 border-t border-zinc-900 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-zinc-500">
             <p>© 2026 XENOVA Esports Platform. All rights reserved.</p>
-            <div className="flex items-center gap-6">
-              {['Terms of Service', 'Privacy Policy', 'Cookie Rules'].map((item) => (
-                <a key={item} href="#" className="hover:text-zinc-300 transition">
-                  {item}
-                </a>
-              ))}
+            <div className="flex items-center flex-wrap gap-4 sm:gap-6">
+              <Link href="/terms" className="hover:text-zinc-300 transition">
+                Terms of Service
+              </Link>
+              <Link href="/privacy" className="hover:text-zinc-300 transition">
+                Privacy Policy
+              </Link>
+              <Link href="/contact" className="hover:text-zinc-300 transition">
+                Contact Desk
+              </Link>
+              <Link href="/help" className="hover:text-zinc-300 transition">
+                Help Center
+              </Link>
+              <Link href="/verify" className="hover:text-zinc-300 transition">
+                Ticket Scanner
+              </Link>
             </div>
           </div>
         </div>

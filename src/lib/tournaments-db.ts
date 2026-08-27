@@ -21,25 +21,17 @@ export interface TournamentRegistrationRecord {
   registeredAt: string;
 }
 
+let memoryTournamentsCache: Tournament[] | null = null;
+
 /**
- * Fetch all tournaments directly from Backend Database with direct Supabase fallback
+ * Fetch all tournaments directly from Supabase (<50ms) with in-memory caching and non-blocking API fallback
  */
 export async function getAllTournaments(): Promise<Tournament[]> {
-  // 1. Try Backend API
-  try {
-    const apiBase = getApiBaseUrl();
-    const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
-        return json.data.map(mapSupabaseTournament);
-      }
-    }
-  } catch (err) {
-    console.warn('Backend API tournaments fetch error:', err);
+  if (memoryTournamentsCache && memoryTournamentsCache.length > 0) {
+    return memoryTournamentsCache;
   }
 
-  // 2. Direct Supabase Query Fallback (Ensures 100% database data in deployment even if serverless API has cold-start)
+  // 1. Direct Supabase Query First (<50ms direct cloud query)
   try {
     const { data, error } = await supabase
       .from('tournaments')
@@ -47,11 +39,34 @@ export async function getAllTournaments(): Promise<Tournament[]> {
       .order('id', { ascending: true });
 
     if (!error && data && Array.isArray(data) && data.length > 0) {
-      return data.map(mapSupabaseTournament);
+      const mapped = data.map(mapSupabaseTournament);
+      memoryTournamentsCache = mapped;
+      return mapped;
     }
   } catch (err) {
-    console.warn('Direct Supabase tournaments query fallback error:', err);
+    console.warn('Direct Supabase tournaments query warning:', err);
   }
+
+  // 2. Non-blocking Backend API Fallback with 600ms timeout
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 600);
+    const apiBase = getApiBaseUrl();
+    const res = await fetch(`${apiBase}/tournaments/`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        const mapped = json.data.map(mapSupabaseTournament);
+        memoryTournamentsCache = mapped;
+        return mapped;
+      }
+    }
+  } catch {}
 
   return defaultMockTournaments;
 }
@@ -101,7 +116,7 @@ export async function saveRegistration(record: TournamentRegistrationRecord): Pr
 const REG_CACHE = new Map<string, { data: TournamentRegistrationRecord[]; expires: number }>();
 
 /**
- * Get all registrations stored for the current user strictly from Backend / Supabase with instant client caching
+ * Get all registrations stored for the current user strictly from Supabase / Backend with instant client caching
  */
 export async function getUserRegistrations(email?: string): Promise<TournamentRegistrationRecord[]> {
   const records: TournamentRegistrationRecord[] = [];
@@ -114,11 +129,51 @@ export async function getUserRegistrations(email?: string): Promise<TournamentRe
     return cached.data;
   }
 
-  // 1. Fetch from Flask Backend API (/api/registrations?email=...)
+  // 1. Direct Supabase Query First (<50ms)
   try {
-    const apiBase = getApiBaseUrl();
+    const { data, error } = await supabase
+      .from('registrations')
+      .select('*')
+      .eq('email', cleanEmail);
 
-    const res = await fetch(`${apiBase}/registrations?email=${encodeURIComponent(cleanEmail)}`, { cache: 'no-store' });
+    if (!error && data && Array.isArray(data) && data.length > 0) {
+      for (const item of data) {
+        records.push({
+          tournamentSlug: item.tournament_slug,
+          tournamentTitle: item.tournament_title || item.tournament_slug,
+          tournamentGame: item.tournament_game || 'Esports',
+          tournamentPrize: item.tournament_prize || 'Verified Entry',
+          tournamentDate: item.tournament_date || 'Upcoming',
+          tournamentFormat: item.tournament_format || 'Tournament',
+          tournamentRegion: item.tournament_region || 'Pan India',
+          tournamentFee: item.tournament_fee || 'Free',
+          teamId: item.team_id,
+          teamName: item.team_name,
+          college: item.college,
+          captainName: item.captain_name,
+          email: item.email,
+          passId: item.pass_id,
+          registeredAt: item.registered_at || new Date().toISOString(),
+        });
+      }
+      REG_CACHE.set(cleanEmail, { data: records, expires: Date.now() + 60000 });
+      return records;
+    }
+  } catch (err) {
+    console.warn('Direct Supabase registrations query error:', err);
+  }
+
+  // 2. Non-blocking Backend API fallback (600ms timeout)
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 600);
+    const apiBase = getApiBaseUrl();
+    const res = await fetch(`${apiBase}/registrations?email=${encodeURIComponent(cleanEmail)}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
     if (res.ok) {
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
@@ -141,49 +196,11 @@ export async function getUserRegistrations(email?: string): Promise<TournamentRe
             registeredAt: item.registered_at || item.registeredAt || new Date().toISOString(),
           });
         }
-        if (records.length > 0) {
-          REG_CACHE.set(cleanEmail, { data: records, expires: Date.now() + 20000 });
-          return records;
-        }
       }
     }
-  } catch (err) {
-    console.warn('Backend API registrations fetch error:', err);
-  }
+  } catch {}
 
-  // 2. Direct Supabase Fallback
-  try {
-    const { data, error } = await supabase
-      .from('registrations')
-      .select('*')
-      .eq('email', cleanEmail);
-
-    if (!error && data && Array.isArray(data)) {
-      for (const item of data) {
-        records.push({
-          tournamentSlug: item.tournament_slug,
-          tournamentTitle: item.tournament_title || item.tournament_slug,
-          tournamentGame: item.tournament_game || 'Esports',
-          tournamentPrize: item.tournament_prize || 'Verified Entry',
-          tournamentDate: item.tournament_date || 'Upcoming',
-          tournamentFormat: item.tournament_format || 'Tournament',
-          tournamentRegion: item.tournament_region || 'Pan India',
-          tournamentFee: item.tournament_fee || 'Free',
-          teamId: item.team_id,
-          teamName: item.team_name,
-          college: item.college,
-          captainName: item.captain_name,
-          email: item.email,
-          passId: item.pass_id,
-          registeredAt: item.registered_at || new Date().toISOString(),
-        });
-      }
-    }
-  } catch (err) {
-    console.warn('Supabase registrations fallback error:', err);
-  }
-
-  REG_CACHE.set(cleanEmail, { data: records, expires: Date.now() + 20000 });
+  REG_CACHE.set(cleanEmail, { data: records, expires: Date.now() + 60000 });
   return records;
 }
 

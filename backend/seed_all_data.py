@@ -8,7 +8,6 @@ from config import Config, get_supabase_client
 from routes.tournaments import MOCK_TOURNAMENTS
 from routes.colleges import MOCK_COLLEGES
 from routes.teams import MOCK_TEAMS
-from routes.notifications import MOCK_NOTIFICATIONS
 
 def seed_all():
     print("=" * 60)
@@ -67,15 +66,25 @@ def seed_all():
         print("\n🔔 Seeding Notifications...")
         try:
             existing_res = supabase.table('notifications').select('id').execute()
-            existing_ids = {item['id'] for item in (existing_res.data or []) if 'id' in item}
-            to_insert = [n for n in MOCK_NOTIFICATIONS if n['id'] not in existing_ids]
-            if to_insert:
-                res = supabase.table('notifications').insert(to_insert).execute()
-                print(f"  ✅ Inserted {len(res.data or [])} notifications.")
+            if not existing_res.data or len(existing_res.data) == 0:
+                initial_notifs = [
+                    {
+                        'id': 'notif-welcome-01',
+                        'title': 'Welcome to Xenova Esports Platform',
+                        'message': 'Official varsity collegiate league registrations and athlete leaderboards are now live.',
+                        'type': 'system',
+                        'badge': 'OFFICIAL',
+                        'action_url': '/tournaments',
+                        'action_label': 'Tournaments',
+                        'read': False
+                    }
+                ]
+                res = supabase.table('notifications').insert(initial_notifs).execute()
+                print(f"  ✅ Inserted {len(res.data or [])} official announcements.")
             else:
-                print(f"  ℹ️ All {len(MOCK_NOTIFICATIONS)} notifications already present.")
+                print(f"  ℹ️ Notifications already present ({len(existing_res.data)} items).")
         except Exception as e:
-            print(f"  ❌ Notifications seeding failed: {e}")
+            print(f"  ❌ Notifications check/seed note: {e}")
 
         # 5. Seed Sample Registrations & Linked Event Attendance
         print("\n🎟️ Seeding Event Registrations & Attendance...")

@@ -77,14 +77,36 @@ CREATE TABLE IF NOT EXISTS teams (
 
 -- 3. NOTIFICATIONS TABLE
 CREATE TABLE IF NOT EXISTS notifications (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    user_email TEXT, -- NULL for global announcements or target user email
     title TEXT NOT NULL,
     message TEXT NOT NULL,
-    time TEXT DEFAULT 'Just now',
+    type TEXT DEFAULT 'system', -- 'tournament', 'team', 'campus', 'system'
+    badge TEXT DEFAULT 'OFFICIAL',
+    action_url TEXT,
+    action_label TEXT,
     read BOOLEAN DEFAULT false,
-    type TEXT DEFAULT 'system',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Index for fast 7-day cutoff queries and cleanup
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
+
+-- Function to prune notifications older than 7 days
+CREATE OR REPLACE FUNCTION delete_expired_notifications() 
+RETURNS trigger AS $$
+BEGIN
+    DELETE FROM notifications WHERE created_at < NOW() - INTERVAL '7 days';
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger to automatically prune expired notifications on each new insert
+DROP TRIGGER IF EXISTS trigger_delete_expired_notifications ON notifications;
+CREATE TRIGGER trigger_delete_expired_notifications
+AFTER INSERT ON notifications
+FOR EACH STATEMENT
+EXECUTE FUNCTION delete_expired_notifications();
 
 -- 4. TOURNAMENTS TABLE
 CREATE TABLE IF NOT EXISTS tournaments (

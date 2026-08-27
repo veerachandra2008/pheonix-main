@@ -18,8 +18,6 @@ import {
   Zap
 } from 'lucide-react';
 
-import TicketBookingModal from './TicketBookingModal';
-
 const navLinks = [
   { href: '/tournaments', label: 'Tournaments' },
   { href: '/colleges', label: 'Colleges' },
@@ -34,7 +32,6 @@ export const Navbar = () => {
   const [session, setSession] = useState<any>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [joinDropdownOpen, setJoinDropdownOpen] = useState(false);
-  const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const joinRef = useRef<HTMLDivElement>(null);
@@ -166,9 +163,9 @@ export const Navbar = () => {
                 <button
                   onClick={() => {
                     setJoinDropdownOpen(false);
-                    setIsTicketModalOpen(true);
+                    router.push('/tournaments');
                   }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-emerald-400 hover:bg-emerald-500/10 rounded-xl transition text-left uppercase tracking-wider nav-menu-link"
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-emerald-400 hover:bg-emerald-500/10 rounded-xl transition text-left uppercase tracking-wider nav-menu-link cursor-pointer"
                 >
                   <Sparkles className="h-4 w-4" />
                   BOOK TICKET
@@ -178,7 +175,7 @@ export const Navbar = () => {
                     setJoinDropdownOpen(false);
                     router.push('/host');
                   }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-zinc-200 hover:bg-white/10 hover:text-white rounded-xl transition text-left uppercase tracking-wider nav-menu-link"
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-zinc-200 hover:bg-white/10 hover:text-white rounded-xl transition text-left uppercase tracking-wider nav-menu-link cursor-pointer"
                 >
                   <Trophy className="h-4 w-4 text-emerald-400" />
                   HOST EVENT
@@ -249,36 +246,33 @@ export const Navbar = () => {
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> ONLINE
                         </span>
                       </div>
-                      <p className="text-[11px] text-zinc-400 truncate mt-0.5">{session?.email || 'user@xenova.gg'}</p>
+                      <p className="text-[11px] text-zinc-400 truncate mt-0.5">{session?.email || 'verified_gamer@xenova.gg'}</p>
                     </div>
 
-                    {/* Links */}
+                    <Link
+                      href="/dashboard"
+                      onClick={() => setDropdownOpen(false)}
+                      className="flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-zinc-300 hover:text-white hover:bg-white/10 rounded-xl transition"
+                    >
+                      <Gamepad2 className="h-4 w-4 text-emerald-400" />
+                      Dashboard & Pass
+                    </Link>
+
                     <Link
                       href="/settings"
-                      className="flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-zinc-200 hover:bg-white/10 hover:text-white rounded-xl transition"
                       onClick={() => setDropdownOpen(false)}
+                      className="flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-zinc-300 hover:text-white hover:bg-white/10 rounded-xl transition"
                     >
-                      <Settings className="h-4 w-4 text-emerald-400" />
-                      Account Settings
+                      <Settings className="h-4 w-4 text-zinc-400" />
+                      Profile Settings
                     </Link>
-
-                    <Link
-                      href={`/players/${encodeURIComponent(session?.email || 'me')}`}
-                      className="flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-zinc-200 hover:bg-white/10 hover:text-white rounded-xl transition"
-                      onClick={() => setDropdownOpen(false)}
-                    >
-                      <User className="h-4 w-4 text-emerald-400" />
-                      Gamer Profile
-                    </Link>
-
-                    <div className="border-t border-white/10 my-1" />
 
                     <button
                       onClick={() => {
-                        logout();
                         setDropdownOpen(false);
+                        logout();
                       }}
-                      className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-rose-400 hover:bg-rose-500/10 rounded-xl transition text-left"
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-rose-400 hover:bg-rose-500/10 rounded-xl transition text-left cursor-pointer"
                     >
                       <LogOut className="h-4 w-4" />
                       Log Out
@@ -298,7 +292,6 @@ export const Navbar = () => {
         )}
       </div>
     </header>
-    <TicketBookingModal isOpen={isTicketModalOpen} onClose={() => setIsTicketModalOpen(false)} />
     </>
   );
 };

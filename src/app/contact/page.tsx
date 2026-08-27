@@ -1,0 +1,359 @@
+'use client';
+
+import React, { useState } from 'react';
+import Link from 'next/link';
+import { motion } from 'framer-motion';
+import {
+  Phone,
+  Mail,
+  MapPin,
+  Clock,
+  Send,
+  CheckCircle2,
+  AlertCircle,
+  MessageSquare,
+  Zap,
+  ShieldCheck,
+  Trophy,
+  ArrowRight,
+  Headphones
+} from 'lucide-react';
+import FinalCTA from '@/components/xenova/FinalCTA';
+
+export default function ContactPage() {
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    college: '',
+    category: 'Tournament Dispute / Match Issue',
+    subject: '',
+    message: '',
+  });
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+
+    // Simulate direct dispatch
+    setTimeout(() => {
+      setIsSubmitting(false);
+      setSubmitted(true);
+      setFormData({
+        name: '',
+        email: '',
+        phone: '',
+        college: '',
+        category: 'Tournament Dispute / Match Issue',
+        subject: '',
+        message: '',
+      });
+    }, 800);
+  };
+
+  return (
+    <main className="min-h-screen bg-black text-white font-sans selection:bg-emerald-500 selection:text-zinc-950">
+      
+      {/* ═══════════════ 1. HERO BANNER ═══════════════ */}
+      <section 
+        className="relative overflow-hidden bg-black py-20 sm:py-28 border-b border-emerald-500/20"
+        style={{
+          clipPath: 'polygon(0 0, 100% 0, 100% 92%, 0 100%)',
+        }}
+      >
+        <div className="absolute inset-0 z-0">
+          <img
+            src="/valorant.jpg"
+            alt="Xenova Contact Desk"
+            className="w-full h-full object-cover filter brightness-[0.25] saturate-150 scale-105"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(16,185,129,0.15),transparent_70%)]" />
+        </div>
+
+        <div className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-6">
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase tracking-widest"
+          >
+            <Headphones className="h-4 w-4" /> Official Support & Tournament Ops Desk
+          </motion.div>
+
+          <motion.h1
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="text-4xl sm:text-6xl font-black uppercase tracking-tight text-white drop-shadow-2xl"
+          >
+            Contact <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-emerald-500 bg-clip-text text-transparent">XENOVA</span>
+          </motion.h1>
+
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+            className="text-sm sm:text-base text-zinc-300 max-w-2xl mx-auto font-normal leading-relaxed"
+          >
+            Have a question about tournament rules, university partnerships, ticket passes, or need matchday emergency support? Connect with our dedicated operations team.
+          </motion.p>
+        </div>
+      </section>
+
+      {/* ═══════════════ 2. MAIN CONTACT SECTION ═══════════════ */}
+      <section className="py-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+          
+          {/* Left Column: Direct Info Cards */}
+          <div className="lg:col-span-5 space-y-6">
+            
+            {/* Primary Phone Hotline Card */}
+            <div className="p-7 rounded-3xl border border-emerald-500/40 bg-zinc-950/90 backdrop-blur-2xl shadow-2xl space-y-4">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+                  <Phone className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider text-zinc-300">Helpline / Matchday Hotline</h3>
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 uppercase tracking-widest mt-0.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Live Dispatch
+                  </span>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <a
+                  href="tel:+917993728522"
+                  className="text-2xl sm:text-3xl font-black font-mono text-emerald-400 hover:text-emerald-300 tracking-tight transition block"
+                >
+                  +91 79937 28522
+                </a>
+                <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
+                  Call or WhatsApp for immediate tournament referee escalation, lobby disputes, and gate scanner assistance.
+                </p>
+              </div>
+
+              <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs text-zinc-400">
+                <span className="flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-emerald-400" /> 24/7 Matchday Support
+                </span>
+                <a
+                  href="https://wa.me/917993728522"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-emerald-400 hover:underline font-bold"
+                >
+                  Chat on WhatsApp &rarr;
+                </a>
+              </div>
+            </div>
+
+            {/* Email Support Card */}
+            <div className="p-7 rounded-3xl border border-white/15 bg-zinc-950/90 backdrop-blur-2xl shadow-2xl space-y-4">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shrink-0">
+                  <Mail className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider text-zinc-300">Official Inquiries & Desk</h3>
+                  <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mt-0.5 block">
+                    Direct Administrative Mail
+                  </span>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <a
+                  href="mailto:veerachandra2008@gmail.com"
+                  className="text-lg sm:text-xl font-bold font-mono text-white hover:text-cyan-400 tracking-tight transition block truncate"
+                >
+                  veerachandra2008@gmail.com
+                </a>
+                <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
+                  For university festival partnerships, brand sponsorships, campus ambassador applications, and payment queries.
+                </p>
+              </div>
+
+              <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs text-zinc-400">
+                <span>Response Time</span>
+                <span className="text-cyan-400 font-bold">&lt; 15 Minutes</span>
+              </div>
+            </div>
+
+            {/* Headquarters & Operations Card */}
+            <div className="p-6 rounded-3xl border border-white/10 bg-zinc-950/60 backdrop-blur-xl space-y-3">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-zinc-400">
+                <MapPin className="w-4 h-4 text-emerald-400" /> Pan-India Collegiate Network
+              </div>
+              <p className="text-xs text-zinc-300 leading-relaxed">
+                Operating across 200+ universities in Hyderabad, Bengaluru, Delhi NCR, Mumbai, Pune, Chennai, and Kolkata.
+              </p>
+            </div>
+
+          </div>
+
+          {/* Right Column: Interactive Contact / Escalation Form */}
+          <div className="lg:col-span-7">
+            <div className="p-8 sm:p-10 rounded-3xl border border-white/15 bg-zinc-950/90 backdrop-blur-2xl shadow-2xl">
+              
+              <div className="mb-8">
+                <h2 className="text-2xl font-black uppercase tracking-tight text-white">Send a Message</h2>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Fill in the details below. Our tournament marshals will respond immediately.
+                </p>
+              </div>
+
+              {submitted ? (
+                <div className="py-12 px-6 rounded-2xl border border-emerald-500/40 bg-emerald-950/20 text-center space-y-4">
+                  <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-xl font-extrabold uppercase text-white">Message Dispatched!</h3>
+                  <p className="text-xs text-zinc-300 max-w-md mx-auto leading-relaxed">
+                    Thank you! Your ticket request has been received by our tournament operations desk. We will reach out to your provided email or phone number shortly.
+                  </p>
+                  <button
+                    onClick={() => setSubmitted(false)}
+                    className="mt-4 px-6 py-2.5 rounded-xl bg-emerald-500 text-zinc-950 text-xs font-black uppercase tracking-wider hover:bg-emerald-400 transition"
+                  >
+                    Send Another Message
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmit} className="space-y-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-300 mb-1.5">
+                        Your Full Name *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        placeholder="e.g. Veera Chandra"
+                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/15 text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-300 mb-1.5">
+                        Email Address *
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={formData.email}
+                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        placeholder="e.g. player@university.edu"
+                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/15 text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-300 mb-1.5">
+                        Phone / WhatsApp No. *
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        value={formData.phone}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        placeholder="e.g. +91 79937 28522"
+                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/15 text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-300 mb-1.5">
+                        College / University Name
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.college}
+                        onChange={(e) => setFormData({ ...formData, college: e.target.value })}
+                        placeholder="e.g. IIT Bombay / BITS Pilani"
+                        className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/15 text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-300 mb-1.5">
+                      Issue Category *
+                    </label>
+                    <select
+                      value={formData.category}
+                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl bg-zinc-900 border border-white/15 text-white text-xs focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition"
+                    >
+                      <option value="Tournament Dispute / Match Issue">Tournament Dispute / Match Issue</option>
+                      <option value="Ticket Pass & Scanner Verification">Ticket Pass & Scanner Verification</option>
+                      <option value="College Fest / Hosting Application">College Fest / Hosting Application</option>
+                      <option value="Prize Pool Payout Query">Prize Pool Payout Query</option>
+                      <option value="Anti-Cheat & Fair Play Report">Anti-Cheat & Fair Play Report</option>
+                      <option value="Brand Partnership & Sponsorship">Brand Partnership & Sponsorship</option>
+                      <option value="Other Inquiries">Other Inquiries</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-300 mb-1.5">
+                      Subject *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.subject}
+                      onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
+                      placeholder="Brief summary of your query or match ID"
+                      className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/15 text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-300 mb-1.5">
+                      Message / Dispute Description *
+                    </label>
+                    <textarea
+                      required
+                      rows={4}
+                      value={formData.message}
+                      onChange={(e) => setFormData({ ...formData, message: e.target.value })}
+                      placeholder="Please include tournament name, match bracket link, and specific details..."
+                      className="w-full px-4 py-3 rounded-xl bg-black/60 border border-white/15 text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition resize-none"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full blob-btn bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black py-4 text-xs sm:text-sm uppercase tracking-wider rounded-xl transition shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {isSubmitting ? (
+                      <span>Dispatching Message...</span>
+                    ) : (
+                      <>
+                        <span>Submit Support Ticket</span>
+                        <Send className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
+
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <FinalCTA />
+    </main>
+  );
+}

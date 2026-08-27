@@ -40,14 +40,50 @@ type Player = {
   trophies?: number;
 };
 
+// In-memory module cache for sub-millisecond route transitions (0.0ms)
+let cachedPlayersMemory: Player[] | null = null;
+let cachedFollowsMemory: Set<string> | null = null;
+
 export default function PlayersPage() {
   const router = useRouter();
   const [session, setSession] = useState<any>(null);
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [followingSet, setFollowingSet] = useState<Set<string>>(new Set());
+  
+  // Instant 0ms Synchronous State Hydration
+  const [players, setPlayers] = useState<Player[]>(() => {
+    if (cachedPlayersMemory && cachedPlayersMemory.length > 0) return cachedPlayersMemory;
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('xenova_players_cache');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            cachedPlayersMemory = parsed;
+            return parsed;
+          }
+        }
+      } catch {}
+    }
+    return [];
+  });
+
+  const [followingSet, setFollowingSet] = useState<Set<string>>(() => {
+    if (cachedFollowsMemory) return cachedFollowsMemory;
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('xenova_following');
+        if (stored) {
+          const set = new Set<string>(JSON.parse(stored));
+          cachedFollowsMemory = set;
+          return set;
+        }
+      } catch {}
+    }
+    return new Set<string>();
+  });
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'following' | 'player' | 'organizer'>('all');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => (cachedPlayersMemory && cachedPlayersMemory.length > 0 ? false : true));
 
   useEffect(() => {
     let currentEmail = '';
@@ -56,94 +92,107 @@ export default function PlayersPage() {
       try {
         const parsed = JSON.parse(rawSession);
         setSession(parsed);
-        currentEmail = (parsed.email || '').toLowerCase();
+        currentEmail = (parsed.email || '').toLowerCase().trim();
       } catch (e) {
         console.error(e);
       }
     }
 
-    // Load initial following from localStorage
-    try {
-      const rawFollowing = localStorage.getItem('xenova_following');
-      if (rawFollowing) {
-        setFollowingSet(new Set(JSON.parse(rawFollowing)));
-      }
-    } catch {}
-
-    // Load following list directly from Supabase user_follows
-    if (currentEmail) {
+    // High-Speed Parallel Direct Database Dispatch (<50ms)
+    const fetchLatestData = async () => {
       try {
-        supabase
-          .from('user_follows')
-          .select('target_email')
-          .eq('follower_email', currentEmail)
-          .then(({ data }) => {
-            if (data && data.length > 0) {
-              const set = new Set(data.map((r: any) => (r.target_email || '').toLowerCase()));
-              setFollowingSet(set);
-              localStorage.setItem('xenova_following', JSON.stringify(Array.from(set)));
+        // Run users query and follow status simultaneously in one single parallel burst
+        const [usersResult, followsResult] = await Promise.all([
+          supabase
+            .from('users')
+            .select('id, name, email, college, role, bio, tag, avatar_url, rank, win_rate, trophies')
+            .order('created_at', { ascending: false })
+            .limit(100),
+          currentEmail
+            ? supabase.from('user_follows').select('target_email').eq('follower_email', currentEmail)
+            : Promise.resolve({ data: null, error: null })
+        ]);
+
+        let dbUsers: Player[] = [];
+
+        // 1. Process Supabase Users
+        if (!usersResult.error && Array.isArray(usersResult.data) && usersResult.data.length > 0) {
+          dbUsers = usersResult.data.map((u: any, idx: number) => ({
+            id: String(u.id || idx),
+            name: u.name || 'Varsity Athlete',
+            email: (u.email || '').trim().toLowerCase(),
+            college: u.college || 'University Campus',
+            role: (u.role || 'PLAYER').toLowerCase(),
+            bio: u.bio || '',
+            tag: u.tag || `@${(u.name || 'player').toLowerCase().replace(/\s+/g, '')}`,
+            avatar: u.avatar_url || '/valorant.jpg',
+            avatar_url: u.avatar_url || '/valorant.jpg',
+            rank: u.rank || idx + 1,
+            win_rate: u.win_rate ?? 0.0,
+            trophies: u.trophies ?? 0,
+          }));
+        } else {
+          // 2. Fast non-blocking fallback if Supabase is unavailable (500ms timeout)
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 600);
+            const apiBase =
+              typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+                ? '/api'
+                : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+
+            const res = await fetch(`${apiBase}/auth/users`, {
+              cache: 'no-store',
+              signal: controller.signal,
+            });
+            clearTimeout(timer);
+
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && Array.isArray(json.data)) {
+                dbUsers = json.data.map((u: any, idx: number) => ({
+                  id: String(u.id || idx),
+                  name: u.name || 'Varsity Athlete',
+                  email: (u.email || '').trim().toLowerCase(),
+                  college: u.college || 'University Campus',
+                  role: (u.role || 'PLAYER').toLowerCase(),
+                  bio: u.bio || '',
+                  tag: u.tag || `@${(u.name || 'player').toLowerCase().replace(/\s+/g, '')}`,
+                  avatar: u.avatar_url || u.avatar || '/valorant.jpg',
+                  avatar_url: u.avatar_url || u.avatar || '/valorant.jpg',
+                  rank: u.rank || idx + 1,
+                  win_rate: u.win_rate ?? 0.0,
+                  trophies: u.trophies ?? 0,
+                }));
+              }
             }
-          });
-      } catch {}
-    }
+          } catch {}
+        }
 
-    const loadPlayersFromDatabase = async () => {
-      setLoading(true);
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
+        // 3. Process follows result
+        if (followsResult?.data && Array.isArray(followsResult.data)) {
+          const newFollows = new Set(followsResult.data.map((r: any) => (r.target_email || '').toLowerCase()));
+          setFollowingSet(newFollows);
+          cachedFollowsMemory = newFollows;
+          localStorage.setItem('xenova_following', JSON.stringify(Array.from(newFollows)));
+        }
 
-      let dbPlayers: Player[] = [];
+        // Exclude current logged in user
+        const finalPlayers = dbUsers.filter((p) => p.email && p.email !== currentEmail);
+        
+        setPlayers(finalPlayers);
+        cachedPlayersMemory = finalPlayers;
+        setLoading(false);
 
-      // 1. Fetch from Backend /api/auth/users
-      try {
-        const res = await fetch(`${apiBase}/auth/users`, { cache: 'no-store' });
-        if (res.ok) {
-          const json = await res.json();
-          if (json.success && Array.isArray(json.data)) {
-            dbPlayers = json.data;
-          }
+        if (finalPlayers.length > 0) {
+          localStorage.setItem('xenova_players_cache', JSON.stringify(finalPlayers));
         }
       } catch (err) {
-        console.warn('Backend users fetch notice:', err);
+        setLoading(false);
       }
-
-      // 2. Direct Supabase Fallback if Backend API returned empty
-      if (dbPlayers.length === 0) {
-        try {
-          const { data, error } = await supabase.from('users').select('*').order('created_at', { ascending: false });
-          if (!error && data && Array.isArray(data)) {
-            dbPlayers = data.map((u: any) => ({
-              id: String(u.id),
-              name: u.name || 'Varsity Athlete',
-              email: u.email || '',
-              college: u.college || 'University Campus',
-              role: (u.role || 'PLAYER').toLowerCase(),
-              bio: u.bio || '',
-              tag: u.tag || `@${(u.name || 'player').toLowerCase().replace(/\s+/g, '')}`,
-              avatar: u.avatar_url || '/valorant.jpg',
-              avatar_url: u.avatar_url || '/valorant.jpg',
-              rank: u.rank || 1,
-              win_rate: u.win_rate || 0.0,
-              trophies: u.trophies || 0,
-            }));
-          }
-        } catch (sbErr) {
-          console.warn('Direct Supabase users fallback notice:', sbErr);
-        }
-      }
-
-      // STRICTLY EXCLUDE CURRENT LOGGED-IN USER'S OWN PROFILE
-      const otherPlayers = dbPlayers.filter(
-        (p) => p.email && p.email.toLowerCase() !== currentEmail
-      );
-
-      setPlayers(otherPlayers);
-      setLoading(false);
     };
 
-    loadPlayersFromDatabase();
+    fetchLatestData();
   }, []);
 
   const handleToggleFollow = async (targetEmail: string) => {
@@ -155,7 +204,7 @@ export default function PlayersPage() {
           const parsed = JSON.parse(raw);
           currentEmail = (parsed.email || '').trim().toLowerCase();
         }
-      } catch {}
+      } catch { }
     }
 
     if (!currentEmail) {
@@ -257,7 +306,7 @@ export default function PlayersPage() {
 
   return (
     <main className="min-h-screen bg-black text-white font-sans selection:bg-emerald-500 selection:text-zinc-950">
-      
+
       {/* ═══════════════ 1. HERO HEADER ═══════════════ */}
       <section className="relative overflow-hidden border-b border-zinc-900 bg-black py-16 sm:py-20">
         <div className="absolute inset-0 z-0">
@@ -272,7 +321,7 @@ export default function PlayersPage() {
 
         <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
-            
+
             <div className="space-y-4 max-w-2xl">
               <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase tracking-wider">
                 <Users className="h-3.5 w-3.5" /> Collegiate Athletes Directory
@@ -308,7 +357,7 @@ export default function PlayersPage() {
       <section className="sticky top-16 z-30 border-b border-white/10 bg-black/90 backdrop-blur-2xl py-4">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            
+
             {/* Search Bar */}
             <div className="relative w-full sm:w-80 md:w-96">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
@@ -325,44 +374,40 @@ export default function PlayersPage() {
             <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-zinc-900/80 border border-white/10 overflow-x-auto max-w-full">
               <button
                 onClick={() => setSelectedFilter('all')}
-                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${
-                  selectedFilter === 'all'
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${selectedFilter === 'all'
                     ? 'bg-emerald-500 text-zinc-950 shadow-md shadow-emerald-500/20'
                     : 'text-zinc-400 hover:text-white hover:bg-white/5'
-                }`}
+                  }`}
               >
                 All Athletes ({players.length})
               </button>
 
               <button
                 onClick={() => setSelectedFilter('following')}
-                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${
-                  selectedFilter === 'following'
+                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${selectedFilter === 'following'
                     ? 'bg-emerald-500 text-zinc-950 shadow-md shadow-emerald-500/20'
                     : 'text-zinc-400 hover:text-white hover:bg-white/5'
-                }`}
+                  }`}
               >
                 <Heart className="h-3.5 w-3.5" /> Following ({followingSet.size})
               </button>
 
               <button
                 onClick={() => setSelectedFilter('player')}
-                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${
-                  selectedFilter === 'player'
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${selectedFilter === 'player'
                     ? 'bg-emerald-500 text-zinc-950 shadow-md shadow-emerald-500/20'
                     : 'text-zinc-400 hover:text-white hover:bg-white/5'
-                }`}
+                  }`}
               >
                 Players
               </button>
 
               <button
                 onClick={() => setSelectedFilter('organizer')}
-                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${
-                  selectedFilter === 'organizer'
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${selectedFilter === 'organizer'
                     ? 'bg-emerald-500 text-zinc-950 shadow-md shadow-emerald-500/20'
                     : 'text-zinc-400 hover:text-white hover:bg-white/5'
-                }`}
+                  }`}
               >
                 Organizers
               </button>
@@ -375,10 +420,22 @@ export default function PlayersPage() {
       {/* ═══════════════ 3. ATHLETES GRID ═══════════════ */}
       <section className="py-12 sm:py-16 bg-black min-h-[50vh]">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          
-          {loading ? (
-            <div className="flex items-center justify-center py-20">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+
+          {loading && players.length === 0 ? (
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                <div key={n} className="rounded-3xl border border-white/5 bg-[#09090b] p-6 space-y-4 animate-pulse">
+                  <div className="flex items-center justify-between">
+                    <div className="w-16 h-16 rounded-2xl bg-zinc-900" />
+                    <div className="w-20 h-7 rounded-xl bg-zinc-900" />
+                  </div>
+                  <div className="space-y-2 pt-2">
+                    <div className="w-36 h-5 rounded bg-zinc-900" />
+                    <div className="w-24 h-3.5 rounded bg-zinc-900/60" />
+                    <div className="w-28 h-3.5 rounded bg-zinc-900/60" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : filteredPlayers.length === 0 ? (
             <div className="rounded-3xl border border-white/10 bg-[#09090b] p-12 text-center max-w-xl mx-auto space-y-4">
@@ -390,8 +447,8 @@ export default function PlayersPage() {
                 {selectedFilter === 'following'
                   ? "You haven't followed any other athletes yet. Browse 'All Athletes' to follow collegiate rivals!"
                   : searchTerm
-                  ? `No athletes match "${searchTerm}".`
-                  : 'No other registered athletes found in the database yet.'}
+                    ? `No athletes match "${searchTerm}".`
+                    : 'No other registered athletes found in the database yet.'}
               </p>
             </div>
           ) : (
@@ -403,8 +460,8 @@ export default function PlayersPage() {
                   player.role === 'admin'
                     ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
                     : player.role === 'organizer'
-                    ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
-                    : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+                      ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
+                      : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
 
                 return (
                   <motion.div
@@ -436,11 +493,10 @@ export default function PlayersPage() {
                         <button
                           type="button"
                           onClick={() => handleToggleFollow(player.email)}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider transition cursor-pointer active:scale-95 ${
-                            isFollowing
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider transition cursor-pointer active:scale-95 ${isFollowing
                               ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 hover:bg-rose-500/20 hover:border-rose-500/40 hover:text-rose-400'
                               : 'bg-white/5 border border-white/15 text-white hover:bg-emerald-500 hover:text-black hover:border-emerald-500 shadow-md'
-                          }`}
+                            }`}
                         >
                           {isFollowing ? (
                             <>

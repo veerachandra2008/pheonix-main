@@ -15,6 +15,7 @@ import {
   Lock,
   Mail
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 const defaultTeams = [
   {
@@ -158,7 +159,7 @@ export default function TeamManagePage({ params }: Props) {
     };
   }, [id, router]);
 
-  const handleSendInvite = (e: React.FormEvent) => {
+  const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanPlayer = newPlayerName.trim();
     if (!cleanPlayer) return;
@@ -179,7 +180,7 @@ export default function TeamManagePage({ params }: Props) {
       
       const newInvite = {
         id: Math.random().toString(36).substring(7),
-        teamSlug: fullTeamData.slug || id,
+        teamSlug: fullTeamData?.slug || id,
         teamName: teamName,
         invitedPlayerTagOrEmail: cleanPlayer,
         status: 'pending',
@@ -190,24 +191,21 @@ export default function TeamManagePage({ params }: Props) {
       localStorage.setItem('xenova_team_invites', JSON.stringify(updatedAllInvites));
       setInvites([newInvite, ...invites]);
       
-      // Also generate a notification for the player if they exist
-      const rawUsers = localStorage.getItem('xenova_users');
-      const users = rawUsers ? JSON.parse(rawUsers) : [];
-      const targetUser = users.find((u: any) => u.name?.toLowerCase() === cleanPlayer.toLowerCase() || u.email?.toLowerCase() === cleanPlayer.toLowerCase());
-      
-      if (targetUser) {
-        const rawNotifs = localStorage.getItem('xenova_notifications') || '[]';
-        const notifications = JSON.parse(rawNotifs);
-        const newNotif = {
-          id: Math.random().toString(36).substring(7),
-          userEmail: targetUser.email,
-          title: 'Team Invitation',
-          message: `You have been invited to join "${teamName}" in the ${activeGame} division. Accept or decline the invitation now.`,
-          type: 'info',
+      // Insert official team invitation notification into Supabase database
+      const targetEmail = (cleanPlayer.includes('@') ? cleanPlayer : '').trim().toLowerCase();
+      try {
+        await supabase.from('notifications').insert({
+          user_email: targetEmail || null,
+          title: `Squad Invitation: ${teamName}`,
+          message: `You have been officially invited to join "${teamName}" in the ${activeGame} division.`,
+          type: 'team',
+          badge: 'SQUAD INVITE',
+          action_url: `/teams/${id}`,
+          action_label: 'View Squad',
           read: false,
-          date: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        localStorage.setItem('xenova_notifications', JSON.stringify([newNotif, ...notifications]));
+        });
+      } catch (err) {
+        console.warn('Supabase notification insert warning:', err);
       }
 
       setNewPlayerName('');

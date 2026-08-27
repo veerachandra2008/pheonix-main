@@ -153,6 +153,13 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
 
         if (!error && data && data.length > 0) {
           const item = data[0];
+          let userBio = item.bio || '';
+          if (!userBio && item.email) {
+            try {
+              const { data: uData } = await supabase.from('users').select('bio, role, tag').eq('email', item.email).maybeSingle();
+              if (uData?.bio) userBio = uData.bio;
+            } catch {}
+          }
           setTicketData({
             passId: item.pass_id,
             pass_id: item.pass_id,
@@ -162,6 +169,7 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             college: item.college,
             captainName: item.captain_name,
             email: item.email,
+            bio: userBio || 'Compete with honor, dominate with strategy. Verified Collegiate Athlete.',
             paymentStatus: item.payment_status || 'SUCCESS',
             registeredAt: item.registered_at || new Date().toISOString()
           });
@@ -319,6 +327,24 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
                 <div className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold uppercase tracking-wider inline-block">
                   {ticketData?.paymentStatus || 'VERIFIED'}
                 </div>
+              </div>
+            </div>
+
+            {/* Athlete Bio & Squad Motto */}
+            <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-emerald-500/20 flex items-start gap-2.5 shadow-sm">
+              <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">
+                    Athlete Bio & Squad Motto
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 font-mono font-bold">
+                    VERIFIED
+                  </span>
+                </div>
+                <p className="text-zinc-200 italic font-normal leading-relaxed">
+                  “{ticketData?.bio || 'Compete with honor, dominate with strategy. Official collegiate esports athlete.'}”
+                </p>
               </div>
             </div>
 

@@ -255,9 +255,43 @@ export default function DashboardPage() {
                   Welcome back, <span className="text-emerald-400">{session?.name || 'Player'}</span>
                 </h1>
 
-                <p className="text-xs sm:text-sm text-zinc-400 font-medium">
-                  Gamer Tag: <span className="text-white font-bold">@{session?.tag || 'player'}</span> • Team: <span className="text-emerald-400 font-bold">{session?.team || 'Free Agent'}</span>
-                </p>
+                <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm text-zinc-400 font-medium">
+                  <span>Gamer Tag: <strong className="text-white font-bold">@{session?.tag || 'player'}</strong></span>
+                  <span>•</span>
+                  <span>Team: <strong className="text-emerald-400 font-bold">{session?.team || 'Free Agent'}</strong></span>
+                  {session?.role && (
+                    <>
+                      <span>•</span>
+                      <span className="text-zinc-300">Role: <strong className="text-teal-400 font-bold uppercase">{session.role}</strong></span>
+                    </>
+                  )}
+                  {session?.rank && (
+                    <>
+                      <span>•</span>
+                      <span className="text-amber-400 font-bold">★ {session.rank}</span>
+                    </>
+                  )}
+                </div>
+
+                {/* Athlete Bio Card */}
+                <div className="pt-2">
+                  {session?.bio ? (
+                    <div className="inline-flex items-start gap-2.5 rounded-2xl bg-white/[0.04] border border-white/10 px-4 py-2.5 max-w-2xl backdrop-blur-md">
+                      <span className="text-emerald-400 text-sm font-serif select-none">“</span>
+                      <p className="text-xs sm:text-sm text-zinc-200 font-normal italic leading-relaxed">
+                        {session.bio}
+                      </p>
+                      <span className="text-emerald-400 text-sm font-serif select-none">”</span>
+                    </div>
+                  ) : (
+                    <div className="inline-flex items-center gap-2 rounded-2xl bg-white/[0.02] border border-dashed border-white/10 px-3.5 py-1.5 text-xs text-zinc-500">
+                      <span>No athlete bio added yet.</span>
+                      <Link href="/settings" className="text-emerald-400 hover:underline font-bold">
+                        + Add Bio in Settings
+                      </Link>
+                    </div>
+                  )}
+                </div>
               </div>
 
             </div>

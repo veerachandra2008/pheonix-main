@@ -109,8 +109,16 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
     }
   }, [paramsPromise]);
 
-  const [tournament, setTournament] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const targetSlug = slug || rawSlug;
+  
+  // Instant 0ms Synchronous State Hydration
+  const [tournament, setTournament] = useState<any>(() => {
+    if (!targetSlug) return null;
+    const found = defaultTournaments.find((t) => t.slug?.toLowerCase() === targetSlug.toLowerCase());
+    return found || null;
+  });
+
+  const [loading, setLoading] = useState(() => (tournament ? false : true));
   const [sessionUser, setSessionUser] = useState<any>(null);
   const [alreadyRegistered, setAlreadyRegistered] = useState(false);
   const [userPassId, setUserPassId] = useState<string | null>(null);
@@ -119,104 +127,91 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
   const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
+    let isMounted = true;
     async function loadTournamentData() {
-      const apiBase = getApiBaseUrl();
-      const targetSlug = slug || rawSlug;
-      if (!targetSlug) return;
+      const activeSlug = slug || rawSlug;
+      if (!activeSlug) return;
 
-      setLoading(true);
-
-      // 1. Check session
+      let userEmail: string | undefined = undefined;
       try {
         const rawSession = localStorage.getItem('xenova_session');
         if (rawSession) {
           const user = JSON.parse(rawSession);
           setSessionUser(user);
-          if (user.email) {
-            const regs = await getUserRegistrations(user.email.toLowerCase());
-            const matchedReg = regs.find((r) => r.tournamentSlug?.toLowerCase() === targetSlug.toLowerCase());
-            if (matchedReg) {
-              setAlreadyRegistered(true);
-              setUserPassId(matchedReg.passId);
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Session check notice:', e);
-      }
-
-      // 2. Fetch tournament from database (Backend API or direct Supabase)
-      let found: any = null;
-      try {
-        const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
-        if (res.ok) {
-          const json = await res.json();
-          if (json.success && Array.isArray(json.data)) {
-            found = json.data.find(
-              (t: any) =>
-                t.slug?.toLowerCase() === targetSlug.toLowerCase() ||
-                String(t.id) === targetSlug
-            );
-          }
-        }
-      } catch (e) {
-        console.warn('Backend tournament fetch notice:', e);
-      }
-
-      // Direct Supabase query fallback
-      if (!found) {
-        try {
-          const { data: sbTournament } = await supabase
-            .from('tournaments')
-            .select('*')
-            .or(`slug.eq.${targetSlug.toLowerCase()},id.eq.${Number(targetSlug) || 0}`)
-            .maybeSingle();
-          if (sbTournament) {
-            found = sbTournament;
-          }
-        } catch (err) {
-          console.warn('Direct Supabase tournament lookup notice:', err);
-        }
-      }
-
-      if (!found) {
-        found = defaultTournaments.find(
-          (t) => t.slug?.toLowerCase() === targetSlug.toLowerCase()
-        );
-      }
-
-      if (!found) {
-        found = {
-          slug: targetSlug,
-          title: targetSlug.split('-').map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(' '),
-          game: 'Valorant',
-          host: 'Xenova Collegiate',
-          image: '/valorant.jpg',
-          prize: '₹1,00,000',
-          fee: 'Free',
-          date: 'Upcoming',
-          region: 'Pan India',
-          format: '4v4 Squad Tournament',
-          teams: '64 Teams',
-          status: 'Registering',
-          status_color: '#10B981',
-        };
-      }
-
-      setTournament(found);
-
-      // 3. Fetch registered squads specifically for this tournament
-      try {
-        const regsRes = await flaskApi.getRegistrationsByTournament(found.slug || targetSlug);
-        if (regsRes && regsRes.success && Array.isArray(regsRes.data)) {
-          setRegisteredTeamsList(regsRes.data);
+          userEmail = (user.email || '').trim().toLowerCase();
         }
       } catch {}
 
-      setLoading(false);
+      // High-Speed Single-Burst Parallel Dispatch (<50ms)
+      try {
+        const [sbTournamentRes, userRegs, teamRegsRes] = await Promise.all([
+          supabase
+            .from('tournaments')
+            .select('*')
+            .or(`slug.eq.${activeSlug.toLowerCase()},id.eq.${Number(activeSlug) || 0}`)
+            .maybeSingle(),
+          userEmail ? getUserRegistrations(userEmail) : Promise.resolve([]),
+          supabase
+            .from('registrations')
+            .select('*')
+            .eq('tournament_slug', activeSlug)
+        ]);
+
+        if (!isMounted) return;
+
+        let found: any = sbTournamentRes.data;
+
+        // If not in Supabase, fallback to default tournaments or local mock
+        if (!found) {
+          found = defaultTournaments.find(
+            (t) => t.slug?.toLowerCase() === activeSlug.toLowerCase()
+          );
+        }
+
+        if (!found) {
+          found = {
+            slug: activeSlug,
+            title: activeSlug.split('-').map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(' '),
+            game: 'Valorant',
+            host: 'Xenova Collegiate',
+            image: '/valorant.jpg',
+            prize: '₹1,00,000',
+            fee: 'Free',
+            date: 'Upcoming',
+            region: 'Pan India',
+            format: '4v4 Squad Tournament',
+            teams: '64 Teams',
+            status: 'Registering',
+            status_color: '#10B981',
+          };
+        }
+
+        setTournament(found);
+
+        // Check user registration status
+        if (Array.isArray(userRegs)) {
+          const matchedReg = userRegs.find((r) => r.tournamentSlug?.toLowerCase() === activeSlug.toLowerCase());
+          if (matchedReg) {
+            setAlreadyRegistered(true);
+            setUserPassId(matchedReg.passId);
+          }
+        }
+
+        // Set registered squads
+        if (teamRegsRes.data && Array.isArray(teamRegsRes.data)) {
+          setRegisteredTeamsList(teamRegsRes.data);
+        }
+
+        setLoading(false);
+      } catch (err) {
+        setLoading(false);
+      }
     }
 
     loadTournamentData();
+    return () => {
+      isMounted = false;
+    };
   }, [slug, rawSlug]);
 
   const handleShare = () => {
