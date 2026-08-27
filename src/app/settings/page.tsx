@@ -114,16 +114,17 @@ export default function SettingsPage() {
               .maybeSingle();
 
             if (sbData) {
-              setName(sbData.name || user.name || '');
-              setTag(sbData.tag || user.tag || '');
-              setCollege(sbData.college || user.college || '');
-              setTeam(sbData.team || user.team || '');
-              setBio(sbData.bio || user.bio || '');
+              if (sbData.name) setName(sbData.name);
+              if (sbData.tag) setTag(sbData.tag);
+              if (sbData.college) setCollege(sbData.college);
+              if (sbData.team) setTeam(sbData.team);
+              if (sbData.bio) setBio(sbData.bio);
               if (sbData.avatar_url || sbData.avatar) {
                 setAvatar(sbData.avatar_url || sbData.avatar);
               }
-              const updatedSession = { ...user, ...sbData };
+              const updatedSession = { ...user, ...sbData, avatar: sbData.avatar_url || sbData.avatar || user.avatar };
               localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
+              window.dispatchEvent(new Event('xenova-auth-change'));
             }
           } catch {}
 
@@ -134,17 +135,18 @@ export default function SettingsPage() {
             const json = await res.json();
             if (json.success && json.data) {
               const live = json.data;
-              setName(live.name || user.name || '');
-              setTag(live.tag || user.tag || '');
-              setCollege(live.college || user.college || '');
-              setTeam(live.team || user.team || '');
-              setBio(live.bio || user.bio || '');
+              if (live.name) setName(live.name);
+              if (live.tag) setTag(live.tag);
+              if (live.college) setCollege(live.college);
+              if (live.team) setTeam(live.team);
+              if (live.bio) setBio(live.bio);
               if (live.avatar || live.avatar_url) {
                 setAvatar(live.avatar || live.avatar_url);
               }
               // Update local session
-              const updatedSession = { ...user, ...live };
+              const updatedSession = { ...user, ...live, avatar: live.avatar || live.avatar_url || user.avatar };
               localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
+              window.dispatchEvent(new Event('xenova-auth-change'));
             }
           }
         } catch (err) {
@@ -169,8 +171,33 @@ export default function SettingsPage() {
       // Auto-compress photo to max 512x512 (~40KB) to prevent 413 Payload Too Large
       const compressedDataUrl = await compressImageToDataUrl(file, 512, 0.85);
       setAvatar(compressedDataUrl);
+
+      // Instant optimistic local session update (0ms Navbar photo update)
+      if (sessionUser) {
+        const nextSession = {
+          ...sessionUser,
+          avatar: compressedDataUrl,
+          avatar_url: compressedDataUrl,
+        };
+        localStorage.setItem('xenova_session', JSON.stringify(nextSession));
+        window.dispatchEvent(new Event('xenova-auth-change'));
+      }
     } catch (err) {
       setErrorMsg('Could not process this image. Please select another image.');
+    }
+  };
+
+  const handleSelectPresetAvatar = (src: string) => {
+    setAvatar(src);
+    // Instant optimistic local session update (0ms Navbar photo update)
+    if (sessionUser) {
+      const nextSession = {
+        ...sessionUser,
+        avatar: src,
+        avatar_url: src,
+      };
+      localStorage.setItem('xenova_session', JSON.stringify(nextSession));
+      window.dispatchEvent(new Event('xenova-auth-change'));
     }
   };
 
@@ -193,58 +220,62 @@ export default function SettingsPage() {
       avatar: avatar,
     };
 
+    // 1. INSTANT OPTIMISTIC LOCAL UPDATE (0ms instant update across Navbar & App)
+    const nextSession = {
+      ...sessionUser,
+      ...payload,
+    };
+    localStorage.setItem('xenova_session', JSON.stringify(nextSession));
+    window.dispatchEvent(new Event('xenova-auth-change'));
+    setSavedMsg('Profile and photo updated!');
+
+    // 2. PARALLEL BACKGROUND PERSISTENCE (Supabase + Backend API concurrently)
     try {
-      // 1. Direct Supabase Update
-      try {
-        const { error: fullErr } = await supabase
-          .from('users')
-          .update({
-            name: name.trim(),
-            college: college.trim(),
-            team: team.trim() || 'Free Agent',
-            tag: tag.trim(),
-            bio: bio.trim(),
-            avatar_url: avatar,
-          })
-          .eq('email', sessionUser.email.toLowerCase());
+      const apiBase = getApiBaseUrl();
 
-        if (fullErr) {
-          // Fallback to core columns
-          await supabase
-            .from('users')
-            .update({
-              name: name.trim(),
-              college: college.trim(),
-              bio: bio.trim(),
-              avatar_url: avatar,
-            })
-            .eq('email', sessionUser.email.toLowerCase());
-        }
-      } catch (sbErr) {
-        console.warn('Direct Supabase update notice:', sbErr);
-      }
+      await Promise.allSettled([
+        // Direct Supabase Update
+        (async () => {
+          try {
+            const { error: fullErr } = await supabase
+              .from('users')
+              .update({
+                name: name.trim(),
+                college: college.trim(),
+                team: team.trim() || 'Free Agent',
+                tag: tag.trim(),
+                bio: bio.trim(),
+                avatar_url: avatar,
+              })
+              .eq('email', sessionUser.email.toLowerCase());
 
-      // 2. Backend API Update
-      try {
-        const apiBase = getApiBaseUrl();
-        await fetch(`${apiBase}/auth/profile`, {
+            if (fullErr) {
+              await supabase
+                .from('users')
+                .update({
+                  name: name.trim(),
+                  college: college.trim(),
+                  bio: bio.trim(),
+                  avatar_url: avatar,
+                })
+                .eq('email', sessionUser.email.toLowerCase());
+            }
+          } catch (sbErr) {
+            console.warn('Direct Supabase update notice:', sbErr);
+          }
+        })(),
+
+        // Backend API Update
+        fetch(`${apiBase}/auth/profile`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
-        });
-      } catch (apiErr) {
-        console.warn('Backend profile update notice:', apiErr);
-      }
+        }).catch((apiErr) => {
+          console.warn('Backend profile update notice:', apiErr);
+        }),
+      ]);
 
-      // Update session in local storage
-      const nextSession = {
-        ...sessionUser,
-        ...payload,
-      };
-      localStorage.setItem('xenova_session', JSON.stringify(nextSession));
-      window.dispatchEvent(new Event('xenova-auth-change'));
-
-      setSavedMsg('Profile and picture updated successfully in database!');
+      setSavedMsg('Profile and photo saved to database successfully!');
       setTimeout(() => setSavedMsg(''), 4000);
     } catch (err: any) {
       setErrorMsg(err.message || 'Error updating profile');
@@ -354,7 +385,7 @@ export default function SettingsPage() {
                       <button
                         key={p.src}
                         type="button"
-                        onClick={() => setAvatar(p.src)}
+                        onClick={() => handleSelectPresetAvatar(p.src)}
                         className={`w-10 h-10 rounded-xl overflow-hidden border-2 transition cursor-pointer ${
                           avatar === p.src ? 'border-emerald-400 scale-105 shadow-md shadow-emerald-500/30' : 'border-white/10 hover:border-white/30 opacity-70 hover:opacity-100'
                         }`}

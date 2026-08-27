@@ -99,7 +99,7 @@ export default function DashboardPage() {
           .maybeSingle();
 
         if (!error && dbUser) {
-          const liveData = {
+          const liveData: any = {
             id: dbUser.id,
             name: dbUser.name || cleanEmail.split('@')[0],
             email: dbUser.email || cleanEmail,
@@ -108,17 +108,20 @@ export default function DashboardPage() {
             tag: dbUser.tag || `@${(dbUser.name || 'player').toUpperCase().replace(/\s+/g, '')}#1337`,
             bio: dbUser.bio || 'Verified collegiate esports competitor.',
             role: (dbUser.role || 'PLAYER').toLowerCase(),
-            avatar: dbUser.avatar_url || '/valorant.jpg',
-            avatar_url: dbUser.avatar_url || '/valorant.jpg',
             rank: dbUser.rank || 1,
             win_rate: dbUser.win_rate || 84.5,
             trophies: dbUser.trophies || 5,
           };
+          if (dbUser.avatar_url || dbUser.avatar) {
+            liveData.avatar = dbUser.avatar_url || dbUser.avatar;
+            liveData.avatar_url = dbUser.avatar_url || dbUser.avatar;
+          }
           setSession((prev: any) => ({ ...(prev || {}), ...liveData }));
           try {
             const raw = localStorage.getItem('xenova_session');
             const existing = raw ? JSON.parse(raw) : {};
             localStorage.setItem('xenova_session', JSON.stringify({ ...existing, ...liveData }));
+            window.dispatchEvent(new Event('xenova-auth-change'));
           } catch {}
         }
       } catch (sbErr) {
@@ -137,6 +140,7 @@ export default function DashboardPage() {
               const raw = localStorage.getItem('xenova_session');
               const existing = raw ? JSON.parse(raw) : {};
               localStorage.setItem('xenova_session', JSON.stringify({ ...existing, ...data.data }));
+              window.dispatchEvent(new Event('xenova-auth-change'));
             } catch {}
           }
         }
@@ -148,6 +152,7 @@ export default function DashboardPage() {
             const data = await fallbackRes.json();
             if (data.success && data.data) {
               setSession((prev: any) => ({ ...(prev || {}), ...data.data }));
+              window.dispatchEvent(new Event('xenova-auth-change'));
             }
           }
         } catch {}

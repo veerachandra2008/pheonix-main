@@ -44,7 +44,18 @@ export const Navbar = () => {
   const syncSession = () => {
     try {
       const rawSession = localStorage.getItem('xenova_session');
-      setSession(rawSession ? JSON.parse(rawSession) : null);
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession);
+        setSession((prev: any) => {
+          // If avatar or values changed, update state immediately
+          if (!prev || prev.avatar !== parsed.avatar || prev.avatar_url !== parsed.avatar_url || prev.name !== parsed.name) {
+            return parsed;
+          }
+          return prev;
+        });
+      } else {
+        setSession(null);
+      }
     } catch (error) {
       setSession(null);
     }
@@ -54,6 +65,8 @@ export const Navbar = () => {
     syncSession();
     window.addEventListener('storage', syncSession);
     window.addEventListener('xenova-auth-change', syncSession);
+    window.addEventListener('focus', syncSession);
+    document.addEventListener('visibilitychange', syncSession);
     
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -69,9 +82,16 @@ export const Navbar = () => {
     return () => {
       window.removeEventListener('storage', syncSession);
       window.removeEventListener('xenova-auth-change', syncSession);
+      window.removeEventListener('focus', syncSession);
+      document.removeEventListener('visibilitychange', syncSession);
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  // Re-sync session immediately whenever the route/page changes
+  useEffect(() => {
+    syncSession();
+  }, [pathname]);
 
   const goLogin = () => {
     router.push('/login');
@@ -223,7 +243,12 @@ export const Navbar = () => {
                 title="Gamer Profile"
               >
                 {session?.avatar || session?.avatar_url ? (
-                  <img src={session.avatar || session.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                  <img
+                    key={session.avatar || session.avatar_url}
+                    src={session.avatar || session.avatar_url}
+                    alt="Profile"
+                    className="w-full h-full object-cover"
+                  />
                 ) : (
                   <User className="h-4.5 w-4.5 text-emerald-400 group-hover:scale-110 transition-transform" />
                 )}

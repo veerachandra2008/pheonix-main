@@ -69,13 +69,31 @@ export default function PlayerProfilePage() {
 
   useEffect(() => {
     let sessionUser: Player | null = null;
-    const rawSession = localStorage.getItem('xenova_session');
-    if (rawSession) {
-      try {
-        sessionUser = JSON.parse(rawSession);
-        setCurrentUser(sessionUser);
-      } catch (e) {}
-    }
+    const updateFromLocal = () => {
+      const rawSession = localStorage.getItem('xenova_session');
+      if (rawSession) {
+        try {
+          sessionUser = JSON.parse(rawSession);
+          setCurrentUser(sessionUser);
+          if (
+            rawId === 'me' ||
+            rawId === 'profile' ||
+            (sessionUser && (
+              sessionUser.email?.toLowerCase() === rawId.toLowerCase() ||
+              slugify(sessionUser.name || '') === slugify(rawId) ||
+              (sessionUser.tag && sessionUser.tag.toLowerCase() === rawId.toLowerCase())
+            ))
+          ) {
+            setProfileData(sessionUser);
+            setLoading(false);
+          }
+        } catch (e) {}
+      }
+    };
+
+    updateFromLocal();
+    window.addEventListener('xenova-auth-change', updateFromLocal);
+    window.addEventListener('storage', updateFromLocal);
 
     // 1. INSTANT OPTIMISTIC RENDER (0ms)
     const isSelf = 
@@ -187,6 +205,11 @@ export default function PlayerProfilePage() {
     };
 
     loadProfile();
+
+    return () => {
+      window.removeEventListener('xenova-auth-change', updateFromLocal);
+      window.removeEventListener('storage', updateFromLocal);
+    };
   }, [rawId]);
 
   const playerName = profileData?.name || 'ATHLETE';
