@@ -19,11 +19,15 @@ import {
   Sparkles,
   Trophy,
   Activity,
-  UserCheck
+  UserCheck,
+  Plus,
+  CreditCard,
+  Ticket
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 import { tournaments as defaultTournaments } from '@/app/tournaments/data';
 import { getApiBaseUrl } from '@/lib/api-config';
+import { supabase } from '@/lib/supabase';
 
 export default function OrganizerAttendanceHubPage() {
   const router = useRouter();
@@ -47,30 +51,81 @@ export default function OrganizerAttendanceHubPage() {
         setSession(user);
         setAuthLoading(false);
 
-        // Load tournaments and registrations
         const apiBase = getApiBaseUrl();
+        let allTournaments: any[] = [];
+        let allRegistrations: any[] = [];
 
-        let tournsList: any[] = defaultTournaments;
+        // 1. Direct Supabase Query
         try {
-          const res = await fetch(`${apiBase}/tournaments/`);
-          if (res.ok) {
-            const data = await res.json();
+          const [sbTournRes, sbRegRes] = await Promise.all([
+            supabase.from('tournaments').select('*'),
+            supabase.from('registrations').select('*'),
+          ]);
+          if (sbTournRes.data && Array.isArray(sbTournRes.data) && sbTournRes.data.length > 0) {
+            allTournaments = sbTournRes.data;
+          }
+          if (sbRegRes.data && Array.isArray(sbRegRes.data)) {
+            allRegistrations = sbRegRes.data;
+          }
+        } catch {}
+
+        // 2. Fetch from Backend API
+        try {
+          const [tournRes, regRes] = await Promise.all([
+            fetch(`${apiBase}/tournaments/`, { cache: 'no-store' }),
+            flaskApi.getRegistrationsByTournament()
+          ]);
+
+          if (tournRes.ok) {
+            const data = await tournRes.json();
             if (data.success && Array.isArray(data.data) && data.data.length > 0) {
-              tournsList = data.data;
+              const seenSlugs = new Set(allTournaments.map((t: any) => t.slug));
+              for (const t of data.data) {
+                if (!seenSlugs.has(t.slug)) {
+                  allTournaments.push(t);
+                  seenSlugs.add(t.slug);
+                }
+              }
             }
           }
-        } catch { }
 
-        let regsList: any[] = [];
-        try {
-          const res = await flaskApi.getRegistrationsByTournament();
-          if (res.success && Array.isArray(res.data)) {
-            regsList = res.data;
+          if (regRes && regRes.success && Array.isArray(regRes.data)) {
+            const seenPasses = new Set(allRegistrations.map((r: any) => r.pass_id || r.passId));
+            for (const r of regRes.data) {
+              const pid = r.pass_id || r.passId;
+              if (pid && !seenPasses.has(pid)) {
+                allRegistrations.push(r);
+                seenPasses.add(pid);
+              }
+            }
           }
-        } catch { }
+        } catch {}
 
-        setTournaments(tournsList);
-        setRegistrations(regsList);
+        // Fallback default mock tournaments if none loaded
+        if (allTournaments.length === 0) {
+          allTournaments = defaultTournaments;
+        }
+
+        // 3. STRICT ORGANIZER SCOPING:
+        // Only show tournaments that this organizer owns / created / hosts (unless platform admin)
+        const userRole = (user.role || '').toLowerCase();
+        const isAdmin = userRole === 'admin' || user.email === 'admin@xenova.gg';
+
+        if (!isAdmin) {
+          const cleanEmail = (user.email || '').trim().toLowerCase();
+          const cleanName = (user.name || user.hostName || '').trim().toLowerCase();
+
+          allTournaments = allTournaments.filter((t: any) => {
+            const createdBy = (t.createdBy || t.organizer_email || t.organizerEmail || '').trim().toLowerCase();
+            const host = (t.host || t.hostName || '').trim().toLowerCase();
+            const emailMatch = cleanEmail && (createdBy === cleanEmail || host.includes(cleanEmail));
+            const nameMatch = cleanName && (host === cleanName || host.includes(cleanName));
+            return emailMatch || nameMatch;
+          });
+        }
+
+        setTournaments(allTournaments);
+        setRegistrations(allRegistrations);
       } catch {
         router.replace('/login');
       } finally {
@@ -81,7 +136,22 @@ export default function OrganizerAttendanceHubPage() {
     checkAuthAndLoad();
   }, [router]);
 
-  // Filter tournaments
+  // Helper to check if a registration record is a paid entry vs free entry
+  const checkIsPaidEntry = (r: any) => {
+    const pId = r.payment_id || r.paymentId;
+    const oId = r.order_id || r.orderId;
+    const fee = (r.tournament_fee || r.tournamentFee || '').toString().toLowerCase();
+    const pStatus = (r.payment_status || r.paymentStatus || '').toString().toUpperCase();
+    return (
+      (pId && pId !== 'FREE' && pId !== 'FREE ENTRY') ||
+      (oId && oId !== 'FREE' && oId !== 'FREE ENTRY') ||
+      pStatus === 'SUCCESS' ||
+      pStatus.includes('PAID') ||
+      (fee && !fee.includes('free') && fee !== '₹0' && fee !== '0')
+    );
+  };
+
+  // Filter tournaments by search
   const filteredTournaments = tournaments.filter((t) => {
     const q = searchQuery.toLowerCase();
     return (
@@ -113,24 +183,33 @@ export default function OrganizerAttendanceHubPage() {
             <ArrowLeft className="h-3.5 w-3.5" /> Dashboard
           </Link>
           <ChevronRight className="h-3.5 w-3.5 text-slate-600" />
-          <span className="text-emerald-400 font-black">Event Day Attendance Hub</span>
+          <span className="text-emerald-400 font-black">My Event Attendance Desks</span>
         </div>
 
         {/* Header Hero */}
         <section className="relative overflow-hidden rounded-3xl border border-white/15 bg-[#0C111D] p-6 sm:p-8 shadow-2xl mb-8">
-          <div className="space-y-2 max-w-2xl">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase tracking-wider">
-                <Activity className="h-3.5 w-3.5 animate-pulse" />
-                Live Event Day Operations
-              </span>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-2 max-w-2xl">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase tracking-wider">
+                  <Activity className="h-3.5 w-3.5 animate-pulse" />
+                  Organizer Attendance Operations
+                </span>
+              </div>
+              <h1 className="text-2xl sm:text-4xl font-black italic uppercase tracking-tight text-white">
+                My Tournament Attendance Desks
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-400 leading-relaxed font-medium">
+                Manage live attendee check-ins, verify Paid/Free passes via Payment &amp; Order IDs, and track event check-in rates for your organized tournaments.
+              </p>
             </div>
-            <h1 className="text-2xl sm:text-4xl font-black italic uppercase tracking-tight text-white">
-              Event Attendance Management
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-400 leading-relaxed font-medium">
-              Select an active tournament to open the live check-in desk, mark teams as Present, track no-shows, and close event attendance.
-            </p>
+
+            <Link
+              href="/organizer/tournament/create"
+              className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider rounded-2xl transition shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2 shrink-0"
+            >
+              <Plus className="h-4 w-4" /> Host New Event
+            </Link>
           </div>
         </section>
 
@@ -141,7 +220,7 @@ export default function OrganizerAttendanceHubPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search tournament name, game, or region..."
+            placeholder="Search within your organized tournaments..."
             className="w-full pl-12 pr-4 py-3.5 bg-[#0C111D] border border-white/10 focus:border-emerald-500 rounded-2xl text-white text-sm outline-none font-medium placeholder:text-slate-500"
           />
         </div>
@@ -150,7 +229,25 @@ export default function OrganizerAttendanceHubPage() {
         {loading ? (
           <div className="py-20 text-center space-y-4">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent mx-auto" />
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Loading Tournaments...</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Loading Your Tournaments...</p>
+          </div>
+        ) : filteredTournaments.length === 0 ? (
+          <div className="rounded-3xl border border-white/10 bg-[#0C111D] p-12 text-center space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-slate-400">
+              <Trophy className="h-8 w-8" />
+            </div>
+            <h3 className="text-xl font-bold text-white uppercase tracking-tight">No Tournaments Found</h3>
+            <p className="text-sm text-slate-400 max-w-md mx-auto">
+              You haven&apos;t created or hosted any tournaments yet. Host a tournament to unlock and manage its dedicated live attendance desk.
+            </p>
+            <div className="pt-2">
+              <Link
+                href="/organizer/tournament/create"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider rounded-xl transition shadow-lg shadow-emerald-950/50"
+              >
+                <Plus className="h-4 w-4" /> Create Your First Tournament
+              </Link>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -163,6 +260,9 @@ export default function OrganizerAttendanceHubPage() {
               const absentCount = tournRegs.filter((r) => r.attendance_status === 'ABSENT').length;
               const notMarkedCount = tournRegs.filter((r) => !r.attendance_status || r.attendance_status === 'NOT_MARKED').length;
 
+              const paidCount = tournRegs.filter(checkIsPaidEntry).length;
+              const freeCount = tournRegs.length - paidCount;
+
               return (
                 <motion.div
                   key={slug}
@@ -171,7 +271,7 @@ export default function OrganizerAttendanceHubPage() {
                 >
                   <div>
                     {/* Image Banner */}
-                    <div className="relative h-40 w-full overflow-hidden bg-slate-900">
+                    <div className="relative h-44 w-full overflow-hidden bg-slate-900">
                       <img
                         src={tournament.image || '/hero-arena.jpg'}
                         alt={tournament.title || tournament.name}
@@ -180,7 +280,7 @@ export default function OrganizerAttendanceHubPage() {
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-[#0C111D] via-transparent to-transparent" />
 
-                      <div className="absolute top-3 left-3">
+                      <div className="absolute top-3 left-3 flex items-center gap-2">
                         <span
                           className="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider text-white shadow"
                           style={{ backgroundColor: tournament.status_color || '#10B981' }}
@@ -205,6 +305,22 @@ export default function OrganizerAttendanceHubPage() {
                         {tournament.title || tournament.name}
                       </h3>
 
+                      {/* Entry Types (Paid vs Free Breakdown) */}
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="flex-1 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-bold flex items-center justify-between">
+                          <span className="flex items-center gap-1">
+                            <CreditCard className="h-3.5 w-3.5" /> Paid:
+                          </span>
+                          <span className="font-mono font-black">{paidCount}</span>
+                        </span>
+                        <span className="flex-1 px-3 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 font-bold flex items-center justify-between">
+                          <span className="flex items-center gap-1">
+                            <Ticket className="h-3.5 w-3.5" /> Free:
+                          </span>
+                          <span className="font-mono font-black">{freeCount}</span>
+                        </span>
+                      </div>
+
                       {/* Attendance Quick Stats */}
                       <div className="grid grid-cols-3 gap-2 p-3 bg-black/40 rounded-xl border border-white/5 text-center">
                         <div>
@@ -217,7 +333,7 @@ export default function OrganizerAttendanceHubPage() {
                         </div>
                         <div>
                           <div className="text-[10px] font-bold uppercase text-amber-400">Awaiting</div>
-                          <div className="text-base font-black text-white">{notMarkedCount || (tournRegs.length > 0 ? notMarkedCount : 5)}</div>
+                          <div className="text-base font-black text-white">{notMarkedCount}</div>
                         </div>
                       </div>
                     </div>
@@ -230,7 +346,7 @@ export default function OrganizerAttendanceHubPage() {
                       className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider rounded-xl transition shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <UserCheck className="h-4 w-4" />
-                      Open Event Attendance
+                      Open Attendance Desk
                     </Link>
                   </div>
                 </motion.div>

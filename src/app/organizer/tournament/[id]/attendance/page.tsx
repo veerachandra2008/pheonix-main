@@ -18,6 +18,7 @@ import {
   Building2,
   Mail,
   ShieldCheck,
+  ShieldAlert,
   Sparkles,
   RefreshCw,
   Trophy,
@@ -28,11 +29,14 @@ import {
   HelpCircle,
   Copy,
   Check,
-  AlertCircle
+  AlertCircle,
+  CreditCard,
+  Ticket
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 import { tournaments as defaultTournaments } from '@/app/tournaments/data';
 import { getApiBaseUrl } from '@/lib/api-config';
+import { supabase } from '@/lib/supabase';
 
 interface RegistrationItem {
   id: string;
@@ -46,11 +50,18 @@ interface RegistrationItem {
   email: string;
   phone?: string;
   payment_status: string;
+  payment_id?: string | null;
+  paymentId?: string | null;
+  order_id?: string | null;
+  orderId?: string | null;
+  tournament_fee?: string | null;
+  tournamentFee?: string | null;
   attendance_status: 'NOT_MARKED' | 'PRESENT' | 'ABSENT';
   attended_at?: string | null;
   attended_by?: string | null;
   registered_at?: string;
   members_count?: number;
+  players?: any[];
 }
 
 export default function TournamentAttendancePage() {
@@ -60,6 +71,7 @@ export default function TournamentAttendancePage() {
 
   const [session, setSession] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [isAuthorized, setIsAuthorized] = useState(true);
   const [tournament, setTournament] = useState<any>(null);
   const [registrations, setRegistrations] = useState<RegistrationItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +80,7 @@ export default function TournamentAttendancePage() {
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'NOT_MARKED' | 'PRESENT' | 'ABSENT'>('ALL');
+  const [entryTypeFilter, setEntryTypeFilter] = useState<'ALL' | 'PAID' | 'FREE'>('ALL');
   
   // Toast notifications
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'info' | 'error'; text: string } | null>(null);
@@ -77,9 +90,24 @@ export default function TournamentAttendancePage() {
   const [showBatchAbsentModal, setShowBatchAbsentModal] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
 
+  // Helper to determine if registration is Paid or Free
+  const checkIsPaid = (r: RegistrationItem) => {
+    const pId = r.payment_id || r.paymentId;
+    const oId = r.order_id || r.orderId;
+    const fee = (r.tournament_fee || r.tournamentFee || '').toString().toLowerCase();
+    const pStatus = (r.payment_status || '').toString().toUpperCase();
+    return (
+      (pId && pId !== 'FREE' && pId !== 'FREE ENTRY') ||
+      (oId && oId !== 'FREE' && oId !== 'FREE ENTRY') ||
+      pStatus === 'SUCCESS' ||
+      pStatus.includes('PAID') ||
+      (fee && !fee.includes('free') && fee !== '₹0' && fee !== '0')
+    );
+  };
+
   // 1. Authentication & Authorization Check
   useEffect(() => {
-    async function checkAuth() {
+    async function checkAuthAndLoad() {
       const rawSession = localStorage.getItem('xenova_session');
       if (!rawSession) {
         router.replace('/login');
@@ -90,405 +118,381 @@ export default function TournamentAttendancePage() {
         const user = JSON.parse(rawSession);
         setSession(user);
 
-        // Check if user is organizer or admin
-        const userRole = (user.role || '').toLowerCase();
-        if (userRole === 'organizer' || userRole === 'admin' || user.email === 'admin@xenova.gg') {
-          setAuthLoading(false);
-          return;
-        }
+        // Fetch tournament details to check organizer ownership
+        const apiBase = getApiBaseUrl();
+        let foundTournament: any = null;
 
-        // Verify with Supabase / Backend API
+        // 1. Direct Supabase Query
         try {
-          const { supabase } = await import('@/lib/supabase');
-          const { data } = await supabase.from('users').select('role').eq('email', user.email.toLowerCase()).maybeSingle();
-          if (data && (data.role?.toLowerCase() === 'organizer' || data.role?.toLowerCase() === 'admin')) {
-            setAuthLoading(false);
-            return;
-          }
+          const { data: sbTourn } = await supabase
+            .from('tournaments')
+            .select('*')
+            .or(`slug.eq.${rawId},id.eq.${rawId}`)
+            .maybeSingle();
+          if (sbTourn) foundTournament = sbTourn;
         } catch {}
 
-        // Fallback: Check backend organizers
-        try {
-          const apiBase = getApiBaseUrl();
-          const orgRes = await fetch(`${apiBase}/auth/organizers`);
-          if (orgRes.ok) {
-            const orgData = await orgRes.json();
-            if (orgData.success && Array.isArray(orgData.data)) {
-              const match = orgData.data.find((o: any) => o.email?.toLowerCase() === user.email?.toLowerCase());
-              if (match) {
-                setAuthLoading(false);
-                return;
+        // 2. Fallback to API
+        if (!foundTournament) {
+          try {
+            const tournRes = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
+            if (tournRes.ok) {
+              const tournData = await tournRes.json();
+              if (tournData.success && Array.isArray(tournData.data)) {
+                foundTournament = tournData.data.find(
+                  (t: any) =>
+                    t.slug === rawId ||
+                    t.id?.toString() === rawId ||
+                    t.slug?.toLowerCase().includes(rawId.toLowerCase())
+                );
               }
             }
-          }
-        } catch {}
+          } catch {}
+        }
 
-        // Allow demo user bypass for test session
+        // 3. Fallback to defaultTournaments
+        if (!foundTournament) {
+          foundTournament = defaultTournaments.find(
+            (t) => t.slug === rawId || t.slug.toLowerCase().includes(rawId.toLowerCase())
+          );
+        }
+
+        if (!foundTournament) {
+          foundTournament = {
+            slug: rawId,
+            title: rawId.split('-').map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(' '),
+            game: 'Competitive Esports',
+            format: 'Tournament',
+            region: 'Main Arena',
+            date: 'Event Day',
+            prize: '₹1,00,000',
+            image: '/valorant.jpg',
+            host: user.name || 'Organizer',
+            createdBy: user.email
+          };
+        }
+
+        setTournament(foundTournament);
+
+        // Check if user is authorized to manage THIS tournament desk
+        const userRole = (user.role || '').toLowerCase();
+        const isAdmin = userRole === 'admin' || user.email === 'admin@xenova.gg';
+
+        if (!isAdmin) {
+          const cleanEmail = (user.email || '').trim().toLowerCase();
+          const cleanName = (user.name || user.hostName || '').trim().toLowerCase();
+          const createdBy = (foundTournament.createdBy || foundTournament.organizer_email || foundTournament.organizerEmail || '').trim().toLowerCase();
+          const host = (foundTournament.host || foundTournament.hostName || '').trim().toLowerCase();
+
+          const isOwner = (cleanEmail && (createdBy === cleanEmail || host.includes(cleanEmail))) ||
+                          (cleanName && (host === cleanName || host.includes(cleanName)));
+
+          if (!isOwner) {
+            setIsAuthorized(false);
+            setAuthLoading(false);
+            setLoading(false);
+            return;
+          }
+        }
+
+        setIsAuthorized(true);
         setAuthLoading(false);
+
+        // Load Registrations
+        await fetchRegistrationsData(foundTournament.slug || rawId, foundTournament.title);
       } catch {
         router.replace('/login');
       }
     }
 
-    checkAuth();
-  }, [router]);
+    checkAuthAndLoad();
+  }, [rawId, router]);
 
-  // 2. Load Tournament & Registrations
-  const loadData = async () => {
-    if (!rawId) return;
+  // Load Registrations & Event Attendance
+  const fetchRegistrationsData = async (targetSlug: string, tournTitle?: string) => {
     setLoading(true);
-
     try {
-      const apiBase = getApiBaseUrl();
+      let items: RegistrationItem[] = [];
 
-      // A. Load Tournament Details
-      let foundTournament: any = defaultTournaments.find(
-        (t) => t.slug === rawId || t.slug.toLowerCase().includes(rawId.toLowerCase())
-      );
-
+      // 1. Direct Supabase Query
       try {
-        const tournRes = await fetch(`${apiBase}/tournaments/`);
-        if (tournRes.ok) {
-          const tournData = await tournRes.json();
-          if (tournData.success && Array.isArray(tournData.data)) {
-            const match = tournData.data.find(
-              (t: any) =>
-                t.slug === rawId ||
-                t.id?.toString() === rawId ||
-                t.slug?.toLowerCase().includes(rawId.toLowerCase())
-            );
-            if (match) foundTournament = match;
+        const [sbRegRes, sbAttRes] = await Promise.all([
+          supabase.from('registrations').select('*').ilike('tournament_slug', targetSlug),
+          supabase.from('event_attendance').select('*').ilike('tournament_slug', targetSlug),
+        ]);
+
+        const attMap: Record<string, any> = {};
+        if (sbAttRes.data && Array.isArray(sbAttRes.data)) {
+          for (const a of sbAttRes.data) {
+            if (a.pass_id) attMap[a.pass_id] = a;
           }
         }
-      } catch (e) {
-        console.warn('Tournament fetch notice:', e);
+
+        if (sbRegRes.data && Array.isArray(sbRegRes.data) && sbRegRes.data.length > 0) {
+          items = sbRegRes.data.map((r: any) => {
+            const pid = r.pass_id || r.passId || r.id;
+            const att = attMap[pid] || {};
+            return {
+              id: pid,
+              pass_id: pid,
+              passId: pid,
+              tournament_slug: r.tournament_slug || targetSlug,
+              tournament_title: r.tournament_title || tournTitle,
+              team_name: r.team_name || r.teamName || 'Squad Entry',
+              college: r.college || 'Collegiate Campus',
+              captain_name: r.captain_name || r.captainName || 'Team Captain',
+              email: r.email || 'competitor@campus.edu',
+              phone: r.phone || '',
+              payment_status: r.payment_status || r.paymentStatus || 'FREE ENTRY',
+              payment_id: r.payment_id || r.paymentId || null,
+              paymentId: r.payment_id || r.paymentId || null,
+              order_id: r.order_id || r.orderId || null,
+              orderId: r.order_id || r.orderId || null,
+              tournament_fee: r.tournament_fee || r.tournamentFee || null,
+              attendance_status: (att.attendance_status || r.attendance_status || 'NOT_MARKED').toUpperCase() as any,
+              attended_at: att.attended_at || r.attended_at || null,
+              attended_by: att.attended_by || r.attended_by || null,
+              registered_at: r.registered_at || r.created_at,
+              members_count: 5,
+              players: r.players || [],
+            };
+          });
+        }
+      } catch (sbErr) {
+        console.warn('Supabase attendance load notice:', sbErr);
       }
 
-      if (!foundTournament) {
-        foundTournament = {
-          slug: rawId,
-          title: rawId.split('-').map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(' '),
-          game: 'Competitive Esports',
-          format: 'Tournament',
-          region: 'Main Arena',
-          date: 'Event Day',
-          prize: '₹1,00,000',
-          image: '/valorant.jpg',
-        };
-      }
-      setTournament(foundTournament);
-
-      // B. Load Attendance & Registrations from dedicated event_attendance table linked to registrations
-      const targetSlug = foundTournament.slug || rawId;
-      const attRes = await flaskApi.getEventAttendance(targetSlug);
-      
-      let items: RegistrationItem[] = [];
-      if (attRes && attRes.success && Array.isArray(attRes.data)) {
-        items = attRes.data.map((r: any) => ({
-          id: r.id || r.pass_id || r.passId,
-          pass_id: r.pass_id || r.passId,
-          passId: r.pass_id || r.passId,
-          tournament_slug: r.tournament_slug || targetSlug,
-          tournament_title: r.tournament_title || foundTournament.title,
-          team_name: r.team_name || r.teamName || 'Squad Entry',
-          college: r.college || 'Collegiate Campus',
-          captain_name: r.captain_name || r.captainName || 'Team Captain',
-          email: r.email || 'competitor@campus.edu',
-          phone: r.phone || '',
-          payment_status: r.payment_status || r.paymentStatus || 'FREE ENTRY',
-          attendance_status: (r.attendance_status || r.attendanceStatus || 'NOT_MARKED').toUpperCase() as any,
-          attended_at: r.attended_at || r.attendedAt || null,
-          attended_by: r.attended_by || r.attendedBy || null,
-          registered_at: r.registered_at || r.registeredAt,
-          members_count: 5,
-        }));
-      }
-
-      // If no registrations exist yet in database, generate sample event-day registrations so organizers can test immediately
+      // 2. Fallback to Flask API
       if (items.length === 0) {
-        items = [
-          {
-            id: 'XPH-A101',
-            pass_id: 'XPH-A101',
-            passId: 'XPH-A101',
-            tournament_slug: targetSlug,
-            team_name: 'Phoenix Titans',
-            college: 'IIT Bombay',
-            captain_name: 'Rahul Sharma',
-            email: 'rahul.titans@iitb.ac.in',
-            payment_status: 'FREE ENTRY',
-            attendance_status: 'NOT_MARKED',
-            members_count: 5,
-            registered_at: '2026-08-25T08:30:00Z',
-          },
-          {
-            id: 'XPH-B204',
-            pass_id: 'XPH-B204',
-            passId: 'XPH-B204',
-            tournament_slug: targetSlug,
-            team_name: 'Shadow Vipers',
-            college: 'BITS Pilani',
-            captain_name: 'Aarav Patel',
-            email: 'aarav.vipers@bits.ac.in',
-            payment_status: 'PAID (₹500)',
-            attendance_status: 'NOT_MARKED',
-            members_count: 5,
-            registered_at: '2026-08-25T08:45:00Z',
-          },
-          {
-            id: 'XPH-C309',
-            pass_id: 'XPH-C309',
-            passId: 'XPH-C309',
-            tournament_slug: targetSlug,
-            team_name: 'Apex Predators',
-            college: 'NIT Trichy',
-            captain_name: 'Karthik Raja',
-            email: 'karthik.apex@nitt.edu',
-            payment_status: 'PAID (₹500)',
-            attendance_status: 'NOT_MARKED',
-            members_count: 5,
-            registered_at: '2026-08-25T09:00:00Z',
-          },
-          {
-            id: 'XPH-D412',
-            pass_id: 'XPH-D412',
-            passId: 'XPH-D412',
-            tournament_slug: targetSlug,
-            team_name: 'Cyber Samurai',
-            college: 'IIIT Hyderabad',
-            captain_name: 'Vikram Joshi',
-            email: 'vikram.samurai@iiit.ac.in',
-            payment_status: 'FREE ENTRY',
-            attendance_status: 'NOT_MARKED',
-            members_count: 5,
-            registered_at: '2026-08-25T09:15:00Z',
-          },
-          {
-            id: 'XPH-E518',
-            pass_id: 'XPH-E518',
-            passId: 'XPH-E518',
-            tournament_slug: targetSlug,
-            team_name: 'Vanguard Elite',
-            college: 'DTU Delhi',
-            captain_name: 'Sameer Khan',
-            email: 'sameer.vanguard@dtu.ac.in',
-            payment_status: 'PAID (₹500)',
-            attendance_status: 'NOT_MARKED',
-            members_count: 5,
-            registered_at: '2026-08-25T09:20:00Z',
-          },
-        ];
+        try {
+          const attRes = await flaskApi.getEventAttendance(targetSlug);
+          if (attRes && attRes.success && Array.isArray(attRes.data)) {
+            items = attRes.data.map((r: any) => ({
+              id: r.id || r.pass_id || r.passId,
+              pass_id: r.pass_id || r.passId,
+              passId: r.pass_id || r.passId,
+              tournament_slug: r.tournament_slug || targetSlug,
+              tournament_title: r.tournament_title || tournTitle,
+              team_name: r.team_name || r.teamName || 'Squad Entry',
+              college: r.college || 'Collegiate Campus',
+              captain_name: r.captain_name || r.captainName || 'Team Captain',
+              email: r.email || 'competitor@campus.edu',
+              phone: r.phone || '',
+              payment_status: r.payment_status || r.paymentStatus || 'FREE ENTRY',
+              payment_id: r.payment_id || r.paymentId || null,
+              paymentId: r.payment_id || r.paymentId || null,
+              order_id: r.order_id || r.orderId || null,
+              orderId: r.order_id || r.orderId || null,
+              tournament_fee: r.tournament_fee || r.tournamentFee || null,
+              attendance_status: (r.attendance_status || r.attendanceStatus || 'NOT_MARKED').toUpperCase() as any,
+              attended_at: r.attended_at || r.attendedAt || null,
+              attended_by: r.attended_by || r.attendedBy || null,
+              registered_at: r.registered_at || r.registeredAt,
+              members_count: 5,
+              players: r.players || [],
+            }));
+          }
+        } catch {}
       }
 
       setRegistrations(items);
     } catch (e) {
-      console.error('Failed to load attendance records:', e);
+      console.error('Failed to fetch attendance data:', e);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (!authLoading) {
-      loadData();
-    }
-  }, [authLoading, rawId]);
-
-  // Toast Helper
-  const showToast = (type: 'success' | 'info' | 'error', text: string) => {
-    setToastMessage({ type, text });
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 3500);
-  };
-
-  // Format Time for display
-  const formatTime = (isoString?: string | null) => {
-    if (!isoString) return '';
-    try {
-      const date = new Date(isoString);
-      if (isNaN(date.getTime())) return isoString;
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-    } catch {
-      return isoString;
+  const loadData = () => {
+    if (tournament) {
+      fetchRegistrationsData(tournament.slug || rawId, tournament.title);
     }
   };
 
-  // 3. Mark Single Registration Status (PRESENT, ABSENT, NOT_MARKED)
-  const handleMarkStatus = async (
-    item: RegistrationItem,
-    newStatus: 'PRESENT' | 'ABSENT' | 'NOT_MARKED'
-  ) => {
-    // Prevent duplicate action if already in that state
-    if (item.attendance_status === newStatus) {
-      if (newStatus === 'PRESENT') {
-        showToast('info', `Team ${item.team_name} is already marked Present.`);
-      } else if (newStatus === 'ABSENT') {
-        showToast('info', `Team ${item.team_name} is already marked Absent.`);
-      }
-      return;
-    }
-
-    setActionLoadingId(item.pass_id);
-    const organizerName = session?.name || session?.email || 'Organizer';
-    const nowIso = new Date().toISOString();
-
-    // Optimistically update local state immediately
-    setRegistrations((prev) =>
-      prev.map((r) => {
-        if (r.pass_id === item.pass_id) {
-          return {
-            ...r,
-            attendance_status: newStatus,
-            attended_at: newStatus === 'NOT_MARKED' ? null : nowIso,
-            attended_by: newStatus === 'NOT_MARKED' ? null : organizerName,
-          };
-        }
-        return r;
-      })
-    );
-
-    // Call Backend API
-    try {
-      const res = await flaskApi.updateAttendance(
-        item.pass_id,
-        newStatus,
-        organizerName,
-        {
-          tournament_slug: item.tournament_slug || tournament?.slug || rawId,
-          team_name: item.team_name,
-          captain_name: item.captain_name,
-          college: item.college,
-          email: item.email,
-        }
-      );
-      if (res && res.success) {
-        if (newStatus === 'PRESENT') {
-          showToast('success', `✅ Team ${item.team_name} marked Present.`);
-        } else if (newStatus === 'ABSENT') {
-          showToast('info', `Team ${item.team_name} marked Absent.`);
-        } else {
-          showToast('info', `Team ${item.team_name} reset to Not Marked.`);
-        }
-      } else {
-        console.warn('Backend update notice:', res?.message);
-        if (newStatus === 'PRESENT') {
-          showToast('success', `Team ${item.team_name} marked Present.`);
-        }
-      }
-    } catch (e: any) {
-      console.warn('API sync warning:', e);
-      if (newStatus === 'PRESENT') {
-        showToast('success', `Team ${item.team_name} marked Present.`);
-      }
-    } finally {
-      setActionLoadingId(null);
-    }
-  };
-
-  // 4. Batch Mark Remaining as Absent
-  const handleBatchMarkRemainingAbsent = async () => {
-    setBatchLoading(true);
-    const organizerName = session?.name || session?.email || 'Organizer';
-    const nowIso = new Date().toISOString();
-    const targetSlug = tournament?.slug || rawId;
-
-    const notMarkedCount = registrations.filter((r) => r.attendance_status === 'NOT_MARKED').length;
-
-    // Optimistically update all NOT_MARKED to ABSENT
-    setRegistrations((prev) =>
-      prev.map((r) => {
-        if (r.attendance_status === 'NOT_MARKED') {
-          return {
-            ...r,
-            attendance_status: 'ABSENT',
-            attended_at: nowIso,
-            attended_by: organizerName,
-          };
-        }
-        return r;
-      })
-    );
-
-    setShowBatchAbsentModal(false);
-
-    try {
-      const res = await flaskApi.markRemainingAbsent(targetSlug, organizerName);
-      const count = res?.updated_count || notMarkedCount;
-      showToast('info', `✅ ${count} remaining registrations marked as Absent.`);
-    } catch (e) {
-      showToast('info', `✅ ${notMarkedCount} remaining registrations marked as Absent.`);
-    } finally {
-      setBatchLoading(false);
-    }
-  };
-
-  // 5. Dynamic Statistics Calculations
+  // Attendance Quick Stats
   const stats = useMemo(() => {
     const total = registrations.length;
     const present = registrations.filter((r) => r.attendance_status === 'PRESENT').length;
     const absent = registrations.filter((r) => r.attendance_status === 'ABSENT').length;
     const notMarked = registrations.filter((r) => r.attendance_status === 'NOT_MARKED').length;
+    const paid = registrations.filter(checkIsPaid).length;
+    const free = total - paid;
     const rate = total > 0 ? Math.round((present / total) * 100) : 0;
 
-    return { total, present, absent, notMarked, rate };
+    return { total, present, absent, notMarked, paid, free, rate };
   }, [registrations]);
 
-  // 6. Search & Filter Filtering
+  // Filtered registrations
   const filteredRegistrations = useMemo(() => {
-    return registrations.filter((item) => {
-      // Search match
-      const query = searchQuery.trim().toLowerCase();
-      const matchesSearch =
-        !query ||
-        item.pass_id.toLowerCase().includes(query) ||
-        item.team_name.toLowerCase().includes(query) ||
-        item.captain_name.toLowerCase().includes(query) ||
-        (item.college && item.college.toLowerCase().includes(query)) ||
-        (item.email && item.email.toLowerCase().includes(query)) ||
-        (item.phone && item.phone.includes(query));
+    return registrations.filter((r) => {
+      // 1. Status Filter
+      if (statusFilter !== 'ALL' && r.attendance_status !== statusFilter) {
+        return false;
+      }
 
-      // Filter match
-      const matchesFilter =
-        statusFilter === 'ALL' || item.attendance_status === statusFilter;
+      // 2. Entry Type Filter
+      if (entryTypeFilter !== 'ALL') {
+        const isPaid = checkIsPaid(r);
+        if (entryTypeFilter === 'PAID' && !isPaid) return false;
+        if (entryTypeFilter === 'FREE' && isPaid) return false;
+      }
 
-      return matchesSearch && matchesFilter;
+      // 3. Search Query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const passMatch = (r.pass_id || '').toLowerCase().includes(q);
+        const teamMatch = (r.team_name || '').toLowerCase().includes(q);
+        const capMatch = (r.captain_name || '').toLowerCase().includes(q);
+        const colMatch = (r.college || '').toLowerCase().includes(q);
+        const emailMatch = (r.email || '').toLowerCase().includes(q);
+        const payIdMatch = ((r.payment_id || r.paymentId || '').toLowerCase()).includes(q);
+        const orderIdMatch = ((r.order_id || r.orderId || '').toLowerCase()).includes(q);
+        return passMatch || teamMatch || capMatch || colMatch || emailMatch || payIdMatch || orderIdMatch;
+      }
+
+      return true;
     });
-  }, [registrations, searchQuery, statusFilter]);
+  }, [registrations, statusFilter, entryTypeFilter, searchQuery]);
 
-  // 7. Copy Pass ID Helper
-  const handleCopyPassId = (passId: string) => {
-    navigator.clipboard.writeText(passId);
-    setCopiedPassId(passId);
-    setTimeout(() => setCopiedPassId(null), 2000);
+  // Action: Mark Individual Attendance Status
+  const handleMarkStatus = async (
+    item: RegistrationItem,
+    newStatus: 'PRESENT' | 'ABSENT' | 'NOT_MARKED'
+  ) => {
+    setActionLoadingId(item.pass_id);
+    const organizerName = session?.name || session?.email || 'Organizer Desk';
+
+    try {
+      const nowIso = new Date().toISOString();
+      const updatedItem: RegistrationItem = {
+        ...item,
+        attendance_status: newStatus,
+        attended_at: newStatus === 'NOT_MARKED' ? null : nowIso,
+        attended_by: newStatus === 'NOT_MARKED' ? null : organizerName,
+      };
+
+      // 1. Optimistic UI update
+      setRegistrations((prev) =>
+        prev.map((r) => (r.pass_id === item.pass_id ? updatedItem : r))
+      );
+
+      // 2. Sync to Backend Database
+      await flaskApi.updateAttendance(
+        item.pass_id,
+        newStatus,
+        organizerName,
+        { tournament_slug: tournament?.slug || rawId }
+      );
+
+      setToastMessage({
+        type: newStatus === 'PRESENT' ? 'success' : newStatus === 'ABSENT' ? 'error' : 'info',
+        text: `Updated ${item.team_name} to ${newStatus === 'PRESENT' ? 'PRESENT (Checked In)' : newStatus === 'ABSENT' ? 'ABSENT' : 'NOT MARKED'}.`,
+      });
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (err: any) {
+      setToastMessage({
+        type: 'error',
+        text: `Failed to update status: ${err?.message || 'Server connection error'}`,
+      });
+      setTimeout(() => setToastMessage(null), 3500);
+    } finally {
+      setActionLoadingId(null);
+    }
   };
 
-  // 8. Export CSV
+  // Action: Batch Mark Remaining Unchecked Teams as Absent
+  const handleBatchMarkRemainingAbsent = async () => {
+    setBatchLoading(true);
+    const organizerName = session?.name || session?.email || 'Organizer Desk';
+    const targetSlug = tournament?.slug || rawId;
+
+    try {
+      const nowIso = new Date().toISOString();
+
+      // Optimistic UI update
+      setRegistrations((prev) =>
+        prev.map((r) =>
+          r.attendance_status === 'NOT_MARKED'
+            ? { ...r, attendance_status: 'ABSENT', attended_at: nowIso, attended_by: organizerName }
+            : r
+        )
+      );
+
+      await flaskApi.markRemainingAbsent(targetSlug, organizerName);
+
+      setShowBatchAbsentModal(false);
+      setToastMessage({
+        type: 'info',
+        text: `Marked all remaining teams as ABSENT for ${tournament?.title || 'tournament'}.`,
+      });
+      setTimeout(() => setToastMessage(null), 4000);
+    } catch (err: any) {
+      setToastMessage({
+        type: 'error',
+        text: `Batch update error: ${err?.message || 'Failed to update database'}`,
+      });
+      setTimeout(() => setToastMessage(null), 4000);
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  // Copy Pass ID
+  const handleCopyPassId = (passId: string) => {
+    if (typeof window !== 'undefined') {
+      navigator.clipboard.writeText(passId);
+      setCopiedPassId(passId);
+      setTimeout(() => setCopiedPassId(null), 2000);
+    }
+  };
+
+  // Format Date/Time
+  const formatTime = (dateStr?: string | null) => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
+    }
+  };
+
+  // Export Attendance CSV
   const handleExportCSV = () => {
     if (registrations.length === 0) return;
+
     const headers = [
       'Pass ID',
       'Team Name',
       'Captain Name',
       'College',
       'Email',
+      'Entry Type',
+      'Payment ID',
+      'Order ID',
       'Payment Status',
       'Attendance Status',
       'Check-in Time',
       'Marked By',
     ];
 
-    const rows = registrations.map((r) => [
-      `"${r.pass_id}"`,
-      `"${r.team_name}"`,
-      `"${r.captain_name}"`,
-      `"${r.college || ''}"`,
-      `"${r.email}"`,
-      `"${r.payment_status}"`,
-      `"${r.attendance_status}"`,
-      `"${r.attended_at ? new Date(r.attended_at).toLocaleString() : ''}"`,
-      `"${r.attended_by || ''}"`,
-    ]);
+    const rows = registrations.map((r) => {
+      const isPaid = checkIsPaid(r);
+      return [
+        `"${r.pass_id}"`,
+        `"${r.team_name}"`,
+        `"${r.captain_name}"`,
+        `"${r.college || ''}"`,
+        `"${r.email}"`,
+        `"${isPaid ? 'PAID ENTRY' : 'FREE ENTRY'}"`,
+        `"${r.payment_id || r.paymentId || 'N/A'}"`,
+        `"${r.order_id || r.orderId || 'N/A'}"`,
+        `"${r.payment_status}"`,
+        `"${r.attendance_status}"`,
+        `"${r.attended_at ? new Date(r.attended_at).toLocaleString() : ''}"`,
+        `"${r.attended_by || ''}"`,
+      ];
+    });
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
@@ -508,6 +512,39 @@ export default function TournamentAttendancePage() {
           <p className="text-sm font-semibold tracking-wider text-slate-400 uppercase">Authorizing Event Organizer...</p>
         </div>
       </div>
+    );
+  }
+
+  // Unauthorized Access Screen
+  if (!isAuthorized) {
+    return (
+      <main className="min-h-screen bg-[#070B14] text-white flex items-center justify-center p-6 font-sans">
+        <div className="max-w-md w-full rounded-3xl border border-rose-500/30 bg-[#0C111D] p-8 text-center space-y-6 shadow-2xl shadow-rose-950/30">
+          <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-400">
+            <ShieldAlert className="h-8 w-8" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-black uppercase tracking-tight text-white">Attendance Desk Restricted</h2>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              You can only access and handle the attendance desk for tournaments that you organize. You do not have organizer permissions for <strong className="text-white">{tournament?.title || rawId}</strong>.
+            </p>
+          </div>
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <Link
+              href="/organizer/attendance"
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider rounded-xl transition shadow-lg text-center"
+            >
+              My Attendance Desks
+            </Link>
+            <Link
+              href="/organizer/dashboard"
+              className="w-full py-3 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-bold uppercase tracking-wider rounded-xl transition text-center"
+            >
+              Dashboard
+            </Link>
+          </div>
+        </div>
+      </main>
     );
   }
 
@@ -554,13 +591,13 @@ export default function TournamentAttendancePage() {
             </Link>
             <ChevronRight className="h-3.5 w-3.5 text-slate-600" />
             <Link
-              href={`/organizer/tournament/${tournament?.slug || rawId}`}
+              href="/organizer/attendance"
               className="hover:text-white transition"
             >
-              Manage & Rosters
+              Attendance Desks
             </Link>
             <ChevronRight className="h-3.5 w-3.5 text-slate-600" />
-            <span className="text-emerald-400 font-black">Event Day Attendance</span>
+            <span className="text-emerald-400 font-black">{tournament?.title || 'Event Desk'}</span>
           </div>
 
           <div className="flex items-center gap-3">
@@ -600,7 +637,7 @@ export default function TournamentAttendancePage() {
               <div className="flex flex-wrap items-center gap-2.5">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase tracking-wider">
                   <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
-                  Live Event Day
+                  Organizer Attendance Desk
                 </span>
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
                   {tournament?.game || 'Esports'} • {tournament?.format || 'Tournament'}
@@ -608,11 +645,11 @@ export default function TournamentAttendancePage() {
               </div>
 
               <h1 className="text-2xl sm:text-4xl font-black italic uppercase tracking-tight text-white">
-                {tournament?.title || 'Tournament'} — Attendance
+                {tournament?.title || 'Tournament'} — Live Attendance
               </h1>
 
               <p className="text-xs sm:text-sm text-slate-400 leading-relaxed font-medium">
-                Track arrivals in real time. Search any team or pass ID to check them in as <strong className="text-emerald-400">PRESENT</strong> on event day.
+                Verify team check-ins, validate Paid &amp; Free entry passes by Payment/Order IDs, and track live match attendance.
               </p>
             </div>
 
@@ -633,83 +670,85 @@ export default function TournamentAttendancePage() {
         </section>
 
         {/* ═══════════════ 2. ATTENDANCE STATISTICS CARDS ═══════════════ */}
-        <section className="grid grid-cols-2 lg:grid-cols-5 gap-3.5 sm:gap-4 mb-8">
+        <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mb-8">
           
           {/* Total Registered */}
-          <div className="rounded-2xl border border-white/10 bg-[#0C111D] p-5 relative overflow-hidden">
+          <div className="rounded-2xl border border-white/10 bg-[#0C111D] p-4 sm:p-5 relative overflow-hidden">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">Total Registered</span>
+              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-slate-400">Total Registered</span>
               <Users className="h-4 w-4 text-indigo-400" />
             </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-3xl sm:text-4xl font-black italic text-white">{stats.total}</span>
-              <span className="text-xs text-slate-500 font-bold">Teams</span>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-black italic text-white">{stats.total}</span>
+              <span className="text-[11px] text-slate-500 font-bold">Teams</span>
             </div>
-            <div className="mt-2 text-[10px] text-slate-500 font-medium">Full registered roster capacity</div>
+          </div>
+
+          {/* Paid Entries */}
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/15 p-4 sm:p-5 relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-emerald-400">Paid Entries</span>
+              <CreditCard className="h-4 w-4 text-emerald-400" />
+            </div>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-black italic text-emerald-300">{stats.paid}</span>
+              <span className="text-[11px] text-emerald-500/70 font-bold">Verified</span>
+            </div>
+          </div>
+
+          {/* Free Entries */}
+          <div className="rounded-2xl border border-blue-500/20 bg-blue-950/15 p-4 sm:p-5 relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-blue-400">Free Passes</span>
+              <Ticket className="h-4 w-4 text-blue-400" />
+            </div>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-black italic text-blue-300">{stats.free}</span>
+              <span className="text-[11px] text-blue-500/70 font-bold">Passes</span>
+            </div>
           </div>
 
           {/* Present */}
-          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-5 relative overflow-hidden shadow-[0_0_20px_rgba(16,185,129,0.1)]">
+          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4 sm:p-5 relative overflow-hidden shadow-[0_0_20px_rgba(16,185,129,0.1)]">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-black uppercase tracking-wider text-emerald-400">Present</span>
+              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-emerald-400">Present</span>
               <CheckCircle2 className="h-4 w-4 text-emerald-400" />
             </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-3xl sm:text-4xl font-black italic text-emerald-400">{stats.present}</span>
-              <span className="text-xs text-emerald-500/70 font-bold">Arrived</span>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-black italic text-emerald-400">{stats.present}</span>
+              <span className="text-[11px] text-emerald-500/70 font-bold">Arrived</span>
             </div>
-            <div className="mt-2 text-[10px] text-emerald-400/80 font-medium">Checked in at venue / online</div>
           </div>
 
           {/* Absent */}
-          <div className="rounded-2xl border border-rose-500/20 bg-rose-950/15 p-5 relative overflow-hidden">
+          <div className="rounded-2xl border border-rose-500/20 bg-rose-950/15 p-4 sm:p-5 relative overflow-hidden">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-black uppercase tracking-wider text-rose-400">Absent</span>
+              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-rose-400">Absent</span>
               <XCircle className="h-4 w-4 text-rose-400" />
             </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-3xl sm:text-4xl font-black italic text-rose-400">{stats.absent}</span>
-              <span className="text-xs text-rose-500/70 font-bold">No-Show</span>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-black italic text-rose-400">{stats.absent}</span>
+              <span className="text-[11px] text-rose-500/70 font-bold">No-Show</span>
             </div>
-            <div className="mt-2 text-[10px] text-rose-400/80 font-medium">Marked absent by organizer</div>
           </div>
 
           {/* Not Marked */}
-          <div className="rounded-2xl border border-amber-500/20 bg-amber-950/15 p-5 relative overflow-hidden">
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-950/15 p-4 sm:p-5 relative overflow-hidden">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-black uppercase tracking-wider text-amber-400">Not Marked</span>
+              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-amber-400">Awaiting</span>
               <Clock className="h-4 w-4 text-amber-400" />
             </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-3xl sm:text-4xl font-black italic text-amber-400">{stats.notMarked}</span>
-              <span className="text-xs text-amber-500/70 font-bold">Awaiting</span>
-            </div>
-            <div className="mt-2 text-[10px] text-amber-400/80 font-medium">Yet to decide / arrive</div>
-          </div>
-
-          {/* Attendance Rate */}
-          <div className="col-span-2 lg:col-span-1 rounded-2xl border border-indigo-500/30 bg-indigo-950/20 p-5 relative overflow-hidden">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-black uppercase tracking-wider text-indigo-400">Attendance Rate</span>
-              <Sparkles className="h-4 w-4 text-indigo-400" />
-            </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-3xl sm:text-4xl font-black italic text-indigo-300">{stats.rate}%</span>
-            </div>
-            {/* Progress Bar */}
-            <div className="mt-3 h-2 w-full bg-white/10 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-emerald-500 to-indigo-500 rounded-full transition-all duration-500"
-                style={{ width: `${stats.rate}%` }}
-              />
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-black italic text-amber-400">{stats.notMarked}</span>
+              <span className="text-[11px] text-amber-500/70 font-bold">Pending</span>
             </div>
           </div>
 
         </section>
 
-        {/* ═══════════════ 3. SEARCH & QUICK FILTERS ═══════════════ */}
-        <section className="rounded-2xl border border-white/10 bg-[#0C111D] p-4 sm:p-5 mb-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* ═══════════════ 3. SEARCH & DUAL FILTERS (STATUS & ENTRY TYPE) ═══════════════ */}
+        <section className="rounded-2xl border border-white/10 bg-[#0C111D] p-4 sm:p-5 mb-6 space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             
             {/* Large Instant Search */}
             <div className="relative flex-1">
@@ -718,134 +757,163 @@ export default function TournamentAttendancePage() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by Pass ID (e.g. XPH-...), Team, Captain, or College..."
+                placeholder="Search by Pass ID (XPH-...), Payment ID (pay_...), Team, Captain, or College..."
                 className="w-full pl-12 pr-10 py-3.5 bg-black/50 border border-white/10 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl text-white text-sm placeholder:text-slate-500 transition outline-none font-medium"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 cursor-pointer"
                 >
                   <XCircle className="h-4 w-4" />
                 </button>
               )}
             </div>
 
-            {/* Quick Status Filter Tabs */}
-            <div className="flex items-center gap-1.5 p-1 bg-black/40 border border-white/10 rounded-xl overflow-x-auto">
+            {/* Entry Type Filter Tabs (Paid vs Free) */}
+            <div className="flex items-center gap-1.5 p-1 bg-black/40 border border-white/10 rounded-xl">
               <button
                 type="button"
-                onClick={() => setStatusFilter('ALL')}
-                className={`px-3.5 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition whitespace-nowrap cursor-pointer ${
-                  statusFilter === 'ALL'
+                onClick={() => setEntryTypeFilter('ALL')}
+                className={`px-3 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition cursor-pointer ${
+                  entryTypeFilter === 'ALL'
                     ? 'bg-white/15 text-white shadow'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                All ({stats.total})
+                All Entries ({stats.total})
               </button>
 
               <button
                 type="button"
-                onClick={() => setStatusFilter('NOT_MARKED')}
-                className={`px-3.5 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition whitespace-nowrap cursor-pointer ${
-                  statusFilter === 'NOT_MARKED'
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                    : 'text-slate-400 hover:text-amber-400'
-                }`}
-              >
-                ⚪ Not Marked ({stats.notMarked})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setStatusFilter('PRESENT')}
-                className={`px-3.5 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition whitespace-nowrap cursor-pointer ${
-                  statusFilter === 'PRESENT'
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                onClick={() => setEntryTypeFilter('PAID')}
+                className={`px-3 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition flex items-center gap-1 cursor-pointer ${
+                  entryTypeFilter === 'PAID'
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow'
                     : 'text-slate-400 hover:text-emerald-400'
                 }`}
               >
-                🟢 Present ({stats.present})
+                <CreditCard className="h-3 w-3" /> Paid ({stats.paid})
               </button>
 
               <button
                 type="button"
-                onClick={() => setStatusFilter('ABSENT')}
-                className={`px-3.5 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition whitespace-nowrap cursor-pointer ${
-                  statusFilter === 'ABSENT'
-                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                    : 'text-slate-400 hover:text-rose-400'
+                onClick={() => setEntryTypeFilter('FREE')}
+                className={`px-3 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition flex items-center gap-1 cursor-pointer ${
+                  entryTypeFilter === 'FREE'
+                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40 shadow'
+                    : 'text-slate-400 hover:text-blue-400'
                 }`}
               >
-                🔴 Absent ({stats.absent})
+                <Ticket className="h-3 w-3" /> Free ({stats.free})
               </button>
             </div>
+          </div>
 
+          {/* Status Filter Tabs */}
+          <div className="flex items-center gap-1.5 p-1 bg-black/40 border border-white/10 rounded-xl overflow-x-auto">
+            <button
+              type="button"
+              onClick={() => setStatusFilter('ALL')}
+              className={`px-3.5 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition whitespace-nowrap cursor-pointer ${
+                statusFilter === 'ALL'
+                  ? 'bg-white/15 text-white shadow'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              All Status
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter('PRESENT')}
+              className={`px-3.5 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                statusFilter === 'PRESENT'
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow'
+                  : 'text-slate-400 hover:text-emerald-400'
+              }`}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Present ({stats.present})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter('NOT_MARKED')}
+              className={`px-3.5 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                statusFilter === 'NOT_MARKED'
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow'
+                  : 'text-slate-400 hover:text-amber-400'
+              }`}
+            >
+              <Clock className="h-3.5 w-3.5" />
+              Awaiting Check-in ({stats.notMarked})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter('ABSENT')}
+              className={`px-3.5 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                statusFilter === 'ABSENT'
+                  ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 shadow'
+                  : 'text-slate-400 hover:text-rose-400'
+              }`}
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Absent ({stats.absent})
+            </button>
           </div>
         </section>
 
-        {/* ═══════════════ 4. REGISTRATIONS ATTENDANCE LIST ═══════════════ */}
-        <section className="rounded-3xl border border-white/10 bg-[#0C111D] overflow-hidden shadow-2xl">
+        {/* ═══════════════ 4. REGISTRATIONS & ATTENDANCE ROSTER LIST ═══════════════ */}
+        <section className="space-y-4">
           
           {loading ? (
             <div className="py-20 text-center space-y-4">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent mx-auto" />
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Loading Attendance Registrations...</p>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Loading Attendance Roster...</p>
             </div>
           ) : filteredRegistrations.length === 0 ? (
-            <div className="py-16 px-6 text-center space-y-3">
-              <div className="h-12 w-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-slate-500">
-                <Search className="h-6 w-6" />
-              </div>
-              <h3 className="text-base font-bold text-white uppercase tracking-wider">No matching registrations found</h3>
-              <p className="text-xs text-slate-400 max-w-md mx-auto">
-                {searchQuery
-                  ? `No teams or pass IDs match "${searchQuery}". Try a different name or clear search filter.`
-                  : `No registrations with status "${statusFilter}".`}
+            <div className="rounded-3xl border border-white/10 bg-[#0C111D] p-12 text-center space-y-3">
+              <Users className="h-10 w-10 text-slate-600 mx-auto" />
+              <h3 className="text-base font-bold text-white uppercase tracking-tight">No Teams Found</h3>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                No tournament participants match your current search and filter criteria.
               </p>
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => { setSearchQuery(''); setStatusFilter('ALL'); }}
-                  className="mt-2 text-xs font-bold text-emerald-400 hover:underline cursor-pointer"
-                >
-                  Clear all filters
-                </button>
-              )}
             </div>
           ) : (
-            <div className="divide-y divide-white/5">
-              {filteredRegistrations.map((item, index) => {
+            <div className="space-y-3">
+              {filteredRegistrations.map((item) => {
                 const isPresent = item.attendance_status === 'PRESENT';
                 const isAbsent = item.attendance_status === 'ABSENT';
                 const isNotMarked = item.attendance_status === 'NOT_MARKED';
                 const isActionLoading = actionLoadingId === item.pass_id;
+                const isPaid = checkIsPaid(item);
+                const paymentId = item.payment_id || item.paymentId;
+                const orderId = item.order_id || item.orderId;
 
                 return (
                   <motion.div
-                    key={item.pass_id || index}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.2 }}
-                    className={`p-5 sm:p-6 transition flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5 ${
+                    key={item.pass_id}
+                    layout
+                    className={`rounded-2xl border p-5 transition-all flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
                       isPresent
-                        ? 'bg-emerald-950/10 hover:bg-emerald-950/20'
+                        ? 'bg-[#0C111D] border-emerald-500/40 shadow-lg shadow-emerald-950/20'
                         : isAbsent
-                        ? 'bg-rose-950/10 hover:bg-rose-950/20'
-                        : 'hover:bg-white/[0.02]'
+                        ? 'bg-[#0C111D] border-rose-500/30 opacity-80'
+                        : 'bg-[#0C111D] border-white/10 hover:border-white/20'
                     }`}
                   >
                     
-                    {/* Left: Identity & Team Info */}
-                    <div className="flex items-start gap-4">
+                    {/* Left: Status Icon & Team Details */}
+                    <div className="flex items-start gap-4 flex-1">
                       
-                      {/* Status Icon Pillar */}
+                      {/* Status Icon Indicator */}
                       <div
-                        className={`h-12 w-12 rounded-2xl flex items-center justify-center shrink-0 border ${
+                        className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 border mt-0.5 ${
                           isPresent
-                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]'
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
                             : isAbsent
                             ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
                             : 'bg-white/5 border-white/10 text-slate-400'
@@ -861,7 +929,7 @@ export default function TournamentAttendancePage() {
                       </div>
 
                       {/* Details */}
-                      <div className="space-y-1.5">
+                      <div className="space-y-2 flex-1">
                         
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-tight">
@@ -883,11 +951,33 @@ export default function TournamentAttendancePage() {
                             )}
                           </button>
 
-                          {/* Payment Stamp */}
-                          <span className="px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded bg-white/5 text-slate-300 border border-white/10">
-                            {item.payment_status}
-                          </span>
+                          {/* Paid vs Free Entry Badge based on Payment ID / Order ID */}
+                          {isPaid ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                              <CreditCard className="h-3 w-3" /> PAID ENTRY
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                              <Ticket className="h-3 w-3" /> FREE ENTRY
+                            </span>
+                          )}
                         </div>
+
+                        {/* Payment and Order ID Details if Paid */}
+                        {isPaid && (paymentId || orderId) && (
+                          <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono bg-black/40 px-3 py-1.5 rounded-xl border border-white/5 w-fit">
+                            {paymentId && paymentId !== 'FREE' && (
+                              <span className="text-slate-400">
+                                Payment ID: <strong className="text-emerald-400 font-bold">{paymentId}</strong>
+                              </span>
+                            )}
+                            {orderId && orderId !== 'FREE' && (
+                              <span className="text-slate-400">
+                                Order ID: <strong className="text-indigo-400 font-bold">{orderId}</strong>
+                              </span>
+                            )}
+                          </div>
+                        )}
 
                         {/* Captain & College */}
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 font-medium">
@@ -909,11 +999,11 @@ export default function TournamentAttendancePage() {
                           <div className="flex flex-wrap gap-1.5 pt-1">
                             {item.players.map((p: any) => (
                               <span
-                                key={p.slot}
+                                key={p.slot || p.email}
                                 className="px-2 py-0.5 rounded-md bg-black/40 border border-white/10 text-[10px] font-mono text-slate-300 flex items-center gap-1"
                               >
-                                <span className="text-emerald-400 font-bold">{p.slot === 1 ? '👑' : `P${p.slot}`}:</span>
-                                <span>{p.name}</span>
+                                <span className="text-emerald-400 font-bold">{p.isCaptain || p.slot === 1 ? '👑' : `P${p.slot}`}:</span>
+                                <span>{p.name || p.playerName}</span>
                                 <span className="text-slate-500 font-normal">({p.email})</span>
                               </span>
                             ))}
@@ -1013,7 +1103,6 @@ export default function TournamentAttendancePage() {
                             <XCircle className="h-4 w-4" /> Absent
                           </div>
 
-                          {/* Revert Late Arrival back to Present */}
                           <button
                             type="button"
                             onClick={() => handleMarkStatus(item, 'PRESENT')}

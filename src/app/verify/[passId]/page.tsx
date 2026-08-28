@@ -20,7 +20,9 @@ import {
   UserCheck,
   QrCode,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  CreditCard,
+  Ticket
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 import { getApiBaseUrl } from '@/lib/api-config';
@@ -88,6 +90,7 @@ export default function VerifyPassPage(props: PageProps) {
             passId: item.pass_id,
             data: {
               passId: item.pass_id,
+              pass_id: item.pass_id,
               tournamentTitle: item.tournament_title || 'Esports Championship',
               tournamentSlug: item.tournament_slug || 'tournament',
               teamName: item.team_name,
@@ -95,9 +98,17 @@ export default function VerifyPassPage(props: PageProps) {
               college: item.college,
               email: item.email,
               paymentStatus: item.payment_status || 'SUCCESS',
+              payment_status: item.payment_status || 'SUCCESS',
+              paymentId: item.payment_id || null,
+              payment_id: item.payment_id || null,
+              orderId: item.order_id || null,
+              order_id: item.order_id || null,
+              tournamentFee: item.tournament_fee || null,
+              tournament_fee: item.tournament_fee || null,
               attendanceStatus: att?.attendance_status || item.attendance_status || 'NOT_MARKED',
               attendedAt: att?.attended_at || item.attended_at,
               attendedBy: att?.attended_by || item.attended_by,
+              players: item.players || [],
             }
           });
           setLoading(false);
@@ -125,6 +136,7 @@ export default function VerifyPassPage(props: PageProps) {
                   passId: matched.pass_id || matched.passId || passId,
                   data: {
                     passId: matched.pass_id || matched.passId || passId,
+                    pass_id: matched.pass_id || matched.passId || passId,
                     tournamentTitle: matched.tournament_title || matched.tournamentTitle || 'Esports Championship',
                     tournamentSlug: matched.tournament_slug || matched.tournamentSlug || 'tournament',
                     teamName: matched.team_name || matched.teamName || 'Squad',
@@ -132,9 +144,17 @@ export default function VerifyPassPage(props: PageProps) {
                     college: matched.college || 'Collegiate Campus',
                     email: matched.email || '',
                     paymentStatus: matched.payment_status || matched.paymentStatus || 'SUCCESS',
+                    payment_status: matched.payment_status || matched.paymentStatus || 'SUCCESS',
+                    paymentId: matched.payment_id || matched.paymentId || null,
+                    payment_id: matched.payment_id || matched.paymentId || null,
+                    orderId: matched.order_id || matched.orderId || null,
+                    order_id: matched.order_id || matched.orderId || null,
+                    tournamentFee: matched.tournament_fee || matched.tournamentFee || null,
+                    tournament_fee: matched.tournament_fee || matched.tournamentFee || null,
                     attendanceStatus: matched.attendance_status || matched.attendanceStatus || 'NOT_MARKED',
                     attendedAt: matched.attended_at || matched.attendedAt,
                     attendedBy: matched.attended_by || matched.attendedBy,
+                    players: matched.players || [],
                   }
                 });
                 setLoading(false);
@@ -226,6 +246,19 @@ export default function VerifyPassPage(props: PageProps) {
   const isPresent = attendanceStatus === 'PRESENT';
   const isAbsent = attendanceStatus === 'ABSENT';
 
+  const paymentId = ticket.paymentId || ticket.payment_id || '';
+  const orderId = ticket.orderId || ticket.order_id || '';
+  const fee = (ticket.tournamentFee || ticket.tournament_fee || '').toString().toLowerCase();
+  const pStatus = (ticket.paymentStatus || ticket.payment_status || '').toString().toUpperCase();
+
+  const isPaidEntry = Boolean(
+    (paymentId && paymentId !== 'FREE' && paymentId !== 'FREE ENTRY') ||
+    (orderId && orderId !== 'FREE' && orderId !== 'FREE ENTRY') ||
+    pStatus === 'SUCCESS' ||
+    pStatus.includes('PAID') ||
+    (fee && !fee.includes('free') && fee !== '₹0' && fee !== '0')
+  );
+
   return (
     <main className="min-h-screen bg-[#070B14] text-white font-sans flex flex-col justify-between selection:bg-emerald-500 selection:text-zinc-950">
       {/* ── Top Bar ── */}
@@ -264,9 +297,20 @@ export default function VerifyPassPage(props: PageProps) {
 
             {/* Verification Badge */}
             <div className="space-y-2">
-              <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase tracking-wider">
-                <ShieldCheck className="w-3.5 h-3.5" /> VALID ENTRY PASS
-              </span>
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase tracking-wider">
+                  <ShieldCheck className="w-3.5 h-3.5" /> VALID ENTRY PASS
+                </span>
+                {isPaidEntry ? (
+                  <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-black uppercase tracking-wider shadow-sm">
+                    <CreditCard className="w-3.5 h-3.5" /> PAID ENTRY
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-300 text-xs font-black uppercase tracking-wider shadow-sm">
+                    <Ticket className="w-3.5 h-3.5" /> FREE ENTRY
+                  </span>
+                )}
+              </div>
               
               <h1 className="text-2xl font-black text-white pt-1 uppercase tracking-tight">
                 {ticket.tournamentTitle || 'Esports Tournament'}
@@ -351,12 +395,41 @@ export default function VerifyPassPage(props: PageProps) {
                 </span>
               </div>
 
+              {/* Entry Type and Payment Classification */}
               <div className="flex items-center justify-between pb-3 border-b border-white/5">
-                <span className="text-xs text-slate-400 font-medium">Payment Status</span>
-                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[11px] font-black uppercase">
-                  {ticket.paymentStatus || 'SUCCESS'}
+                <span className="text-xs text-slate-400 font-medium">Entry Classification</span>
+                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase flex items-center gap-1 ${
+                  isPaidEntry ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'
+                }`}>
+                  {isPaidEntry ? (
+                    <>
+                      <CreditCard className="h-3 w-3" /> Paid Entry ({ticket.paymentStatus || 'SUCCESS'})
+                    </>
+                  ) : (
+                    <>
+                      <Ticket className="h-3 w-3" /> Free Collegiate Pass
+                    </>
+                  )}
                 </span>
               </div>
+
+              {/* Payment ID & Order ID if Paid */}
+              {isPaidEntry && (paymentId || orderId) && (
+                <div className="p-3 bg-black/50 rounded-xl border border-white/5 space-y-1.5 text-left font-mono text-xs">
+                  {paymentId && paymentId !== 'FREE' && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-[11px]">Payment ID:</span>
+                      <span className="text-emerald-400 font-bold">{paymentId}</span>
+                    </div>
+                  )}
+                  {orderId && orderId !== 'FREE' && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-[11px]">Order ID:</span>
+                      <span className="text-indigo-400 font-bold">{orderId}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* 4-Player Roster List */}
               <div className="pt-2 space-y-1.5">
