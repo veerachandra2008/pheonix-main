@@ -521,32 +521,36 @@ def verify_registration_pass(pass_id):
     Endpoint for Admin QR Scanner / Public verification lookup.
     """
     try:
-        # Check memory store
-        if pass_id in IN_MEMORY_REGISTRATIONS:
-            reg = IN_MEMORY_REGISTRATIONS[pass_id]
-            att_status = (reg.get('attendance_status') or reg.get('attendanceStatus') or 'NOT_MARKED').upper()
-            return jsonify({
-                'valid': True,
-                'status': 'VERIFIED',
-                'passId': pass_id,
-                'data': {
-                    **reg,
-                    'attendanceStatus': att_status,
-                    'attendance_status': att_status
-                }
-            }), 200
+        clean_id = (pass_id or '').strip()
+        if not clean_id:
+            return jsonify({'valid': False, 'status': 'INVALID_PASS', 'message': 'Empty pass ID provided'}), 200
 
-        # Query Supabase
+        # 1. Check memory store (case-insensitive)
+        for k, reg in IN_MEMORY_REGISTRATIONS.items():
+            if k.strip().lower() == clean_id.lower() or (reg.get('pass_id') or '').strip().lower() == clean_id.lower():
+                att_status = (reg.get('attendance_status') or reg.get('attendanceStatus') or 'NOT_MARKED').upper()
+                return jsonify({
+                    'valid': True,
+                    'status': 'VERIFIED',
+                    'passId': clean_id,
+                    'data': {
+                        **reg,
+                        'attendanceStatus': att_status,
+                        'attendance_status': att_status
+                    }
+                }), 200
+
+        # 2. Query Supabase (case-insensitive ilike)
         try:
             supabase = get_supabase_client()
-            res = supabase.table('registrations').select('*').eq('pass_id', pass_id).execute()
+            res = supabase.table('registrations').select('*').ilike('pass_id', clean_id).execute()
             if res.data and len(res.data) > 0:
                 item = res.data[0]
                 att_status = (item.get('attendance_status') or 'NOT_MARKED').upper()
                 return jsonify({
                     'valid': True,
                     'status': 'VERIFIED',
-                    'passId': pass_id,
+                    'passId': item.get('pass_id', clean_id),
                     'data': {
                         'passId': item.get('pass_id'),
                         'tournamentTitle': item.get('tournament_title'),
@@ -565,7 +569,7 @@ def verify_registration_pass(pass_id):
         except Exception as sb_err:
             print(f"Supabase verification error: {sb_err}")
 
-        return jsonify({'valid': False, 'status': 'INVALID_PASS', 'message': 'Pass ID not found or unverified'}), 404
+        return jsonify({'valid': False, 'status': 'NOT_FOUND', 'message': f'Pass ID {clean_id} not found on server'}), 200
     except Exception as e:
         return jsonify({'valid': False, 'message': str(e)}), 500
 

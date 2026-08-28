@@ -18,7 +18,8 @@ import {
   ShieldCheck,
   Sparkles,
   Trophy,
-  Activity
+  Activity,
+  UserCheck
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 import { tournaments as defaultTournaments } from '@/app/tournaments/data';
@@ -48,7 +49,7 @@ export default function OrganizerAttendanceHubPage() {
 
         // Load tournaments and registrations
         const apiBase = getApiBaseUrl();
-        
+
         let tournsList: any[] = defaultTournaments;
         try {
           const res = await fetch(`${apiBase}/tournaments/`);
@@ -58,7 +59,7 @@ export default function OrganizerAttendanceHubPage() {
               tournsList = data.data;
             }
           }
-        } catch {}
+        } catch { }
 
         let regsList: any[] = [];
         try {
@@ -66,7 +67,7 @@ export default function OrganizerAttendanceHubPage() {
           if (res.success && Array.isArray(res.data)) {
             regsList = res.data;
           }
-        } catch {}
+        } catch { }
 
         setTournaments(tournsList);
         setRegistrations(regsList);
@@ -102,7 +103,7 @@ export default function OrganizerAttendanceHubPage() {
   return (
     <main className="min-h-screen bg-[#070B14] text-white selection:bg-emerald-500 selection:text-zinc-950 font-sans pb-20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-8">
-        
+
         {/* Navigation Breadcrumb */}
         <div className="flex items-center gap-2 text-xs font-bold text-slate-400 mb-6">
           <Link
@@ -178,7 +179,7 @@ export default function OrganizerAttendanceHubPage() {
                         onError={(e) => { (e.target as HTMLImageElement).src = '/hero-arena.jpg'; }}
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-[#0C111D] via-transparent to-transparent" />
-                      
+
                       <div className="absolute top-3 left-3">
                         <span
                           className="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider text-white shadow"

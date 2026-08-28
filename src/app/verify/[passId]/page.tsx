@@ -71,11 +71,12 @@ export default function VerifyPassPage(props: PageProps) {
         }
       } catch {}
 
-      // 2. Direct Supabase Fallback
+      // 2. Direct Supabase Fallback (case-insensitive)
       try {
+        const cleanPass = passId.trim();
         const [regRes, attRes] = await Promise.all([
-          supabase.from('registrations').select('*').eq('pass_id', passId).maybeSingle(),
-          supabase.from('event_attendance').select('*').eq('pass_id', passId).maybeSingle(),
+          supabase.from('registrations').select('*').ilike('pass_id', cleanPass).maybeSingle(),
+          supabase.from('event_attendance').select('*').ilike('pass_id', cleanPass).maybeSingle(),
         ]);
 
         if (regRes.data) {
@@ -104,6 +105,46 @@ export default function VerifyPassPage(props: PageProps) {
         }
       } catch (sbErr) {
         console.warn('Supabase scanner lookup fallback notice:', sbErr);
+      }
+
+      // 3. Client LocalStorage Fallback (for client-side passes / offline)
+      try {
+        const storedKeys = ['xenova_registrations', 'xenova_tournament_passes', 'user_registrations', 'xenova_user_registrations'];
+        for (const k of storedKeys) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              const matched = list.find((item: any) => 
+                (item.pass_id || item.passId || item.id || '').toString().trim().toLowerCase() === passId.trim().toLowerCase()
+              );
+              if (matched) {
+                setResult({
+                  valid: true,
+                  status: 'VERIFIED',
+                  passId: matched.pass_id || matched.passId || passId,
+                  data: {
+                    passId: matched.pass_id || matched.passId || passId,
+                    tournamentTitle: matched.tournament_title || matched.tournamentTitle || 'Esports Championship',
+                    tournamentSlug: matched.tournament_slug || matched.tournamentSlug || 'tournament',
+                    teamName: matched.team_name || matched.teamName || 'Squad',
+                    captainName: matched.captain_name || matched.captainName || 'Player',
+                    college: matched.college || 'Collegiate Campus',
+                    email: matched.email || '',
+                    paymentStatus: matched.payment_status || matched.paymentStatus || 'SUCCESS',
+                    attendanceStatus: matched.attendance_status || matched.attendanceStatus || 'NOT_MARKED',
+                    attendedAt: matched.attended_at || matched.attendedAt,
+                    attendedBy: matched.attended_by || matched.attendedBy,
+                  }
+                });
+                setLoading(false);
+                return;
+              }
+            }
+          }
+        }
+      } catch (lsErr) {
+        console.warn('LocalStorage verify fallback notice:', lsErr);
       }
 
     } catch (err) {

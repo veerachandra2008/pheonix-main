@@ -261,7 +261,7 @@ export default function CollegesPage() {
         {/* Artwork Backdrop with Diagonal Slanted Divider */}
         <div className="absolute inset-0 z-0">
           <img
-            src="/csgo.jpg"
+            src="/cs2.jpg"
             alt="University Esports Ecosystem"
             className="w-full h-full object-cover filter brightness-[0.35] saturate-150 scale-105"
           />

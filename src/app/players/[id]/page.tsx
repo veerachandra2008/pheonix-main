@@ -68,26 +68,33 @@ export default function PlayerProfilePage() {
   const [userPasses, setUserPasses] = useState<TournamentRegistrationRecord[]>([]);
 
   useEffect(() => {
-    let sessionUser: Player | null = null;
-    const updateFromLocal = () => {
-      const rawSession = localStorage.getItem('xenova_session');
+    const getStoredSession = (): Player | null => {
+      const rawSession = typeof window !== 'undefined' ? localStorage.getItem('xenova_session') : null;
       if (rawSession) {
         try {
-          sessionUser = JSON.parse(rawSession);
-          setCurrentUser(sessionUser);
-          if (
-            rawId === 'me' ||
-            rawId === 'profile' ||
-            (sessionUser && (
-              sessionUser.email?.toLowerCase() === rawId.toLowerCase() ||
-              slugify(sessionUser.name || '') === slugify(rawId) ||
-              (sessionUser.tag && sessionUser.tag.toLowerCase() === rawId.toLowerCase())
-            ))
-          ) {
-            setProfileData(sessionUser);
-            setLoading(false);
-          }
+          return JSON.parse(rawSession);
         } catch (e) {}
+      }
+      return null;
+    };
+
+    let sessionUser: Player | null = getStoredSession();
+
+    const updateFromLocal = () => {
+      const updated = getStoredSession();
+      sessionUser = updated;
+      setCurrentUser(updated);
+      if (
+        rawId === 'me' ||
+        rawId === 'profile' ||
+        (updated && (
+          updated.email?.toLowerCase() === rawId.toLowerCase() ||
+          slugify(updated.name || '') === slugify(rawId) ||
+          (updated.tag && updated.tag.toLowerCase() === rawId.toLowerCase())
+        ))
+      ) {
+        setProfileData(updated);
+        setLoading(false);
       }
     };
 
@@ -99,7 +106,7 @@ export default function PlayerProfilePage() {
     const isSelf = 
       rawId === 'me' || 
       rawId === 'profile' || 
-      (sessionUser && (
+      Boolean(sessionUser && (
         sessionUser.email?.toLowerCase() === rawId.toLowerCase() ||
         slugify(sessionUser.name || '') === slugify(rawId) ||
         (sessionUser.tag && sessionUser.tag.toLowerCase() === rawId.toLowerCase())
