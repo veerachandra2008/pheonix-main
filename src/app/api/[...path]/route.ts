@@ -21,7 +21,7 @@ async function tryProxyToBackend(req: NextRequest, pathStr: string): Promise<Res
   const targetUrl = `${backendBase}/api/${pathStr}${url.search}`;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 2500);
+  const timeoutId = setTimeout(() => controller.abort(), 800);
 
   try {
     const headers: Record<string, string> = {};
@@ -136,8 +136,46 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     }
 
     if (subSegment === 'organizers' && method === 'GET') {
-      const { data } = await supabase.from('users').select('*').in('role', ['ORGANIZER', 'ADMIN', 'organizer', 'admin']);
-      return NextResponse.json({ success: true, data: data || [] }, { status: 200 });
+      const [uRes, aRes] = await Promise.all([
+        supabase.from('users').select('*'),
+        supabase.from('organizer_applications').select('*'),
+      ]);
+      const orgMap = new Map<string, any>();
+      if (aRes.data && Array.isArray(aRes.data)) {
+        for (const a of aRes.data) {
+          const st = (a.status || a.application_status || '').toLowerCase().trim();
+          const em = (a.email || '').toLowerCase().trim();
+          if (em && (st === 'approved' || st === 'verified')) {
+            orgMap.set(em, {
+              id: a.id,
+              email: a.email,
+              name: a.host_name || a.name || em.split('@')[0],
+              college: a.college || 'Campus Esports',
+              role: 'ORGANIZER',
+              status: 'APPROVED',
+              tag: a.tag || `HOST#1001`
+            });
+          }
+        }
+      }
+      if (uRes.data && Array.isArray(uRes.data)) {
+        for (const u of uRes.data) {
+          const rl = (u.role || '').toUpperCase().trim();
+          const em = (u.email || '').toLowerCase().trim();
+          if (em && (rl === 'ORGANIZER' || rl === 'ADMIN') && !orgMap.has(em)) {
+            orgMap.set(em, {
+              id: u.id,
+              email: u.email,
+              name: u.name || u.host_name || em.split('@')[0],
+              college: u.college || 'Campus Esports',
+              role: rl === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
+              status: 'APPROVED',
+              tag: u.tag || `HOST#1001`
+            });
+          }
+        }
+      }
+      return NextResponse.json({ success: true, data: Array.from(orgMap.values()) }, { status: 200 });
     }
 
     if (subSegment === 'analytics' && method === 'GET') {
