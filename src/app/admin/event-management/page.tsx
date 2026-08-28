@@ -19,7 +19,7 @@ import {
   Link as LinkIcon,
   Sparkles
 } from 'lucide-react';
-import { flaskApi } from '@/lib/flask-api';
+import { flaskApi, getCached } from '@/lib/flask-api';
 import { getApiBaseUrl } from '@/lib/api-config';
 
 const GAME_PRESET_IMAGES: Record<string, string> = {
@@ -32,7 +32,7 @@ const GAME_PRESET_IMAGES: Record<string, string> = {
 };
 
 export default function AdminEventManagementPage() {
-  const [tournaments, setTournaments] = useState<any[]>([]);
+  const [tournaments, setTournaments] = useState<any[]>(() => getCached<any[]>('admin:tournaments') || []);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [imageMode, setImageMode] = useState<'upload' | 'url' | 'preset'>('upload');
   const [previewImage, setPreviewImage] = useState<string>('/valorant.jpg');

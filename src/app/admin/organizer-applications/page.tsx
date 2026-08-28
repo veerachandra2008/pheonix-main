@@ -28,7 +28,7 @@ import {
   DollarSign,
   ArrowUpRight
 } from 'lucide-react';
-import { flaskApi } from '@/lib/flask-api';
+import { flaskApi, getCached } from '@/lib/flask-api';
 
 type CategoryType = 'organizers' | 'teams' | 'colleges' | 'tournaments';
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
@@ -37,7 +37,7 @@ export default function AdminApplicationsMasterPage() {
   const [activeCategory, setActiveCategory] = useState<CategoryType>('organizers');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
   const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const [applicationsData, setApplicationsData] = useState<{
@@ -52,22 +52,27 @@ export default function AdminApplicationsMasterPage() {
       pending_tournaments: number;
       total_pending: number;
     };
-  }>({
-    organizers: [],
-    teams: [],
-    colleges: [],
-    tournaments: [],
-    stats: {
-      pending_organizers: 0,
-      pending_teams: 0,
-      pending_colleges: 0,
-      pending_tournaments: 0,
-      total_pending: 0,
-    },
+  }>(() => {
+    const cached = getCached<any>('admin:applications');
+    if (cached) return cached;
+
+    return {
+      organizers: [],
+      teams: [],
+      colleges: [],
+      tournaments: [],
+      stats: {
+        pending_organizers: 0,
+        pending_teams: 0,
+        pending_colleges: 0,
+        pending_tournaments: 0,
+        total_pending: 0,
+      },
+    };
   });
 
-  const loadAllApplications = async () => {
-    setLoading(true);
+  const loadAllApplications = async (isManual: any = false) => {
+    if (isManual === true) setLoading(true);
     try {
       const res = await flaskApi.getApplications();
       if (res.success && res.data) {

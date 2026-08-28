@@ -15,16 +15,16 @@ import {
   XCircle,
   BadgeCheck
 } from 'lucide-react';
-import { flaskApi } from '@/lib/flask-api';
+import { flaskApi, getCached } from '@/lib/flask-api';
 
 export default function AdminTeamsPage() {
   const [searchTerm, setSearchTerm] = useState('');
-  const [teams, setTeams] = useState<any[]>([]);
+  const [teams, setTeams] = useState<any[]>(() => getCached<any[]>('admin:teams') || []);
   const [selectedGame, setSelectedGame] = useState('All Games');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
-  const loadTeams = async () => {
-    setLoading(true);
+  const loadTeams = async (isManual: any = false) => {
+    if (isManual === true) setLoading(true);
     try {
       const res = await flaskApi.getTeams();
       if (res.success && Array.isArray(res.data)) {

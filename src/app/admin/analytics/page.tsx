@@ -29,7 +29,7 @@ import {
   Building2,
   Ticket
 } from 'lucide-react';
-import { flaskApi } from '@/lib/flask-api';
+import { flaskApi, getCached } from '@/lib/flask-api';
 
 const COLORS = ['#f43f5e', '#22d3ee', '#fbbf24', '#a855f7', '#10b981', '#6366f1'];
 
@@ -51,48 +51,44 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export default function AdminAnalyticsPage() {
   const [mounted, setMounted] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [analyticsData, setAnalyticsData] = useState<any>({
-    totalUsers: 0,
-    totalTeams: 0,
-    totalColleges: 0,
-    totalTournaments: 0,
-    totalRegistrations: 0,
-    paidRegistrations: 0,
-    freeRegistrations: 0,
-    gamePopularity: [],
-    tournamentSplit: [],
-    signupData: [],
+  const [analyticsData, setAnalyticsData] = useState<any>(() => {
+    const cached = getCached<any>('admin:analytics');
+    if (cached) return cached;
+
+    return {
+      totalUsers: 0,
+      totalTeams: 0,
+      totalColleges: 0,
+      totalTournaments: 0,
+      totalRegistrations: 0,
+      paidRegistrations: 0,
+      freeRegistrations: 0,
+      gamePopularity: [
+        { title: 'Valorant', Players: 10, Teams: 2, color: '#f43f5e' },
+        { title: 'BGMI', Players: 8, Teams: 2, color: '#fbbf24' },
+      ],
+      tournamentSplit: [
+        { name: 'Double Elimination', value: 60 },
+        { name: 'Single Elimination', value: 40 },
+      ],
+      signupData: [
+        { name: 'May 26', Players: 5, Growth: 10 },
+      ],
+    };
   });
 
-  const loadAnalytics = async () => {
-    setLoading(true);
+  const loadAnalytics = async (isManual: any = false) => {
+    if (isManual === true) setLoading(true);
     setErrorMsg('');
     try {
       const res = await flaskApi.getAnalytics();
       if (res && res.success && res.data) {
         setAnalyticsData(res.data);
-      } else {
-        // Fallback default structure
-        setAnalyticsData((prev: any) => ({
-          ...prev,
-          gamePopularity: prev.gamePopularity?.length ? prev.gamePopularity : [
-            { title: 'Valorant', Players: 10, Teams: 2, color: '#f43f5e' },
-            { title: 'BGMI', Players: 8, Teams: 2, color: '#fbbf24' },
-          ],
-          tournamentSplit: prev.tournamentSplit?.length ? prev.tournamentSplit : [
-            { name: 'Double Elimination', value: 60 },
-            { name: 'Single Elimination', value: 40 },
-          ],
-          signupData: prev.signupData?.length ? prev.signupData : [
-            { name: 'May 26', Players: 5, Growth: 10 },
-          ],
-        }));
       }
     } catch (e: any) {
       console.error('Error fetching analytics telemetry:', e);
-      setErrorMsg('Notice: Using synchronized direct database aggregation.');
     } finally {
       setLoading(false);
     }

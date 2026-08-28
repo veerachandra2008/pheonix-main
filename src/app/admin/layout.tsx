@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Ticket
 } from 'lucide-react';
+import { flaskApi } from '@/lib/flask-api';
 
 export default function AdminLayout({
   children,
@@ -50,6 +51,7 @@ export default function AdminLayout({
 
         if (role === 'admin' || email === 'admin@xenova.gg') {
           setIsAdmin(true);
+          flaskApi.preloadAdminData();
         } else {
           setIsAdmin(false);
           router.replace('/admin/login');

@@ -3,16 +3,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { BadgeCheck, Building2, Search, ShieldCheck, Trash2, XCircle, RefreshCw, Plus, CheckCircle2 } from 'lucide-react';
-import { flaskApi } from '@/lib/flask-api';
+import { flaskApi, getCached } from '@/lib/flask-api';
 
 export default function AdminCollegesPage() {
   const [searchTerm, setSearchTerm] = useState('');
-  const [colleges, setColleges] = useState<any[]>([]);
+  const [colleges, setColleges] = useState<any[]>(() => getCached<any[]>('admin:colleges') || []);
   const [statusFilter, setStatusFilter] = useState('All Status');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
-  const loadColleges = async () => {
-    setLoading(true);
+  const loadColleges = async (isManual: any = false) => {
+    if (isManual === true) setLoading(true);
     try {
       const res = await flaskApi.getColleges();
       if (res.success && Array.isArray(res.data)) {

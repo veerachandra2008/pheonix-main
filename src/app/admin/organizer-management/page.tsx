@@ -16,7 +16,7 @@ import {
   Award
 } from 'lucide-react';
 
-import { flaskApi } from '@/lib/flask-api';
+import { flaskApi, getCached } from '@/lib/flask-api';
 
 interface Organizer {
   id?: string | number;
@@ -48,13 +48,24 @@ function hashString(str: string): number {
 }
 
 export default function AdminOrganizerManagementPage() {
-  const [organizers, setOrganizers] = useState<Organizer[]>([]);
-  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [organizers, setOrganizers] = useState<Organizer[]>(() => {
+    const cached = getCached<any[]>('admin:organizers');
+    if (!cached) return [];
+    return cached.map(o => ({
+      id: o.id,
+      email: o.email,
+      name: o.name || o.host_name || o.hostName || 'Verified Host',
+      college: o.college || 'Independent Campus',
+      role: (o.role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
+      tag: o.tag || `HOST#${Math.abs(hashString(o.email || '')) % 9000 + 1000}`,
+    }));
+  });
+  const [tournaments, setTournaments] = useState<Tournament[]>(() => getCached<any[]>('admin:tournaments') || []);
   const [selectedOrganizer, setSelectedOrganizer] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (isManual: any = false) => {
+    if (isManual === true) setLoading(true);
     try {
       let orgList: Organizer[] = [];
       const seen = new Set<string>();

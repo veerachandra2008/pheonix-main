@@ -16,29 +16,38 @@ import {
   CheckCircle2,
   Ticket
 } from 'lucide-react';
-import { flaskApi } from '@/lib/flask-api';
+import { flaskApi, getCached } from '@/lib/flask-api';
 
 export default function AdminDashboardPage() {
-  const [stats, setStats] = useState({
-    totalPlayers: 0,
-    totalTeams: 0,
-    totalColleges: 0,
-    totalTournaments: 0,
-    totalRegistrations: 0,
-    pendingApplications: 0,
-    pendingColleges: 0,
-    pendingTeams: 0,
-    pendingTournaments: 0,
-    liveTournaments: 0,
+  const [stats, setStats] = useState(() => {
+    const cachedUsers = getCached<any[]>('admin:users') || [];
+    const cachedTeams = getCached<any[]>('admin:teams') || [];
+    const cachedColleges = getCached<any[]>('admin:colleges') || [];
+    const cachedTournaments = getCached<any[]>('admin:tournaments') || [];
+    const cachedRegs = getCached<any[]>('admin:regs::') || [];
+    const cachedApps = getCached<any>('admin:applications');
+
+    return {
+      totalPlayers: cachedUsers.length,
+      totalTeams: cachedTeams.length,
+      totalColleges: cachedColleges.length,
+      totalTournaments: cachedTournaments.length,
+      totalRegistrations: cachedRegs.length,
+      pendingApplications: cachedApps?.stats?.pending_organizers || 0,
+      pendingColleges: cachedApps?.stats?.pending_colleges || 0,
+      pendingTeams: cachedApps?.stats?.pending_teams || 0,
+      pendingTournaments: cachedApps?.stats?.pending_tournaments || 0,
+      liveTournaments: cachedTournaments.filter((t: any) => (t.status || '').toLowerCase() === 'live').length,
+    };
   });
 
-  const [recentUsers, setRecentUsers] = useState<any[]>([]);
-  const [recentApplications, setRecentApplications] = useState<any[]>([]);
-  const [recentTournaments, setRecentTournaments] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [recentUsers, setRecentUsers] = useState<any[]>(() => (getCached<any[]>('admin:users') || []).slice(0, 5));
+  const [recentApplications, setRecentApplications] = useState<any[]>(() => (getCached<any>('admin:applications')?.organizers || []).slice(0, 4));
+  const [recentTournaments, setRecentTournaments] = useState<any[]>(() => (getCached<any[]>('admin:tournaments') || []).slice(0, 4));
+  const [loading, setLoading] = useState(false);
 
-  const loadDashboardData = async () => {
-    setLoading(true);
+  const loadDashboardData = async (isManual: any = false) => {
+    if (isManual === true) setLoading(true);
     try {
       // Parallel fetch across all database endpoints for sub-second loading speed
       const [appsRes, usersRes, teamsRes, collegesRes, tournsRes, regsRes] = await Promise.all([

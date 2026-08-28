@@ -27,20 +27,20 @@ import {
   ChevronRight
 } from 'lucide-react';
 import Link from 'next/link';
-import { flaskApi } from '@/lib/flask-api';
+import { flaskApi, getCached } from '@/lib/flask-api';
 import { getApiBaseUrl } from '@/lib/api-config';
 
 export default function AdminTournamentRegistrationsPage() {
-  const [tournaments, setTournaments] = useState<any[]>([]);
-  const [registrations, setRegistrations] = useState<any[]>([]);
+  const [tournaments, setTournaments] = useState<any[]>(() => getCached<any[]>('admin:tournaments') || []);
+  const [registrations, setRegistrations] = useState<any[]>(() => getCached<any[]>('admin:regs::') || []);
   const [selectedTournamentSlug, setSelectedTournamentSlug] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'free'>('all');
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(false);
   const [copiedPassId, setCopiedPassId] = useState<string | null>(null);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (isManual: any = false) => {
+    if (isManual === true) setLoading(true);
     try {
       const [tournRes, regRes] = await Promise.all([
         flaskApi.getTournaments(),
@@ -49,14 +49,9 @@ export default function AdminTournamentRegistrationsPage() {
 
       if (tournRes.success && Array.isArray(tournRes.data)) {
         setTournaments(tournRes.data);
-      } else {
-        setTournaments([]);
       }
-
       if (regRes.success && Array.isArray(regRes.data)) {
         setRegistrations(regRes.data);
-      } else {
-        setRegistrations([]);
       }
     } catch (err) {
       console.error('Failed to load tournament registrations:', err);
@@ -69,28 +64,63 @@ export default function AdminTournamentRegistrationsPage() {
     loadData();
   }, []);
 
-  // Map of registrations per tournament slug
+  const normalizeSlug = (s?: string) => (s || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+
+  // Map of registrations per tournament slug (deduplicated 1:1 count)
   const tournamentRegCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const reg of registrations) {
-      const slug = reg.tournament_slug || reg.tournamentSlug || 'other';
-      counts[slug] = (counts[slug] || 0) + 1;
+      const regSlug = normalizeSlug(reg.tournament_slug || reg.tournamentSlug || reg.tournament_title || reg.tournamentTitle);
+      let matched = false;
+      for (const t of tournaments) {
+        const tSlug = normalizeSlug(t.slug);
+        const tTitle = normalizeSlug(t.title);
+        if (regSlug === tSlug || regSlug === tTitle || (tSlug && regSlug.includes(tSlug)) || (regSlug && tSlug.includes(regSlug))) {
+          counts[t.slug] = (counts[t.slug] || 0) + 1;
+          matched = true;
+          break; // Count exactly once per tournament
+        }
+      }
+      if (!matched) {
+        const rawSlug = reg.tournament_slug || reg.tournamentSlug || 'other';
+        counts[rawSlug] = (counts[rawSlug] || 0) + 1;
+      }
     }
     return counts;
-  }, [registrations]);
+  }, [registrations, tournaments]);
 
   // Selected tournament details
   const activeTournament = useMemo(() => {
     if (selectedTournamentSlug === 'all') return null;
-    return tournaments.find((t) => t.slug === selectedTournamentSlug) || null;
+    return tournaments.find((t) => t.slug === selectedTournamentSlug || normalizeSlug(t.slug) === normalizeSlug(selectedTournamentSlug)) || null;
   }, [tournaments, selectedTournamentSlug]);
+
+  // Check if a registration is a paid entry
+  const checkIsPaid = (reg: any) => {
+    const pId = reg.payment_id || reg.paymentId;
+    const oId = reg.order_id || reg.orderId;
+    const pStatus = (reg.payment_status || reg.paymentStatus || '').toString().toUpperCase().trim();
+    const fee = (reg.tournament_fee || reg.tournamentFee || '').toString().toLowerCase().trim();
+
+    if (pId && pId !== 'FREE' && pId !== '') return true;
+    if (oId && oId !== '') return true;
+    if (pStatus === 'SUCCESS' || pStatus === 'PAID' || pStatus === 'COMPLETED') return true;
+    if (fee && fee !== 'free' && fee !== '₹0' && fee !== '0') return true;
+
+    return false;
+  };
 
   // Filtered registrations
   const filteredRegistrations = useMemo(() => {
     return registrations.filter((reg) => {
-      const tournSlug = (reg.tournament_slug || reg.tournamentSlug || '').toLowerCase();
+      const regSlug = normalizeSlug(reg.tournament_slug || reg.tournamentSlug || reg.tournament_title || reg.tournamentTitle);
+      const selSlug = normalizeSlug(selectedTournamentSlug);
+
       const matchesTournament =
-        selectedTournamentSlug === 'all' || tournSlug === selectedTournamentSlug.toLowerCase();
+        selectedTournamentSlug === 'all' ||
+        regSlug === selSlug ||
+        (selSlug && regSlug.includes(selSlug)) ||
+        (regSlug && selSlug.includes(regSlug));
 
       const teamName = reg.team_name || reg.teamName || '';
       const captainName = reg.captain_name || reg.captainName || '';
@@ -102,9 +132,9 @@ export default function AdminTournamentRegistrationsPage() {
       const matchesSearch = [teamName, captainName, college, email, passId, tournTitle]
         .join(' ')
         .toLowerCase()
-        .includes(searchTerm.toLowerCase());
+        .includes(searchTerm.toLowerCase().trim());
 
-      const isPaid = (reg.payment_status || reg.paymentStatus) === 'SUCCESS' && (reg.tournament_fee || reg.tournamentFee) !== 'Free';
+      const isPaid = checkIsPaid(reg);
       const matchesPayment =
         paymentFilter === 'all' ||
         (paymentFilter === 'paid' && isPaid) ||
@@ -418,7 +448,8 @@ export default function AdminTournamentRegistrationsPage() {
               const tournamentTitle = reg.tournament_title || reg.tournamentTitle || 'Esports Championship';
               const tournamentSlug = reg.tournament_slug || reg.tournamentSlug || '';
               const registeredAt = reg.registered_at || reg.registeredAt || 'Recent';
-              const isPaid = (reg.payment_status || reg.paymentStatus) === 'SUCCESS' && (reg.tournament_fee || reg.tournamentFee) !== 'Free';
+              const isPaid = checkIsPaid(reg);
+              const paymentId = reg.payment_id || reg.paymentId;
 
               return (
                 <motion.article
@@ -442,12 +473,17 @@ export default function AdminTournamentRegistrationsPage() {
                           {college}
                         </span>
                         {isPaid ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center gap-1">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center gap-1 font-mono">
                             <CheckCircle2 className="h-3 w-3" /> Paid Entry
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-sky-500/15 border border-sky-500/30 text-sky-400">
                             Free Entry
+                          </span>
+                        )}
+                        {paymentId && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/10 border border-emerald-500/20 text-emerald-400/90">
+                            ID: {paymentId}
                           </span>
                         )}
                       </div>
