@@ -101,11 +101,25 @@ export default function AdminApplicationsMasterPage() {
       // Direct Supabase synchronization
       try {
         const { supabase } = await import('@/lib/supabase');
-        await supabase.from('users').update({ role: targetRole }).eq('email', cleanEmail);
-        if (action === 'reject') {
-          await supabase.from('organizer_applications').update({ status: 'REJECTED' }).eq('email', cleanEmail);
-        } else {
-          await supabase.from('organizer_applications').update({ status: 'APPROVED' }).eq('email', cleanEmail);
+        
+        // 1. Update application status
+        await supabase
+          .from('organizer_applications')
+          .update({ status: action === 'approve' ? 'APPROVED' : 'REJECTED' })
+          .ilike('email', cleanEmail);
+
+        // 2. Update or insert in users table
+        const { data: existingUsers } = await supabase.from('users').select('*').ilike('email', cleanEmail);
+        if (existingUsers && existingUsers.length > 0) {
+          await supabase.from('users').update({ role: targetRole }).ilike('email', cleanEmail);
+        } else if (action === 'approve') {
+          await supabase.from('users').insert({
+            email: cleanEmail,
+            name: cleanEmail.split('@')[0],
+            college: 'Campus Esports',
+            role: 'ORGANIZER',
+            tag: `HOST#${Math.floor(1000 + Math.random() * 9000)}`,
+          });
         }
       } catch (sbErr) {
         console.warn('Direct Supabase role update notice:', sbErr);

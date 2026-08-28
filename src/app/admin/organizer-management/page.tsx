@@ -67,25 +67,83 @@ export default function AdminOrganizerManagementPage() {
   const loadData = async (isManual: any = false) => {
     if (isManual === true) setLoading(true);
     try {
-      const [orgRes, tournRes] = await Promise.all([
-        flaskApi.getOrganizers(),
-        flaskApi.getTournaments(),
-      ]);
+      const orgMap = new Map<string, Organizer>();
 
-      if (orgRes.success && Array.isArray(orgRes.data)) {
-        setOrganizers(orgRes.data.map((o: any) => ({
-          id: o.id,
-          email: o.email,
-          name: o.name || o.host_name || o.hostName || 'Verified Host',
-          college: o.college || 'Independent Campus',
-          role: (o.role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
-          tag: o.tag || `HOST#${Math.abs(hashString(o.email || '')) % 9000 + 1000}`,
-        })));
+      // 1. Direct Supabase Query (<30ms)
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        const [appsRes, usersRes, tournsRes] = await Promise.all([
+          supabase.from('organizer_applications').select('*'),
+          supabase.from('users').select('*'),
+          supabase.from('tournaments').select('*'),
+        ]);
+
+        if (appsRes.data && Array.isArray(appsRes.data)) {
+          for (const a of appsRes.data) {
+            const status = (a.status || a.application_status || '').toLowerCase().trim();
+            const email = (a.email || '').toLowerCase().trim();
+            // STRICTLY APPROVED ORGANIZER APPLICATIONS ONLY
+            if (email && (status === 'approved' || status === 'verified')) {
+              orgMap.set(email, {
+                id: a.id,
+                email: a.email,
+                name: a.host_name || a.name || a.applicant_name || email.split('@')[0],
+                college: a.college || 'Campus Esports',
+                role: 'ORGANIZER',
+                tag: a.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+              });
+            }
+          }
+        }
+
+        if (usersRes.data && Array.isArray(usersRes.data)) {
+          for (const u of usersRes.data) {
+            const role = (u.role || '').toUpperCase().trim();
+            const email = (u.email || '').toLowerCase().trim();
+            // STRICTLY USERS WITH ORGANIZER OR ADMIN ROLES ONLY
+            if (email && (role === 'ORGANIZER' || role === 'ADMIN')) {
+              if (!orgMap.has(email)) {
+                orgMap.set(email, {
+                  id: u.id,
+                  email: u.email,
+                  name: u.name || u.host_name || email.split('@')[0],
+                  college: u.college || 'Campus Esports',
+                  role: role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
+                  tag: u.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+                });
+              }
+            }
+          }
+        }
+
+        if (tournsRes.data && Array.isArray(tournsRes.data)) {
+          setTournaments(tournsRes.data);
+        }
+      } catch (sbErr) {
+        console.warn('Direct Supabase fetch notice in organizer-management:', sbErr);
       }
 
-      if (tournRes.success && Array.isArray(tournRes.data)) {
-        setTournaments(tournRes.data);
-      }
+      // 2. Fallback / Merge from API
+      try {
+        const orgRes = await flaskApi.getOrganizers();
+        if (orgRes.success && Array.isArray(orgRes.data)) {
+          for (const o of orgRes.data) {
+            const email = (o.email || '').toLowerCase().trim();
+            if (email && !orgMap.has(email)) {
+              orgMap.set(email, {
+                id: o.id,
+                email: o.email,
+                name: o.name || o.host_name || o.hostName || 'Verified Host',
+                college: o.college || 'Independent Campus',
+                role: (o.role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
+                tag: o.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+              });
+            }
+          }
+        }
+      } catch {}
+
+      setOrganizers(Array.from(orgMap.values()));
     } catch (err) {
       console.error('Error loading organizer data:', err);
     } finally {

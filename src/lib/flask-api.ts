@@ -33,6 +33,15 @@ export interface LoginUserParams {
 const MEM_CACHE = new Map<string, { data: any; exp: number }>();
 const DEFAULT_TTL_MS = 60000; // 60 seconds
 
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+}
+
 export function getCached<T>(key: string): T | null {
   const item = MEM_CACHE.get(key);
   if (item && Date.now() < item.exp) {
@@ -396,63 +405,93 @@ export const flaskApi = {
   async getOrganizers() {
     const cacheKey = 'admin:organizers';
     const cached = getCached<any[]>(cacheKey);
-    if (cached) return { success: true, data: cached };
+    if (cached && Array.isArray(cached) && cached.length > 0) return { success: true, data: cached };
 
     const organizersMap: Record<string, any> = {};
 
     try {
-      // 1. Fetch users with role ORGANIZER or ADMIN
-      const { data: usersData } = await supabase
-        .from('users')
-        .select('*')
-        .in('role', ['ORGANIZER', 'ADMIN', 'organizer', 'admin']);
-
-      if (usersData && Array.isArray(usersData)) {
-        for (const u of usersData) {
-          const email = (u.email || '').toLowerCase().trim();
-          if (email) {
-            organizersMap[email] = {
-              id: u.id,
-              email: u.email,
-              name: u.name || u.host_name || 'Verified Organizer',
-              college: u.college || 'Campus Esports',
-              role: (u.role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
-              tag: u.tag || 'ORGANIZER#1001',
-              status: 'APPROVED',
-            };
-          }
-        }
-      }
-
-      // 2. Fetch approved applications from organizer_applications
-      const { data: appsData } = await supabase
-        .from('organizer_applications')
-        .select('*')
-        .ilike('status', '%approved%');
+      // 1. Fetch from organizer_applications (all approved/verified or active)
+      const { data: appsData } = await supabase.from('organizer_applications').select('*');
 
       if (appsData && Array.isArray(appsData)) {
         for (const a of appsData) {
+          const status = (a.status || a.application_status || '').toLowerCase().trim();
           const email = (a.email || '').toLowerCase().trim();
-          if (email) {
+          // STRICTLY APPROVED ORGANIZERS ONLY
+          if (email && (status === 'approved' || status === 'verified')) {
             organizersMap[email] = {
-              id: a.id || organizersMap[email]?.id,
+              id: a.id,
               email: a.email,
-              name: a.host_name || a.name || organizersMap[email]?.name || 'Verified Host',
-              college: a.college || organizersMap[email]?.college || 'Campus Esports',
-              role: organizersMap[email]?.role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
-              tag: a.tag || organizersMap[email]?.tag || 'HOST#1001',
+              name: a.host_name || a.name || a.applicant_name || email.split('@')[0],
+              college: a.college || 'Campus Esports',
+              role: 'ORGANIZER',
+              tag: a.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
               status: 'APPROVED',
               ...a,
             };
           }
         }
       }
+
+      // 2. Fetch users with role ORGANIZER or ADMIN
+      const { data: usersData } = await supabase.from('users').select('*');
+
+      if (usersData && Array.isArray(usersData)) {
+        for (const u of usersData) {
+          const role = (u.role || '').toUpperCase().trim();
+          const email = (u.email || '').toLowerCase().trim();
+          // STRICTLY ORGANIZER OR ADMIN ROLE ONLY
+          if (email && (role === 'ORGANIZER' || role === 'ADMIN')) {
+            if (!organizersMap[email]) {
+              organizersMap[email] = {
+                id: u.id,
+                email: u.email,
+                name: u.name || u.host_name || email.split('@')[0],
+                college: u.college || 'Campus Esports',
+                role: role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
+                tag: u.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+                status: 'APPROVED',
+              };
+            }
+          }
+        }
+      }
+
+      // 3. Check Backend /api/auth/organizers endpoint with fast timeout
+      try {
+        const apiBase = getApiBaseUrl();
+        const res = await fetchWithTimeout(`${apiBase}/auth/organizers`, {}, 2000);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data)) {
+            for (const o of json.data) {
+              const email = (o.email || '').toLowerCase().trim();
+              const status = (o.status || '').toLowerCase().trim();
+              const role = (o.role || '').toUpperCase().trim();
+              if (email && !organizersMap[email] && (status === 'approved' || role === 'ORGANIZER' || role === 'ADMIN')) {
+                organizersMap[email] = {
+                  id: o.id,
+                  email: o.email,
+                  name: o.name || o.host_name || email.split('@')[0],
+                  college: o.college || 'Campus Esports',
+                  role: role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
+                  tag: o.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+                  status: 'APPROVED',
+                  ...o,
+                };
+              }
+            }
+          }
+        }
+      } catch {}
     } catch (e) {
       console.warn('Error fetching organizers:', e);
     }
 
     const result = Object.values(organizersMap);
-    setCached(cacheKey, result);
+    if (result.length > 0) {
+      setCached(cacheKey, result);
+    }
     return { success: true, data: result };
   },
 
