@@ -147,7 +147,7 @@ export default function LiveTelecaster() {
                 muted={isMuted}
                 loop
                 playsInline
-                preload="metadata"
+                preload="auto"
                 disablePictureInPicture
                 disableRemotePlayback
                 onTimeUpdate={handleTimeUpdate}

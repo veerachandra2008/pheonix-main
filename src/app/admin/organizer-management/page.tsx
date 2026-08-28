@@ -67,108 +67,27 @@ export default function AdminOrganizerManagementPage() {
   const loadData = async (isManual: any = false) => {
     if (isManual === true) setLoading(true);
     try {
-      let orgList: Organizer[] = [];
-      const seen = new Set<string>();
-      let fetchedFromApi = false;
+      const [orgRes, tournRes] = await Promise.all([
+        flaskApi.getOrganizers(),
+        flaskApi.getTournaments(),
+      ]);
 
-      // 1. Fetch organizers from backend API (strictly approved only)
-      try {
-        const orgRes = await flaskApi.getOrganizers();
-        if (orgRes.success && Array.isArray(orgRes.data)) {
-          fetchedFromApi = true;
-          for (const o of orgRes.data) {
-            const email = (o.email || '').toLowerCase().trim();
-            const status = (o.status || '').toLowerCase();
-            const role = (o.role || '').toUpperCase();
-            // ONLY include approved organizers or users with ORGANIZER/ADMIN role
-            if (email && !seen.has(email) && (status === 'approved' || role === 'ORGANIZER' || role === 'ADMIN')) {
-              seen.add(email);
-              orgList.push({
-                id: o.id,
-                email: o.email,
-                name: o.name || o.host_name || o.hostName || 'Verified Host',
-                college: o.college || 'Independent Campus',
-                role: role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
-                tag: o.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
-              });
-            }
-          }
-        }
-      } catch (apiErr) {
-        console.warn('Flask organizers fetch notice:', apiErr);
+      if (orgRes.success && Array.isArray(orgRes.data)) {
+        setOrganizers(orgRes.data.map((o: any) => ({
+          id: o.id,
+          email: o.email,
+          name: o.name || o.host_name || o.hostName || 'Verified Host',
+          college: o.college || 'Independent Campus',
+          role: (o.role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
+          tag: o.tag || `HOST#${Math.abs(hashString(o.email || '')) % 9000 + 1000}`,
+        })));
       }
 
-      // 2. Direct Supabase Fallback only if API was unreachable
-      if (!fetchedFromApi) {
-        try {
-          const { supabase } = await import('@/lib/supabase');
-          const { data: appData } = await supabase
-            .from('organizer_applications')
-            .select('*')
-            .ilike('status', 'approved');
-
-          if (appData && Array.isArray(appData)) {
-            for (const app of appData) {
-              const status = (app.status || '').toLowerCase();
-              const email = (app.email || '').toLowerCase().trim();
-              if (status === 'approved' && email && !seen.has(email)) {
-                seen.add(email);
-                orgList.push({
-                  id: app.id,
-                  email: app.email,
-                  name: app.host_name || app.name || 'Verified Host',
-                  college: app.college || 'Independent Campus',
-                  role: 'ORGANIZER',
-                  tag: `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
-                });
-              }
-            }
-          }
-        } catch (sbErr) {
-          console.warn('Supabase organizer fetch notice:', sbErr);
-        }
+      if (tournRes.success && Array.isArray(tournRes.data)) {
+        setTournaments(tournRes.data);
       }
-
-      setOrganizers(orgList);
-
-      // 3. Fetch tournaments from Direct Supabase and Backend API
-      let tournList: Tournament[] = [];
-      const seenTourns = new Set<string>();
-
-      try {
-        const { supabase } = await import('@/lib/supabase');
-        const { data: sbTourns } = await supabase.from('tournaments').select('*');
-        if (sbTourns && Array.isArray(sbTourns)) {
-          for (const t of sbTourns) {
-            const key = t.slug || String(t.id) || t.title;
-            if (key && !seenTourns.has(key)) {
-              seenTourns.add(key);
-              tournList.push(t);
-            }
-          }
-        }
-      } catch (sbErr) {
-        console.warn('Supabase tournaments fetch notice:', sbErr);
-      }
-
-      try {
-        const tournRes = await flaskApi.getTournaments();
-        if (tournRes.success && Array.isArray(tournRes.data)) {
-          for (const t of tournRes.data) {
-            const key = t.slug || String(t.id) || t.title;
-            if (key && !seenTourns.has(key)) {
-              seenTourns.add(key);
-              tournList.push(t);
-            }
-          }
-        }
-      } catch (apiErr) {
-        console.warn('API tournaments fetch notice:', apiErr);
-      }
-
-      setTournaments(tournList);
-    } catch (e) {
-      console.error('Failed to load organizer data from server:', e);
+    } catch (err) {
+      console.error('Error loading organizer data:', err);
     } finally {
       setLoading(false);
     }

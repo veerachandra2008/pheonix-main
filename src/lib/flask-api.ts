@@ -398,8 +398,60 @@ export const flaskApi = {
     const cached = getCached<any[]>(cacheKey);
     if (cached) return { success: true, data: cached };
 
-    const { data } = await supabase.from('users').select('*').in('role', ['ORGANIZER', 'ADMIN', 'organizer', 'admin']);
-    const result = data || [];
+    const organizersMap: Record<string, any> = {};
+
+    try {
+      // 1. Fetch users with role ORGANIZER or ADMIN
+      const { data: usersData } = await supabase
+        .from('users')
+        .select('*')
+        .in('role', ['ORGANIZER', 'ADMIN', 'organizer', 'admin']);
+
+      if (usersData && Array.isArray(usersData)) {
+        for (const u of usersData) {
+          const email = (u.email || '').toLowerCase().trim();
+          if (email) {
+            organizersMap[email] = {
+              id: u.id,
+              email: u.email,
+              name: u.name || u.host_name || 'Verified Organizer',
+              college: u.college || 'Campus Esports',
+              role: (u.role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
+              tag: u.tag || 'ORGANIZER#1001',
+              status: 'APPROVED',
+            };
+          }
+        }
+      }
+
+      // 2. Fetch approved applications from organizer_applications
+      const { data: appsData } = await supabase
+        .from('organizer_applications')
+        .select('*')
+        .ilike('status', '%approved%');
+
+      if (appsData && Array.isArray(appsData)) {
+        for (const a of appsData) {
+          const email = (a.email || '').toLowerCase().trim();
+          if (email) {
+            organizersMap[email] = {
+              id: a.id || organizersMap[email]?.id,
+              email: a.email,
+              name: a.host_name || a.name || organizersMap[email]?.name || 'Verified Host',
+              college: a.college || organizersMap[email]?.college || 'Campus Esports',
+              role: organizersMap[email]?.role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
+              tag: a.tag || organizersMap[email]?.tag || 'HOST#1001',
+              status: 'APPROVED',
+              ...a,
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error fetching organizers:', e);
+    }
+
+    const result = Object.values(organizersMap);
     setCached(cacheKey, result);
     return { success: true, data: result };
   },

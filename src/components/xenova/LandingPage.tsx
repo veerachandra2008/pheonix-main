@@ -177,7 +177,7 @@ export default function LandingPage() {
               muted
               loop
               playsInline
-              preload="metadata"
+              preload="auto"
               disablePictureInPicture
               disableRemotePlayback
               poster="/image.png"
