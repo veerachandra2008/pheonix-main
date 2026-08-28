@@ -32,25 +32,37 @@ export default function AdminLayout({
       return;
     }
 
-    try {
-      const session = localStorage.getItem('xenova_admin_session');
-      if (!session) {
-        setIsAdmin(false);
-        router.replace('/admin/login');
-        return;
-      }
+    const checkAdminAuth = () => {
+      try {
+        const adminSession = localStorage.getItem('xenova_admin_session');
+        const mainSession = localStorage.getItem('xenova_session');
+        const raw = adminSession || mainSession;
 
-      const parsed = JSON.parse(session);
-      if (parsed && (parsed.role === 'admin' || parsed.email === 'admin@xenova.gg')) {
-        setIsAdmin(true);
-      } else {
+        if (!raw) {
+          setIsAdmin(false);
+          router.replace('/admin/login');
+          return;
+        }
+
+        const parsed = JSON.parse(raw);
+        const role = (parsed?.role || '').toLowerCase();
+        const email = (parsed?.email || '').toLowerCase();
+
+        if (role === 'admin' || email === 'admin@xenova.gg') {
+          setIsAdmin(true);
+        } else {
+          setIsAdmin(false);
+          router.replace('/admin/login');
+        }
+      } catch {
         setIsAdmin(false);
         router.replace('/admin/login');
       }
-    } catch {
-      setIsAdmin(false);
-      router.replace('/admin/login');
-    }
+    };
+
+    checkAdminAuth();
+    window.addEventListener('xenova-auth-change', checkAdminAuth);
+    return () => window.removeEventListener('xenova-auth-change', checkAdminAuth);
   }, [pathname, router]);
 
   const handleLogout = () => {

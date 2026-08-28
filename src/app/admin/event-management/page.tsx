@@ -19,6 +19,8 @@ import {
   Link as LinkIcon,
   Sparkles
 } from 'lucide-react';
+import { flaskApi } from '@/lib/flask-api';
+import { getApiBaseUrl } from '@/lib/api-config';
 
 const GAME_PRESET_IMAGES: Record<string, string> = {
   'Valorant': '/valorant.jpg',
@@ -54,15 +56,9 @@ export default function AdminEventManagementPage() {
 
   const loadTournaments = async () => {
     try {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
-      const tournRes = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
-      const tournData = await tournRes.json();
-      if (tournData.success && Array.isArray(tournData.data)) {
-        setTournaments(tournData.data);
+      const res = await flaskApi.getTournaments();
+      if (res.success && Array.isArray(res.data)) {
+        setTournaments(res.data);
       } else {
         setTournaments([]);
       }
@@ -140,11 +136,7 @@ export default function AdminEventManagementPage() {
         filled: parseInt(formValues.filled) || 0,
       };
 
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
+      const apiBase = getApiBaseUrl();
       const res = await fetch(`${apiBase}/tournaments/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -152,7 +144,7 @@ export default function AdminEventManagementPage() {
       });
 
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok && !data.success) {
         throw new Error(data.message || 'Failed to save tournament in database');
       }
 
@@ -187,18 +179,8 @@ export default function AdminEventManagementPage() {
   const handleDelete = async (slug: string, title: string) => {
     if (!confirm(`Are you sure you want to permanently delete tournament "${title}" from the database and user portal?`)) return;
     try {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
-      const res = await fetch(`${apiBase}/tournaments/${slug}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-      if (res.ok) {
-        alert(`Tournament "${title}" deleted successfully from the database.`);
-      }
+      await flaskApi.deleteTournament(slug);
+      alert(`Tournament "${title}" deleted successfully from the database.`);
       await loadTournaments();
     } catch (e) {
       console.error(e);

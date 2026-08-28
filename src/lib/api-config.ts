@@ -1,37 +1,52 @@
 /**
  * Universal API configuration helper.
  * Ensures all API calls in deployment correctly route to the deployed Python API (/api)
- * while preserving localhost dev server support.
+ * while preserving localhost dev server support and preventing network hangs.
  */
 
-const PRODUCTION_RENDER_BACKEND = 'https://pheonix-main.onrender.com/api';
-
 export function getApiBaseUrl(): string {
-  // If an external deployed backend URL (Render, Railway, Fly.io) is provided in environment variables, use it directly!
-  const envUrl = process.env.NEXT_PUBLIC_FLASK_API_URL || PRODUCTION_RENDER_BACKEND;
-  if (envUrl && (envUrl.includes('render.com') || envUrl.includes('railway.app') || envUrl.includes('railway.internal') || envUrl.includes('fly.dev'))) {
-    return envUrl.endsWith('/') ? envUrl.slice(0, -1) : envUrl;
+  // If an external deployed backend URL (Render, Railway, Fly.io, etc.) is explicitly provided in environment variables, use it
+  const explicitEnvUrl = process.env.NEXT_PUBLIC_FLASK_API_URL?.trim();
+  if (explicitEnvUrl) {
+    return explicitEnvUrl.endsWith('/') ? explicitEnvUrl.slice(0, -1) : explicitEnvUrl;
   }
 
+  // Server-side rendering / Server Component environment:
   if (typeof window === 'undefined') {
-    // Server-side environment
     if (process.env.VERCEL_URL) {
       return `https://${process.env.VERCEL_URL}/api`;
     }
-    return envUrl || PRODUCTION_RENDER_BACKEND;
+    return 'http://127.0.0.1:5000/api';
   }
 
   // Client-side browser:
   const hostname = window.location.hostname;
-  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 
   if (!isLocalhost) {
-    if (envUrl && envUrl.startsWith('https://') && !envUrl.includes('localhost')) {
-      return envUrl.endsWith('/') ? envUrl.slice(0, -1) : envUrl;
-    }
-    return PRODUCTION_RENDER_BACKEND;
+    // In production deployment, use relative '/api' on the same origin.
+    // This works automatically on Vercel serverless, Render, Railway, and any reverse-proxy setup.
+    return '/api';
   }
 
   // Local development
-  return process.env.NEXT_PUBLIC_FLASK_API_URL || 'http://127.0.0.1:5000/api';
+  return 'http://127.0.0.1:5000/api';
+}
+
+/**
+ * Fetch wrapper with built-in timeout protection to ensure requests never hang indefinitely.
+ */
+export async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 4000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(id);
+  }
 }

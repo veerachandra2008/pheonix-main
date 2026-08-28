@@ -27,6 +27,8 @@ import {
   ChevronRight
 } from 'lucide-react';
 import Link from 'next/link';
+import { flaskApi } from '@/lib/flask-api';
+import { getApiBaseUrl } from '@/lib/api-config';
 
 export default function AdminTournamentRegistrationsPage() {
   const [tournaments, setTournaments] = useState<any[]>([]);
@@ -40,27 +42,19 @@ export default function AdminTournamentRegistrationsPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
       const [tournRes, regRes] = await Promise.all([
-        fetch(`${apiBase}/tournaments/`, { cache: 'no-store' }),
-        fetch(`${apiBase}/registrations`, { cache: 'no-store' }),
+        flaskApi.getTournaments(),
+        flaskApi.getRegistrationsByTournament(),
       ]);
 
-      const tournData = await tournRes.json();
-      const regData = await regRes.json();
-
-      if (tournData.success && Array.isArray(tournData.data)) {
-        setTournaments(tournData.data);
+      if (tournRes.success && Array.isArray(tournRes.data)) {
+        setTournaments(tournRes.data);
       } else {
         setTournaments([]);
       }
 
-      if (regData.success && Array.isArray(regData.data)) {
-        setRegistrations(regData.data);
+      if (regRes.success && Array.isArray(regRes.data)) {
+        setRegistrations(regRes.data);
       } else {
         setRegistrations([]);
       }
@@ -132,11 +126,7 @@ export default function AdminTournamentRegistrationsPage() {
     if (!confirm(`Are you sure you want to cancel and remove registration pass "${passId}" for squad "${teamName}"?`)) return;
 
     try {
-      const apiBase =
-        typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-          ? '/api'
-          : process.env.NEXT_PUBLIC_FLASK_API_URL || '/api';
-
+      const apiBase = getApiBaseUrl();
       const res = await fetch(`${apiBase}/registrations/${passId}`, {
         method: 'DELETE',
       });

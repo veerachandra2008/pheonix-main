@@ -1,80 +1,60 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, Gamepad2, Lock, Mail, ShieldAlert } from 'lucide-react';
+import { Eye, EyeOff, Gamepad2, Lock, Mail, ShieldAlert, Loader2, CheckCircle2 } from 'lucide-react';
+import { flaskApi } from '@/lib/flask-api';
 
 export default function AdminLoginPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [errorMsg, setErrorMsg] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [successMsg, setSuccessMsg] = useState('');
 
-  // Seed default admin in local storage
-  useEffect(() => {
-    try {
-      const rawUsers = localStorage.getItem('xenova_users');
-      let users = rawUsers ? JSON.parse(rawUsers) : [];
-      if (!Array.isArray(users)) users = [];
-
-      const adminExists = users.some((u: any) => u.email === 'admin@xenova.gg');
-      if (!adminExists) {
-        const defaultAdmin = {
-          name: 'Super Admin',
-          email: 'admin@xenova.gg',
-          password: 'admin123',
-          role: 'admin',
-          tag: 'ADMINISTRATOR',
-          bio: 'System Control Center Root User'
-        };
-        localStorage.setItem('xenova_users', JSON.stringify([...users, defaultAdmin]));
-      }
-    } catch (e) {
-      console.error('Failed to seed default admin', e);
-    }
-  }, []);
-
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErrorMsg('');
+    setSuccessMsg('');
 
     const email = formData.email.trim().toLowerCase();
     const password = formData.password.trim();
 
     if (!email || !password) {
-      setErrorMsg('Email and password are required.');
+      setErrorMsg('Admin email and security password are required.');
       return;
     }
 
+    setLoading(true);
+
     try {
-      const rawUsers = localStorage.getItem('xenova_users');
-      const users = rawUsers ? JSON.parse(rawUsers) : [];
+      // Authenticate against Backend API / Supabase / Root clearance
+      const authResult = await flaskApi.adminLogin(email, password);
 
-      const foundAdmin = users.find(
-        (user: any) =>
-          user.email?.toLowerCase() === email &&
-          (user.password === password || (email === 'admin@xenova.gg' && (password === 'admin' || password === 'admin123' || password === 'admin@123'))) &&
-          (user.role === 'admin' || email === 'admin@xenova.gg')
-      ) || (email === 'admin@xenova.gg' && (password === 'admin' || password === 'admin123' || password === 'admin@123') ? {
-        name: 'Super Admin',
-        email: 'admin@xenova.gg',
-        role: 'admin',
-        tag: 'ADMINISTRATOR',
-        bio: 'System Control Center Root User'
-      } : null);
-
-      if (!foundAdmin) {
-        setErrorMsg('Invalid admin credentials. Please use admin@xenova.gg / admin123 or admin.');
+      if (!authResult.success || !authResult.user) {
+        setErrorMsg(authResult.message || 'Invalid admin credentials.');
+        setLoading(false);
         return;
       }
 
-      localStorage.setItem('xenova_admin_session', JSON.stringify(foundAdmin));
-      localStorage.setItem('xenova_session', JSON.stringify(foundAdmin));
+      const adminUser = authResult.user;
+
+      // Store in browser session
+      localStorage.setItem('xenova_admin_session', JSON.stringify(adminUser));
+      localStorage.setItem('xenova_session', JSON.stringify(adminUser));
       window.dispatchEvent(new Event('xenova-auth-change'));
-      router.push('/admin/dashboard');
-    } catch (err) {
-      setErrorMsg('An error occurred during authentication.');
+
+      setSuccessMsg('Access Authorized. Initializing Command Center...');
+
+      setTimeout(() => {
+        router.replace('/admin/dashboard');
+      }, 500);
+    } catch (err: any) {
+      console.error('Admin authentication error:', err);
+      setErrorMsg('Authentication error. Please verify database connection and credentials.');
+      setLoading(false);
     }
   };
 
@@ -118,13 +98,22 @@ export default function AdminLoginPage() {
             </div>
           )}
 
+          {successMsg && (
+            <div className="mb-4 border border-emerald-500/30 bg-emerald-500/10 p-4 rounded-xl text-xs font-semibold text-emerald-400 flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              {successMsg}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <label className="block">
               <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Admin Email</span>
               <span className="mt-2 flex items-center gap-3 border border-white/10 bg-white/5 px-4 py-3 rounded-xl focus-within:border-rose-500/50 transition">
-                <Mail className="h-5 w-5 text-rose-500" />
+                <Mail className="h-5 w-5 text-rose-500 shrink-0" />
                 <input
                   type="email"
+                  required
+                  disabled={loading}
                   className="w-full bg-transparent text-white outline-none placeholder:text-slate-600 text-sm"
                   placeholder="admin@xenova.gg"
                   value={formData.email}
@@ -136,22 +125,35 @@ export default function AdminLoginPage() {
             <label className="block">
               <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Security Password</span>
               <span className="mt-2 flex items-center gap-3 border border-white/10 bg-white/5 px-4 py-3 rounded-xl focus-within:border-rose-500/50 transition">
-                <Lock className="h-5 w-5 text-rose-500" />
+                <Lock className="h-5 w-5 text-rose-500 shrink-0" />
                 <input
                   type={showPassword ? 'text' : 'password'}
+                  required
+                  disabled={loading}
                   className="w-full bg-transparent text-white outline-none placeholder:text-slate-600 text-sm"
                   placeholder="••••••••"
                   value={formData.password}
                   onChange={(event) => setFormData((current) => ({ ...current, password: event.target.value }))}
                 />
-                <button type="button" onClick={() => setShowPassword((value) => !value)} className="text-slate-500 hover:text-rose-400 transition">
+                <button type="button" onClick={() => setShowPassword((value) => !value)} className="text-slate-500 hover:text-rose-400 transition cursor-pointer">
                   {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>
               </span>
             </label>
 
-            <button type="submit" className="w-full py-4 px-6 mt-6 bg-rose-600 hover:bg-rose-500 transition text-xs font-black uppercase tracking-[0.2em] text-white shadow-lg shadow-rose-600/20 rounded-xl">
-              Initiate Control
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-4 px-6 mt-6 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 transition text-xs font-black uppercase tracking-[0.2em] text-white shadow-lg shadow-rose-600/20 rounded-xl flex items-center justify-center gap-2 cursor-pointer"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Authenticating System...
+                </>
+              ) : (
+                'Initiate Control'
+              )}
             </button>
           </form>
 
