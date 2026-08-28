@@ -68,8 +68,14 @@ export default function AdminLayout({
   }, [pathname, router]);
 
   const handleLogout = () => {
-    localStorage.removeItem('xenova_admin_session');
-    router.replace('/admin/login');
+    try {
+      localStorage.removeItem('xenova_admin_session');
+      localStorage.removeItem('xenova_session');
+      sessionStorage.removeItem('xenova_admin_session');
+      document.cookie = 'xenova_admin_token=; path=/; max-age=0; SameSite=Lax';
+      document.cookie = 'xenova_session=; path=/; max-age=0; SameSite=Lax';
+    } catch {}
+    window.location.href = '/admin/login';
   };
 
   if (isAdmin === null) {

@@ -41,16 +41,22 @@ export default function AdminLoginPage() {
 
       const adminUser = authResult.user;
 
-      // Store in browser session
-      localStorage.setItem('xenova_admin_session', JSON.stringify(adminUser));
-      localStorage.setItem('xenova_session', JSON.stringify(adminUser));
+      // Store in browser storage & cookies
+      try {
+        localStorage.setItem('xenova_admin_session', JSON.stringify(adminUser));
+        localStorage.setItem('xenova_session', JSON.stringify(adminUser));
+        sessionStorage.setItem('xenova_admin_session', JSON.stringify(adminUser));
+        document.cookie = 'xenova_admin_token=active_token; path=/; max-age=86400; SameSite=Lax';
+        document.cookie = 'xenova_session=admin; path=/; max-age=86400; SameSite=Lax';
+      } catch {}
+
       window.dispatchEvent(new Event('xenova-auth-change'));
+      flaskApi.preloadAdminData();
 
       setSuccessMsg('Access Authorized. Initializing Command Center...');
 
-      setTimeout(() => {
-        router.replace('/admin/dashboard');
-      }, 500);
+      // Immediate redirect to dashboard
+      window.location.href = '/admin/dashboard';
     } catch (err: any) {
       console.error('Admin authentication error:', err);
       setErrorMsg('Authentication error. Please verify database connection and credentials.');
