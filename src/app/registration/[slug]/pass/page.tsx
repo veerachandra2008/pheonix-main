@@ -13,10 +13,6 @@ import {
   Zap,
   Download,
   ExternalLink,
-  Mail,
-  Send,
-  RefreshCw,
-  Check,
 } from 'lucide-react';
 import { QRCodeComponent } from '@/components/QRCodeComponent';
 import { getApiBaseUrl } from '@/lib/api-config';
@@ -50,47 +46,6 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
   const [ticketData, setTicketData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
-  const [resendingEmail, setResendingEmail] = useState(false);
-  const [emailSentStatus, setEmailSentStatus] = useState<string>('');
-  const [emailError, setEmailError] = useState<string>('');
-  const [cooldown, setCooldown] = useState(0);
-
-  useEffect(() => {
-    if (cooldown > 0) {
-      const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [cooldown]);
-
-  const handleResendEmail = async () => {
-    if (cooldown > 0 || resendingEmail || !ticketData?.passId) return;
-    setResendingEmail(true);
-    setEmailError('');
-    setEmailSentStatus('');
-
-    try {
-      const apiBase = getApiBaseUrl();
-      const res = await fetch(`${apiBase}/registrations/resend-ticket-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          passId: ticketData.passId,
-          email: ticketData.email,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setEmailSentStatus(`Ticket email resent to ${ticketData.email}`);
-        setCooldown(30);
-      } else {
-        setEmailError(data.message || 'Failed to resend ticket email.');
-      }
-    } catch (err: any) {
-      setEmailError(err.message || 'Network error occurred while requesting email.');
-    } finally {
-      setResendingEmail(false);
-    }
-  };
 
   useEffect(() => {
     if (paramsPromise) {
@@ -324,56 +279,6 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
               Your official esports ticket has been generated and recorded in the database. Present this pass at match lobbies.
             </p>
           </div>
-        </div>
-
-        {/* ─── EMAIL TICKET CONFIRMATION & RESEND BANNER ─── */}
-        <div className="p-4 rounded-3xl bg-[#111115] border border-white/10 shadow-lg space-y-3 no-print">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 flex items-center justify-center shrink-0">
-                <Mail className="w-5 h-5" />
-              </div>
-              <div className="space-y-0.5">
-                <p className="text-sm font-bold text-white flex items-center gap-2">
-                  <span>🎉 Registration Confirmed!</span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
-                    Ticket ID: {ticketData?.passId}
-                  </span>
-                </p>
-                <p className="text-xs text-zinc-400">
-                  Your tournament ticket has been sent to{' '}
-                  <span className="text-emerald-400 font-semibold">{ticketData?.email}</span>
-                </p>
-              </div>
-            </div>
-
-            <button
-              onClick={handleResendEmail}
-              disabled={resendingEmail || cooldown > 0}
-              className="px-4 py-2.5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-white text-xs font-bold transition flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
-            >
-              {resendingEmail ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-              ) : (
-                <Send className="w-3.5 h-3.5 text-emerald-400" />
-              )}
-              {cooldown > 0 ? `Resend (${cooldown}s)` : 'Resend Ticket Email'}
-            </button>
-          </div>
-
-          {/* Toast / status feedback */}
-          {emailSentStatus && (
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center gap-2">
-              <Check className="w-3.5 h-3.5" />
-              {emailSentStatus}
-            </div>
-          )}
-
-          {emailError && (
-            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium">
-              {emailError}
-            </div>
-          )}
         </div>
 
         {/* ══ ENTRY PASS TICKET CARD (REF FOR HTML2CANVAS) ══ */}

@@ -384,32 +384,7 @@ class TestPhoenixEsportsBackend(unittest.TestCase):
             self.assertEqual(res.status_code, 200)
             data = res.get_json()
             self.assertTrue(data.get('success'))
-            self.assertTrue(data.get('passId').startswith(('XNV-', 'XPH-')))
-            first_pass_id = data.get('passId')
-
-            # Test Idempotency: second call with same order/payment details returns identical pass_id without error
-            res_dup = self.client.post('/api/payments/verify-payment', json=payload)
-            self.assertEqual(res_dup.status_code, 200)
-            dup_data = res_dup.get_json()
-            self.assertTrue(dup_data.get('success'))
-            self.assertEqual(dup_data.get('passId'), first_pass_id)
-            self.assertTrue(dup_data.get('already_verified'))
-
-            # Test Resend Ticket Email Endpoint
-            res_resend = self.client.post('/api/registrations/resend-ticket-email', json={
-                'passId': first_pass_id,
-                'email': self.test_email
-            })
-            self.assertEqual(res_resend.status_code, 200)
-            resend_data = res_resend.get_json()
-            self.assertTrue(resend_data.get('success'))
-
-            # Test Resend Unauthorized mismatch
-            res_unauth = self.client.post('/api/registrations/resend-ticket-email', json={
-                'passId': first_pass_id,
-                'email': 'hacker_imposter@fake.com'
-            })
-            self.assertEqual(res_unauth.status_code, 403)
+            self.assertTrue(data.get('passId').startswith('XPH-'))
 
         # Test invalid signature
         invalid_payload = {

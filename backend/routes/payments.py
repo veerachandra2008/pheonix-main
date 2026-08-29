@@ -11,8 +11,8 @@ payments_bp = Blueprint('payments', __name__)
 IN_MEMORY_REGISTRATIONS = {}
 
 def generate_pass_id():
-    """Generate a clean, unique pass ID: XNV-A7F4D9C2"""
-    return f"XNV-{uuid.uuid4().hex[:8].upper()}"
+    """Generate a clean, unique pass ID: XPH-A7F4D9C2"""
+    return f"XPH-{uuid.uuid4().hex[:8].upper()}"
 
 @payments_bp.route('/create-order', methods=['POST'])
 def create_order():
@@ -135,34 +135,6 @@ def verify_payment():
         if not hmac.compare_digest(generated_signature, razorpay_signature):
             return jsonify({'success': False, 'message': 'Invalid signature. Payment verification failed.'}), 400
 
-        # --- IDEMPOTENCY CHECK ---
-        # If this order_id or payment_id was already processed, retrieve existing pass to prevent duplicate tickets/emails
-        existing_pass_id = None
-        for in_mem_pass, in_mem_rec in IN_MEMORY_REGISTRATIONS.items():
-            if (in_mem_rec.get('order_id') == razorpay_order_id or in_mem_rec.get('orderId') == razorpay_order_id or
-                in_mem_rec.get('payment_id') == razorpay_payment_id or in_mem_rec.get('paymentId') == razorpay_payment_id):
-                existing_pass_id = in_mem_pass
-                break
-
-        if not existing_pass_id:
-            try:
-                supabase = get_supabase_client()
-                existing_q = supabase.table('registrations').select('pass_id').or_(f"order_id.eq.{razorpay_order_id},payment_id.eq.{razorpay_payment_id}").execute()
-                if existing_q.data and len(existing_q.data) > 0:
-                    existing_pass_id = existing_q.data[0].get('pass_id')
-            except Exception as check_err:
-                print(f"[verify-payment] Idempotency check notice: {check_err}")
-
-        if existing_pass_id:
-            print(f"[verify-payment] Order {razorpay_order_id} already confirmed with pass_id: {existing_pass_id}. Returning existing pass.")
-            return jsonify({
-                'success': True,
-                'message': 'Payment already verified and registration confirmed.',
-                'passId': existing_pass_id,
-                'payment_id': razorpay_payment_id,
-                'already_verified': True
-            }), 200
-
         # Generate unique Pass ID
         pass_id = generate_pass_id()
 
@@ -175,11 +147,9 @@ def verify_payment():
         email = data.get('email', '')
         tournament_game = data.get('tournamentGame', 'Esports')
         tournament_date = data.get('tournamentDate', 'TBD')
-        tournament_time = data.get('tournamentTime', '')
         tournament_format = data.get('tournamentFormat', 'Tournament')
         tournament_region = data.get('tournamentRegion', 'Pan India')
         tournament_fee = data.get('tournamentFee', 'Paid')
-        venue = data.get('venue') or tournament_region or 'Online Match Lobbies'
         players = data.get('players', [])
         player_emails = data.get('playerEmails', [email])
 
@@ -194,15 +164,12 @@ def verify_payment():
             'tournamentGame': tournament_game,
             'tournament_date': tournament_date,
             'tournamentDate': tournament_date,
-            'tournament_time': tournament_time,
-            'tournamentTime': tournament_time,
             'tournament_format': tournament_format,
             'tournamentFormat': tournament_format,
             'tournament_region': tournament_region,
             'tournamentRegion': tournament_region,
             'tournament_fee': tournament_fee,
             'tournamentFee': tournament_fee,
-            'venue': venue,
             'team_name': team_name,
             'teamName': team_name,
             'college': college,
@@ -217,7 +184,6 @@ def verify_payment():
             'paymentId': razorpay_payment_id,
             'payment_status': 'SUCCESS',
             'paymentStatus': 'SUCCESS',
-            'ticket_email_status': 'pending',
             'attendance_status': 'NOT_MARKED',
             'attendanceStatus': 'NOT_MARKED',
             'attended_at': None,
@@ -245,11 +211,7 @@ def verify_payment():
                 'payment_status': 'SUCCESS',
             }
             try:
-                supabase.table('registrations').insert({
-                    **reg_payload,
-                    'attendance_status': 'NOT_MARKED',
-                    'ticket_email_status': 'pending'
-                }).execute()
+                supabase.table('registrations').insert({**reg_payload, 'attendance_status': 'NOT_MARKED'}).execute()
             except Exception:
                 supabase.table('registrations').insert(reg_payload).execute()
 
@@ -276,40 +238,9 @@ def verify_payment():
         except Exception as sb_err:
             print(f"Supabase registration / rosters insert warning: {sb_err}")
 
-        # --- TRIGGER TICKET EMAIL VIA SUPABASE EDGE FUNCTION ---
-        try:
-            # Resolve base URL from request origin/referrer
-            origin = request.headers.get('Origin') or request.headers.get('Referer') or ''
-            app_url = origin.rstrip('/').split('/registration')[0].split('/verify')[0] if origin else 'https://xenova.gg'
-
-            email_payload = {
-                'passId': pass_id,
-                'email': email,
-                'playerName': captain_name,
-                'captainName': captain_name,
-                'teamName': team_name,
-                'college': college,
-                'tournamentSlug': tournament_slug,
-                'tournamentTitle': tournament_title,
-                'tournamentGame': tournament_game,
-                'tournamentDate': tournament_date,
-                'tournamentTime': tournament_time,
-                'venue': venue,
-                'tournamentFee': tournament_fee,
-                'paymentStatus': 'PAID',
-                'orderId': razorpay_order_id,
-                'paymentId': razorpay_payment_id,
-                'appUrl': app_url
-            }
-
-            from email_service import trigger_ticket_email_async
-            trigger_ticket_email_async(email_payload)
-        except Exception as email_dispatch_err:
-            print(f"[verify-payment] Notice dispatching ticket email: {email_dispatch_err}")
-
         return jsonify({
             'success': True,
-            'message': 'Payment verified successfully! Tournament ticket has been issued.',
+            'message': 'Payment verified successfully!',
             'passId': pass_id,
             'payment_id': razorpay_payment_id
         }), 200

@@ -122,38 +122,9 @@ def create_registration():
         except Exception as sb_err:
             print(f"Supabase free registration insert warning: {sb_err}")
 
-        # --- TRIGGER TICKET EMAIL VIA SUPABASE EDGE FUNCTION ---
-        try:
-            origin = request.headers.get('Origin') or request.headers.get('Referer') or ''
-            app_url = origin.rstrip('/').split('/registration')[0].split('/verify')[0] if origin else 'https://xenova.gg'
-
-            email_payload = {
-                'passId': pass_id,
-                'email': email,
-                'playerName': captain_name,
-                'captainName': captain_name,
-                'teamName': team_name,
-                'college': college,
-                'tournamentSlug': tournament_slug,
-                'tournamentTitle': tournament_title,
-                'tournamentGame': tournament_game,
-                'tournamentDate': tournament_date,
-                'venue': tournament_region or 'Online Match Lobbies',
-                'tournamentFee': tournament_fee,
-                'paymentStatus': 'FREE ENTRY',
-                'orderId': 'FREE',
-                'paymentId': 'FREE',
-                'appUrl': app_url
-            }
-
-            from email_service import trigger_ticket_email_async
-            trigger_ticket_email_async(email_payload)
-        except Exception as email_dispatch_err:
-            print(f"[create-registration] Notice dispatching ticket email: {email_dispatch_err}")
-
         return jsonify({
             'success': True,
-            'message': 'Registration created successfully! Tournament ticket has been issued.',
+            'message': 'Registration created successfully!',
             'passId': pass_id,
             'data': record
         }), 201
@@ -626,92 +597,3 @@ def delete_registration(pass_id):
     except Exception as e:
         print(f"Supabase delete registration warning: {e}")
         return jsonify({'success': True, 'message': f'Registration {pass_id} removed from memory.'}), 200
-
-
-@registrations_bp.route('/resend-ticket-email', methods=['POST'])
-def resend_ticket_email():
-    """
-    Securely resend a tournament ticket email for an existing registration.
-    Validates ownership, reuses the existing pass_id, and triggers Supabase Edge Function.
-    """
-    try:
-        data = request.get_json() or {}
-        pass_id = (data.get('passId') or data.get('pass_id') or '').strip()
-        requester_email = (data.get('email') or '').strip().lower()
-
-        if not pass_id:
-            return jsonify({'success': False, 'message': 'passId is required to resend ticket email.'}), 400
-
-        # Look up existing registration in memory or Supabase
-        item = None
-        if pass_id in IN_MEMORY_REGISTRATIONS:
-            item = IN_MEMORY_REGISTRATIONS[pass_id]
-        else:
-            try:
-                supabase = get_supabase_client()
-                res = supabase.table('registrations').select('*').eq('pass_id', pass_id).maybeSingle().execute()
-                if res.data:
-                    item = res.data
-            except Exception as sb_err:
-                print(f"[resend-ticket-email] Supabase query notice: {sb_err}")
-
-        if not item:
-            return jsonify({'success': False, 'message': f'No registration record found for Pass ID: {pass_id}'}), 404
-
-        target_email = (item.get('email') or '').strip().lower()
-
-        # Security check: if requester_email provided, ensure it matches registration or is organizer/admin
-        if requester_email and requester_email != target_email:
-            # Check if requester is organizer/admin
-            is_authorized = False
-            try:
-                supabase = get_supabase_client()
-                u_res = supabase.table('users').select('role').eq('email', requester_email).maybeSingle().execute()
-                if u_res.data and u_res.data.get('role') in ['ADMIN', 'ORGANIZER', 'HOST']:
-                    is_authorized = True
-            except Exception:
-                pass
-
-            if not is_authorized:
-                return jsonify({
-                    'success': False,
-                    'message': 'Unauthorized. You can only resend ticket emails for your own tournament registrations.'
-                }), 403
-
-        # Resolve app origin
-        origin = request.headers.get('Origin') or request.headers.get('Referer') or ''
-        app_url = origin.rstrip('/').split('/registration')[0].split('/verify')[0] if origin else 'https://xenova.gg'
-
-        email_payload = {
-            'passId': pass_id,
-            'email': target_email,
-            'playerName': item.get('captain_name') or item.get('captainName') or 'Player',
-            'captainName': item.get('captain_name') or item.get('captainName') or 'Player',
-            'teamName': item.get('team_name') or item.get('teamName') or 'Squad',
-            'college': item.get('college') or 'Collegiate Esports',
-            'tournamentSlug': item.get('tournament_slug') or item.get('tournamentSlug') or '',
-            'tournamentTitle': item.get('tournament_title') or item.get('tournamentTitle') or 'XENOVA Tournament',
-            'tournamentGame': item.get('tournament_game') or item.get('tournamentGame') or 'Esports',
-            'tournamentDate': item.get('tournament_date') or item.get('tournamentDate') or 'Scheduled',
-            'tournamentTime': item.get('tournament_time') or item.get('tournamentTime') or '',
-            'venue': item.get('venue') or item.get('tournament_region') or 'Online Match Lobbies',
-            'paymentStatus': item.get('payment_status') or item.get('paymentStatus') or 'CONFIRMED',
-            'orderId': item.get('order_id') or item.get('orderId') or '',
-            'paymentId': item.get('payment_id') or item.get('paymentId') or '',
-            'appUrl': app_url
-        }
-
-        from email_service import send_ticket_email_edge_function
-        result = send_ticket_email_edge_function(email_payload)
-
-        return jsonify({
-            'success': True,
-            'message': f'Ticket email resent to {target_email}.',
-            'passId': pass_id,
-            'delivery': result
-        }), 200
-
-    except Exception as e:
-        print(f"[resend-ticket-email] Error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
-
