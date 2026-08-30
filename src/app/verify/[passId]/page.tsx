@@ -58,121 +58,14 @@ export default function VerifyPassPage(props: PageProps) {
 
     setLoading(true);
     try {
-      const apiBase = getApiBaseUrl();
-
-      // 1. Check Flask API verification
-      try {
-        const res = await fetch(`${apiBase}/registrations/verify/${encodeURIComponent(passId)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.valid) {
-            setResult(data);
-            setLoading(false);
-            return;
-          }
-        }
-      } catch {}
-
-      // 2. Direct Supabase Fallback (case-insensitive)
-      try {
-        const cleanPass = passId.trim();
-        const [regRes, attRes] = await Promise.all([
-          supabase.from('registrations').select('*').ilike('pass_id', cleanPass).maybeSingle(),
-          supabase.from('event_attendance').select('*').ilike('pass_id', cleanPass).maybeSingle(),
-        ]);
-
-        if (regRes.data) {
-          const item = regRes.data;
-          const att = attRes.data;
-          setResult({
-            valid: true,
-            status: 'VERIFIED',
-            passId: item.pass_id,
-            data: {
-              passId: item.pass_id,
-              pass_id: item.pass_id,
-              tournamentTitle: item.tournament_title || 'Esports Championship',
-              tournamentSlug: item.tournament_slug || 'tournament',
-              teamName: item.team_name,
-              captainName: item.captain_name,
-              college: item.college,
-              email: item.email,
-              paymentStatus: item.payment_status || 'SUCCESS',
-              payment_status: item.payment_status || 'SUCCESS',
-              paymentId: item.payment_id || null,
-              payment_id: item.payment_id || null,
-              orderId: item.order_id || null,
-              order_id: item.order_id || null,
-              tournamentFee: item.tournament_fee || null,
-              tournament_fee: item.tournament_fee || null,
-              attendanceStatus: att?.attendance_status || item.attendance_status || 'NOT_MARKED',
-              attendedAt: att?.attended_at || item.attended_at,
-              attendedBy: att?.attended_by || item.attended_by,
-              players: item.players || [],
-            }
-          });
-          setLoading(false);
-          return;
-        }
-      } catch (sbErr) {
-        console.warn('Supabase scanner lookup fallback notice:', sbErr);
-      }
-
-      // 3. Client LocalStorage Fallback (for client-side passes / offline)
-      try {
-        const storedKeys = ['xenova_registrations', 'xenova_tournament_passes', 'user_registrations', 'xenova_user_registrations'];
-        for (const k of storedKeys) {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              const matched = list.find((item: any) => 
-                (item.pass_id || item.passId || item.id || '').toString().trim().toLowerCase() === passId.trim().toLowerCase()
-              );
-              if (matched) {
-                setResult({
-                  valid: true,
-                  status: 'VERIFIED',
-                  passId: matched.pass_id || matched.passId || passId,
-                  data: {
-                    passId: matched.pass_id || matched.passId || passId,
-                    pass_id: matched.pass_id || matched.passId || passId,
-                    tournamentTitle: matched.tournament_title || matched.tournamentTitle || 'Esports Championship',
-                    tournamentSlug: matched.tournament_slug || matched.tournamentSlug || 'tournament',
-                    teamName: matched.team_name || matched.teamName || 'Squad',
-                    captainName: matched.captain_name || matched.captainName || 'Player',
-                    college: matched.college || 'Collegiate Campus',
-                    email: matched.email || '',
-                    paymentStatus: matched.payment_status || matched.paymentStatus || 'SUCCESS',
-                    payment_status: matched.payment_status || matched.paymentStatus || 'SUCCESS',
-                    paymentId: matched.payment_id || matched.paymentId || null,
-                    payment_id: matched.payment_id || matched.paymentId || null,
-                    orderId: matched.order_id || matched.orderId || null,
-                    order_id: matched.order_id || matched.orderId || null,
-                    tournamentFee: matched.tournament_fee || matched.tournamentFee || null,
-                    tournament_fee: matched.tournament_fee || matched.tournamentFee || null,
-                    attendanceStatus: matched.attendance_status || matched.attendanceStatus || 'NOT_MARKED',
-                    attendedAt: matched.attended_at || matched.attendedAt,
-                    attendedBy: matched.attended_by || matched.attendedBy,
-                    players: matched.players || [],
-                  }
-                });
-                setLoading(false);
-                return;
-              }
-            }
-          }
-        }
-      } catch (lsErr) {
-        console.warn('LocalStorage verify fallback notice:', lsErr);
-      }
-
+      const res = await flaskApi.verifyPass(passId.trim(), { autoCheckIn: false });
+      setResult(res);
     } catch (err) {
       console.warn('Verification API notice:', err);
+      setResult({ valid: false, status: 'INVALID', message: 'Invalid or expired pass ID. No authentic record found on server.' });
+    } finally {
+      setLoading(false);
     }
-
-    setResult({ valid: false, message: 'Invalid or expired pass ID. No authentic record found on server.' });
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -469,6 +362,47 @@ export default function VerifyPassPage(props: PageProps) {
             <p className="text-[11px] text-slate-500">
               Verified by Xenova Database Infrastructure · Real-time Entry Auth
             </p>
+          </div>
+        ) : result?.status === 'EXPIRED' || result?.is_expired ? (
+          /* ── EXPIRED TICKET CARD ── */
+          <div className="rounded-3xl bg-[#0C111D] border border-orange-500/40 p-8 space-y-6 shadow-2xl text-center relative overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-orange-500 via-amber-400 to-orange-500" />
+
+            <div className="w-20 h-20 rounded-2xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center mx-auto shadow-lg shadow-orange-500/20">
+              <Clock className="w-10 h-10 text-orange-400" />
+            </div>
+
+            <div className="space-y-1">
+              <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs font-black uppercase tracking-wider">
+                ⌛ EXPIRED TICKET PASS
+              </span>
+              <h1 className="text-xl font-bold text-white pt-2">{ticket.tournamentTitle || 'Tournament Concluded'}</h1>
+              <p className="text-xs text-slate-400 font-mono tracking-widest pt-1">{passId}</p>
+            </div>
+
+            <div className="text-xs text-slate-300 leading-relaxed bg-black/40 border border-white/5 p-4 rounded-2xl space-y-2">
+              <p className="font-semibold text-orange-300">
+                {result.message || `This ticket pass has expired because the tournament date (${ticket.tournamentDate || 'Event Day'}) has concluded.`}
+              </p>
+              <p className="text-slate-400 text-[11px]">
+                Team: <span className="text-white font-bold">{ticket.teamName || 'Squad'}</span> · Captain: <span className="text-white font-bold">{ticket.captainName || 'Captain'}</span>
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Link
+                href="/verify"
+                className="flex-1 inline-flex items-center justify-center py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-950/50"
+              >
+                Open Gate Scanner
+              </Link>
+              <Link
+                href="/tournaments"
+                className="flex-1 inline-flex items-center justify-center py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white font-bold text-xs uppercase tracking-wider hover:bg-white/10 transition"
+              >
+                Browse Tournaments
+              </Link>
+            </div>
           </div>
         ) : (
           /* ── INVALID TICKET CARD ── */

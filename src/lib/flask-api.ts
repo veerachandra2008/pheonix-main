@@ -842,26 +842,88 @@ export const flaskApi = {
 
   async updateAttendance(passId: string, attendanceStatus: 'PRESENT' | 'ABSENT' | 'NOT_MARKED', attendedBy?: string, additionalData?: any) {
     clearAdminCache();
+    const cleanId = (passId || '').trim();
+    const nowIso = new Date().toISOString();
+    const organizerName = attendedBy || 'Organizer Desk';
+
+    // 1. Sync to Flask Backend API so in-memory store is updated immediately
     try {
-      const nowIso = new Date().toISOString();
+      const apiBase = getApiBaseUrl();
+      await fetchWithTimeout(
+        `${apiBase}/registrations/attendance/update`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pass_id: cleanId,
+            attendance_status: attendanceStatus,
+            attended_by: attendanceStatus === 'NOT_MARKED' ? null : organizerName,
+            attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
+          }),
+        },
+        2000
+      );
+    } catch (apiErr) {
+      console.warn('Backend attendance update API notice:', apiErr);
+    }
+
+    // 2. Sync to Supabase (event_attendance + registrations tables)
+    try {
       const payload = {
-        pass_id: passId,
+        pass_id: cleanId,
         attendance_status: attendanceStatus,
         attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
-        attended_by: attendanceStatus === 'NOT_MARKED' ? null : (attendedBy || 'Organizer'),
+        attended_by: attendanceStatus === 'NOT_MARKED' ? null : organizerName,
         updated_at: nowIso,
         ...additionalData,
       };
-      await supabase.from('event_attendance').upsert(payload, { onConflict: 'pass_id' });
-      await supabase.from('registrations').update({
-        attendance_status: attendanceStatus,
-        attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
-        attended_by: attendanceStatus === 'NOT_MARKED' ? null : (attendedBy || 'Organizer'),
-      }).eq('pass_id', passId);
-      return { success: true, message: 'Updated attendance', data: payload };
-    } catch (err: any) {
-      return { success: false, message: err.message };
+
+      await Promise.allSettled([
+        supabase.from('event_attendance').upsert(payload, { onConflict: 'pass_id' }),
+        supabase.from('registrations').update({
+          attendance_status: attendanceStatus,
+          attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
+          attended_by: attendanceStatus === 'NOT_MARKED' ? null : organizerName,
+        }).ilike('pass_id', cleanId),
+      ]);
+    } catch (sbErr) {
+      console.warn('Supabase attendance update notice:', sbErr);
     }
+
+    // 3. Sync to Client LocalStorage records
+    if (typeof window !== 'undefined') {
+      try {
+        const storedKeys = ['xenova_registrations', 'xenova_tournament_passes', 'user_registrations', 'xenova_user_registrations'];
+        for (const k of storedKeys) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              let updated = false;
+              for (const item of list) {
+                const pId = (item.pass_id || item.passId || item.id || '').toString().trim().toLowerCase();
+                if (pId === cleanId.toLowerCase()) {
+                  item.attendance_status = attendanceStatus;
+                  item.attendanceStatus = attendanceStatus;
+                  item.attended_at = attendanceStatus === 'NOT_MARKED' ? null : nowIso;
+                  item.attendedAt = attendanceStatus === 'NOT_MARKED' ? null : nowIso;
+                  item.attended_by = attendanceStatus === 'NOT_MARKED' ? null : organizerName;
+                  item.attendedBy = attendanceStatus === 'NOT_MARKED' ? null : organizerName;
+                  updated = true;
+                }
+              }
+              if (updated) {
+                localStorage.setItem(k, JSON.stringify(list));
+              }
+            }
+          }
+        }
+      } catch (lsErr) {
+        console.warn('LocalStorage attendance sync notice:', lsErr);
+      }
+    }
+
+    return { success: true, message: `Updated attendance to ${attendanceStatus}`, status: attendanceStatus };
   },
 
   async markRemainingAbsent(tournamentSlug: string, attendedBy?: string) {
@@ -895,8 +957,9 @@ export const flaskApi = {
     options?: { autoCheckIn?: boolean; attendedBy?: string }
   ): Promise<{
     valid: boolean;
-    status: 'VERIFIED' | 'ALREADY_CHECKED_IN' | 'INVALID';
+    status: 'VERIFIED' | 'ALREADY_CHECKED_IN' | 'EXPIRED' | 'INVALID';
     already_checked_in?: boolean;
+    is_expired?: boolean;
     passId: string;
     message?: string;
     data?: any;
@@ -909,6 +972,35 @@ export const flaskApi = {
     const autoCheckIn = options?.autoCheckIn ?? true;
     const attendedBy = options?.attendedBy || 'Entrance Gate Scanner';
     const nowIso = new Date().toISOString();
+
+    // Helper to evaluate tournament date expiration
+    const checkExpiry = (dateStr?: string, endDateStr?: string, status?: string) => {
+      const normStatus = (status || '').toLowerCase().trim();
+      if (normStatus === 'completed' || normStatus === 'concluded' || normStatus === 'ended' || normStatus === 'past') {
+        return { isExpired: true, formattedDate: dateStr || 'Concluded' };
+      }
+
+      const raw = (endDateStr || dateStr || '').trim();
+      if (!raw || raw.toLowerCase() === 'upcoming' || raw.toLowerCase() === 'tba' || raw.toLowerCase() === 'scheduled' || raw.toLowerCase() === 'live' || raw.toLowerCase() === 'registering') {
+        return { isExpired: false, formattedDate: raw };
+      }
+
+      try {
+        let parsed = Date.parse(raw);
+        if (isNaN(parsed)) {
+          parsed = Date.parse(`${raw} ${new Date().getFullYear()}`);
+        }
+        if (!isNaN(parsed)) {
+          const dt = new Date(parsed);
+          dt.setHours(23, 59, 59, 999);
+          if (new Date().getTime() > dt.getTime()) {
+            return { isExpired: true, formattedDate: raw };
+          }
+        }
+      } catch {}
+
+      return { isExpired: false, formattedDate: raw };
+    };
 
     // 1. Primary: Flask Backend Verification with atomic auto-check-in
     try {
@@ -926,6 +1018,17 @@ export const flaskApi = {
 
       if (res.ok) {
         const json = await res.json();
+        if (json.status === 'EXPIRED' || json.is_expired === true) {
+          return {
+            valid: false,
+            status: 'EXPIRED',
+            is_expired: true,
+            passId: json.passId || cleanId,
+            message: json.message || 'This ticket pass has expired. Tournament has concluded.',
+            data: json.data || {},
+          };
+        }
+
         if (json.valid) {
           const isAlready = json.status === 'ALREADY_CHECKED_IN' || json.already_checked_in === true;
           return {
@@ -968,6 +1071,38 @@ export const flaskApi = {
         const orderId = item.order_id || item.orderId || null;
         const tournamentFee = item.tournament_fee || item.tournamentFee || null;
         const players = item.players || [];
+
+        // Check tournament date expiration
+        let tournDate = item.tournament_date || item.date || '';
+        let tournStatus = item.tournament_status || item.status || '';
+        try {
+          const { data: tData } = await supabase.from('tournaments').select('*').eq('slug', tournamentSlug).maybeSingle();
+          if (tData) {
+            tournDate = tData.end_date || tData.date || tournDate;
+            tournStatus = tData.status || tournStatus;
+          }
+        } catch {}
+
+        const expiry = checkExpiry(tournDate, undefined, tournStatus);
+        if (expiry.isExpired) {
+          return {
+            valid: false,
+            status: 'EXPIRED',
+            is_expired: true,
+            passId: pId,
+            message: `This ticket pass has expired. Tournament concluded on ${expiry.formattedDate}.`,
+            data: {
+              passId: pId,
+              pass_id: pId,
+              teamName,
+              captainName,
+              tournamentTitle,
+              tournamentSlug,
+              tournamentDate: expiry.formattedDate,
+              isExpired: true,
+            },
+          };
+        }
 
         // Check if ALREADY PRESENT
         if (currentAttStatus === 'PRESENT') {
@@ -1080,6 +1215,26 @@ export const flaskApi = {
               if (matched) {
                 const pId = matched.pass_id || matched.passId || cleanId;
                 const currentAttStatus = (matched.attendance_status || matched.attendanceStatus || 'NOT_MARKED').toUpperCase();
+                const tournDate = matched.tournament_date || matched.date || '';
+                const tournStatus = matched.tournament_status || matched.status || '';
+
+                const expiry = checkExpiry(tournDate, undefined, tournStatus);
+                if (expiry.isExpired) {
+                  return {
+                    valid: false,
+                    status: 'EXPIRED',
+                    is_expired: true,
+                    passId: pId,
+                    message: `This ticket pass has expired. Tournament concluded on ${expiry.formattedDate}.`,
+                    data: {
+                      ...matched,
+                      passId: pId,
+                      pass_id: pId,
+                      tournamentDate: expiry.formattedDate,
+                      isExpired: true,
+                    },
+                  };
+                }
 
                 if (currentAttStatus === 'PRESENT') {
                   return {

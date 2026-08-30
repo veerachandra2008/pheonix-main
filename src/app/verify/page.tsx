@@ -8,6 +8,10 @@ import {
   QrCode,
   ScanLine,
   ShieldCheck,
+  ShieldAlert,
+  Lock,
+  LogIn,
+  Award,
   CheckCircle2,
   AlertTriangle,
   XCircle,
@@ -44,7 +48,9 @@ const ContinuousQRScanner = dynamic(
         <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
           <RefreshCw className="w-6 h-6 animate-spin" />
         </div>
-        <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Loading Optical Scanner Engine...</p>
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+          Initializing Camera Optical Engine...
+        </p>
       </div>
     ),
   }
@@ -55,13 +61,17 @@ interface ScanHistoryItem {
   passId: string;
   teamName: string;
   captainName: string;
-  status: 'VERIFIED' | 'ALREADY_CHECKED_IN' | 'INVALID';
+  status: 'VERIFIED' | 'ALREADY_CHECKED_IN' | 'EXPIRED' | 'INVALID';
   timestamp: string;
   paymentStatus?: string;
   isPaid?: boolean;
 }
 
 export default function EntranceGateVerificationPage() {
+  // Organizer Authorization State (Gate scanning is restricted to organizers & admins)
+  const [authStatus, setAuthStatus] = useState<'loading' | 'authorized' | 'unauthorized'>('loading');
+  const [sessionUser, setSessionUser] = useState<any>(null);
+
   // Mode selection: 'scanner' (camera) vs 'manual' (text input)
   const [activeMode, setActiveMode] = useState<'scanner' | 'manual'>('scanner');
 
@@ -78,7 +88,7 @@ export default function EntranceGateVerificationPage() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [currentResult, setCurrentResult] = useState<{
     valid: boolean;
-    status: 'VERIFIED' | 'ALREADY_CHECKED_IN' | 'INVALID';
+    status: 'VERIFIED' | 'ALREADY_CHECKED_IN' | 'EXPIRED' | 'INVALID';
     passId: string;
     message?: string;
     data?: any;
@@ -98,13 +108,64 @@ export default function EntranceGateVerificationPage() {
   const [organizerName, setOrganizerName] = useState('Gate Marshal');
 
   useEffect(() => {
-    try {
-      const rawSession = localStorage.getItem('xenova_session');
-      if (rawSession) {
-        const parsed = JSON.parse(rawSession);
-        setOrganizerName(parsed.name || parsed.email || 'Gate Marshal');
+    async function verifyOrganizerAccess() {
+      try {
+        const rawSession = localStorage.getItem('xenova_session');
+        if (!rawSession) {
+          setAuthStatus('unauthorized');
+          return;
+        }
+
+        const user = JSON.parse(rawSession);
+        setSessionUser(user);
+        const email = (user.email || '').trim().toLowerCase();
+        const role = (user.role || '').toLowerCase();
+
+        // 1. Root admin / organizer / host role in session
+        if (role === 'admin' || role === 'organizer' || role === 'host' || email === 'admin@xenova.gg') {
+          setOrganizerName(user.hostName || user.name || user.email || 'Gate Marshal');
+          setAuthStatus('authorized');
+          return;
+        }
+
+        // 2. Real-time Supabase Database Check on organizer_applications or users
+        try {
+          const { supabase } = await import('@/lib/supabase');
+          const [appRes, userRes] = await Promise.allSettled([
+            supabase.from('organizer_applications').select('*').eq('email', email),
+            supabase.from('users').select('*').eq('email', email),
+          ]);
+
+          if (appRes.status === 'fulfilled' && appRes.value.data && appRes.value.data.length > 0) {
+            const app = appRes.value.data[0];
+            if ((app.status || '').toUpperCase() === 'APPROVED') {
+              setOrganizerName(app.host_name || user.name || 'Verified Organizer');
+              setAuthStatus('authorized');
+              return;
+            }
+          }
+
+          if (userRes.status === 'fulfilled' && userRes.value.data && userRes.value.data.length > 0) {
+            const u = userRes.value.data[0];
+            const uRole = (u.role || '').toUpperCase();
+            if (uRole === 'ADMIN' || uRole === 'ORGANIZER' || uRole === 'HOST') {
+              setOrganizerName(u.name || user.name || 'Verified Organizer');
+              setAuthStatus('authorized');
+              return;
+            }
+          }
+        } catch (sbErr) {
+          console.warn('Supabase organizer access lookup notice:', sbErr);
+        }
+
+        // Non-organizer account
+        setAuthStatus('unauthorized');
+      } catch {
+        setAuthStatus('unauthorized');
       }
-    } catch {}
+    }
+
+    verifyOrganizerAccess();
   }, []);
 
   // Clear auto-advance timer on unmount or manual advance
@@ -180,13 +241,13 @@ export default function EntranceGateVerificationPage() {
       // Play Sound & Haptic Feedback based on exact status
       if (soundEnabled) {
         if (status === 'VERIFIED') playScanSound('success');
-        else if (status === 'ALREADY_CHECKED_IN') playScanSound('warning');
+        else if (status === 'ALREADY_CHECKED_IN' || status === 'EXPIRED') playScanSound('warning');
         else playScanSound('error');
       }
 
       if (hapticsEnabled) {
         if (status === 'VERIFIED') triggerScanHaptic('success');
-        else if (status === 'ALREADY_CHECKED_IN') triggerScanHaptic('warning');
+        else if (status === 'ALREADY_CHECKED_IN' || status === 'EXPIRED') triggerScanHaptic('warning');
         else triggerScanHaptic('error');
       }
 
@@ -203,7 +264,7 @@ export default function EntranceGateVerificationPage() {
           captainName: ticketData.captainName || ticketData.captain_name || 'Player',
           status: status,
           timestamp: nowIso,
-          paymentStatus: paymentStatus || (result.valid ? 'VERIFIED' : 'INVALID'),
+          paymentStatus: status === 'EXPIRED' ? 'EXPIRED' : (paymentStatus || (result.valid ? 'VERIFIED' : 'INVALID')),
           isPaid,
         },
         ...prev.slice(0, 49), // Keep latest 50 scans
@@ -219,8 +280,8 @@ export default function EntranceGateVerificationPage() {
         scannedAt: nowIso,
       });
 
-      // Start auto-advance countdown (3.2s for VERIFIED, 3.5s for ALREADY_CHECKED_IN, 3.0s for INVALID)
-      const duration = status === 'ALREADY_CHECKED_IN' ? 3800 : 3200;
+      // Start auto-advance countdown (3.2s for VERIFIED, 3.8s for ALREADY_CHECKED_IN / EXPIRED, 3.0s for INVALID)
+      const duration = (status === 'ALREADY_CHECKED_IN' || status === 'EXPIRED') ? 3800 : 3200;
       startAutoAdvanceCountdown(duration);
     } catch (err: any) {
       console.warn('Verification execution error:', err);
@@ -265,8 +326,103 @@ export default function EntranceGateVerificationPage() {
   const totalScanned = scanHistory.length;
   const verifiedCount = scanHistory.filter((s) => s.status === 'VERIFIED').length;
   const alreadyCount = scanHistory.filter((s) => s.status === 'ALREADY_CHECKED_IN').length;
+  const expiredCount = scanHistory.filter((s) => s.status === 'EXPIRED').length;
   const invalidCount = scanHistory.filter((s) => s.status === 'INVALID').length;
 
+  // 1. Loading Authentication State
+  if (authStatus === 'loading') {
+    return (
+      <main className="min-h-screen bg-[#070B14] text-white flex flex-col items-center justify-center p-4">
+        <div className="p-8 rounded-3xl bg-[#0C111D] border border-white/10 text-center space-y-4 max-w-sm w-full shadow-2xl">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mx-auto">
+            <RefreshCw className="w-6 h-6 animate-spin" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-sm font-black uppercase tracking-wider text-white">Verifying Authorization</h2>
+            <p className="text-xs text-slate-400 font-medium">Checking organizer & marshal credentials...</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // 2. Unauthorized / Non-Organizer Screen
+  if (authStatus === 'unauthorized') {
+    return (
+      <main className="min-h-screen bg-[#070B14] text-white flex flex-col justify-between selection:bg-emerald-500 selection:text-zinc-950">
+        {/* Top Bar */}
+        <header className="border-b border-white/10 bg-[#0C111D]/90 backdrop-blur-xl">
+          <div className="mx-auto max-w-5xl px-4 h-16 flex items-center justify-between">
+            <Link href="/" className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                <QrCode className="h-5 w-5" />
+              </div>
+              <span className="text-sm font-black text-white tracking-tight">
+                XENOVA <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono">GATE</span>
+              </span>
+            </Link>
+            <Link
+              href="/tournaments"
+              className="text-xs text-slate-400 hover:text-white flex items-center gap-1 font-medium px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 transition"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> Back to Tournaments
+            </Link>
+          </div>
+        </header>
+
+        {/* Restricted Access Card */}
+        <div className="mx-auto max-w-md w-full px-4 py-12 flex-1 flex flex-col justify-center">
+          <div className="p-8 rounded-3xl bg-[#0C111D] border border-amber-500/30 space-y-6 shadow-2xl text-center relative overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-500 via-orange-400 to-amber-500" />
+
+            <div className="w-20 h-20 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/20 text-amber-400">
+              <Lock className="w-10 h-10" />
+            </div>
+
+            <div className="space-y-2">
+              <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-black uppercase tracking-wider">
+                <ShieldAlert className="w-3.5 h-3.5" /> ORGANIZER ACCESS ONLY
+              </span>
+              <h1 className="text-xl font-bold text-white pt-1">Gate Verification Restricted</h1>
+              <p className="text-xs text-slate-400 leading-relaxed max-w-xs mx-auto">
+                Ticket QR scanning, gate verification, and attendee check-in are reserved for verified tournament organizers and event marshals.
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-3 pt-2">
+              <Link
+                href="/login?redirect=/verify"
+                className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-black text-xs uppercase tracking-wider rounded-2xl transition shadow-xl shadow-emerald-950/60 flex items-center justify-center gap-2"
+              >
+                <LogIn className="w-4 h-4" /> Sign In as Organizer
+              </Link>
+
+              <Link
+                href="/organizer/apply"
+                className="w-full py-3.5 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white font-bold text-xs uppercase tracking-wider rounded-2xl border border-white/10 transition flex items-center justify-center gap-2"
+              >
+                <Award className="w-4 h-4 text-indigo-400" /> Apply for Organizer Access
+              </Link>
+            </div>
+
+            {sessionUser && (
+              <p className="text-[11px] text-slate-500 pt-1">
+                Signed in as <strong className="text-slate-400">{sessionUser.email}</strong> (Player account)
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <footer className="border-t border-white/10 py-5 text-center text-xs text-slate-500">
+          © 2026 Xenova Esports Platform · Gate Security Engine
+        </footer>
+      </main>
+    );
+  }
+
+  // 3. Authorized Organizer Gate Scanner Workspace
   return (
     <main className="min-h-screen bg-[#070B14] text-white font-sans flex flex-col justify-between selection:bg-emerald-500 selection:text-zinc-950">
       {/* ── Top Header Bar ── */}
@@ -290,6 +446,12 @@ export default function EntranceGateVerificationPage() {
 
           {/* Quick Header Actions */}
           <div className="flex items-center gap-2">
+            {/* Verified Organizer Badge */}
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-xs font-bold">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span className="truncate max-w-[140px]">{organizerName}</span>
+            </div>
+
             {/* Shift History Log Button */}
             <button
               type="button"
@@ -509,6 +671,8 @@ export default function EntranceGateVerificationPage() {
                       ? 'rgba(16, 185, 129, 0.5)'
                       : currentResult.status === 'ALREADY_CHECKED_IN'
                       ? 'rgba(245, 158, 11, 0.5)'
+                      : currentResult.status === 'EXPIRED'
+                      ? 'rgba(249, 115, 22, 0.5)'
                       : 'rgba(244, 63, 94, 0.5)',
                 }}
               >
@@ -521,6 +685,8 @@ export default function EntranceGateVerificationPage() {
                         ? '#10b981'
                         : currentResult.status === 'ALREADY_CHECKED_IN'
                         ? '#f59e0b'
+                        : currentResult.status === 'EXPIRED'
+                        ? '#f97316'
                         : '#f43f5e',
                   }}
                 />
@@ -536,6 +702,8 @@ export default function EntranceGateVerificationPage() {
                           ? '#10b981'
                           : currentResult.status === 'ALREADY_CHECKED_IN'
                           ? '#f59e0b'
+                          : currentResult.status === 'EXPIRED'
+                          ? '#f97316'
                           : '#f43f5e',
                     }}
                   />
@@ -552,23 +720,30 @@ export default function EntranceGateVerificationPage() {
                             ? 'rgba(16, 185, 129, 0.15)'
                             : currentResult.status === 'ALREADY_CHECKED_IN'
                             ? 'rgba(245, 158, 11, 0.15)'
+                            : currentResult.status === 'EXPIRED'
+                            ? 'rgba(249, 115, 22, 0.15)'
                             : 'rgba(244, 63, 94, 0.15)',
                         border:
                           currentResult.status === 'VERIFIED'
                             ? '1px solid rgba(16, 185, 129, 0.4)'
                             : currentResult.status === 'ALREADY_CHECKED_IN'
                             ? '1px solid rgba(245, 158, 11, 0.4)'
+                            : currentResult.status === 'EXPIRED'
+                            ? '1px solid rgba(249, 115, 22, 0.4)'
                             : '1px solid rgba(244, 63, 94, 0.4)',
                         color:
                           currentResult.status === 'VERIFIED'
                             ? '#34d399'
                             : currentResult.status === 'ALREADY_CHECKED_IN'
                             ? '#fbbf24'
+                            : currentResult.status === 'EXPIRED'
+                            ? '#fb923c'
                             : '#fb7185',
                       }}
                     >
                       {currentResult.status === 'VERIFIED' && <CheckCircle2 className="w-9 h-9" />}
                       {currentResult.status === 'ALREADY_CHECKED_IN' && <AlertTriangle className="w-9 h-9" />}
+                      {currentResult.status === 'EXPIRED' && <Clock className="w-9 h-9" />}
                       {currentResult.status === 'INVALID' && <XCircle className="w-9 h-9" />}
                     </div>
 
@@ -582,17 +757,22 @@ export default function EntranceGateVerificationPage() {
                               ? 'rgba(16, 185, 129, 0.15)'
                               : currentResult.status === 'ALREADY_CHECKED_IN'
                               ? 'rgba(245, 158, 11, 0.15)'
+                              : currentResult.status === 'EXPIRED'
+                              ? 'rgba(249, 115, 22, 0.15)'
                               : 'rgba(244, 63, 94, 0.15)',
                           color:
                             currentResult.status === 'VERIFIED'
                               ? '#34d399'
                               : currentResult.status === 'ALREADY_CHECKED_IN'
                               ? '#fbbf24'
+                              : currentResult.status === 'EXPIRED'
+                              ? '#fb923c'
                               : '#fb7185',
                         }}
                       >
                         {currentResult.status === 'VERIFIED' && '✅ VERIFIED ENTRY PASS'}
                         {currentResult.status === 'ALREADY_CHECKED_IN' && '⚠️ ALREADY CHECKED IN'}
+                        {currentResult.status === 'EXPIRED' && '⌛ EXPIRED TICKET PASS'}
                         {currentResult.status === 'INVALID' && '❌ INVALID / UNKNOWN PASS'}
                       </span>
 
@@ -606,7 +786,7 @@ export default function EntranceGateVerificationPage() {
                   </div>
 
                   {/* Ticket Details Breakdown */}
-                  {currentResult.valid && currentResult.data && (
+                  {currentResult.data && currentResult.status !== 'INVALID' && (
                     <div className="bg-black/50 border border-white/10 rounded-2xl p-4 text-left space-y-2.5 text-xs">
                       {/* Team & Captain */}
                       <div className="flex items-center justify-between pb-2 border-b border-white/5">
@@ -624,7 +804,7 @@ export default function EntranceGateVerificationPage() {
                         </span>
                       </div>
 
-                      {/* Tournament & College */}
+                      {/* Tournament */}
                       <div className="flex items-center justify-between pb-2 border-b border-white/5">
                         <span className="text-slate-400 font-medium">Tournament:</span>
                         <span className="font-semibold text-white truncate max-w-[200px]">
@@ -632,19 +812,26 @@ export default function EntranceGateVerificationPage() {
                         </span>
                       </div>
 
-                      {/* Attendance Status Badge */}
-                      <div className="flex items-center justify-between pt-1">
-                        <span className="text-slate-400 font-medium">Attendance:</span>
-                        <span
-                          className={`px-2.5 py-0.5 rounded-full font-black uppercase text-[11px] flex items-center gap-1 ${
-                            currentResult.status === 'ALREADY_CHECKED_IN'
-                              ? 'bg-amber-500/20 text-amber-300'
-                              : 'bg-emerald-500/20 text-emerald-300'
-                          }`}
-                        >
-                          <Check className="w-3 h-3" /> PRESENT (Checked In)
-                        </span>
-                      </div>
+                      {/* Expiration Notice if Expired */}
+                      {currentResult.status === 'EXPIRED' ? (
+                        <div className="p-2.5 bg-orange-950/40 border border-orange-500/30 rounded-xl text-orange-300 text-[11px] text-center font-medium">
+                          Tournament concluded on {currentResult.data.tournamentDate || 'Event Day'}. Pass is no longer valid for gate entry.
+                        </div>
+                      ) : (
+                        /* Attendance Status Badge */
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-slate-400 font-medium">Attendance:</span>
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full font-black uppercase text-[11px] flex items-center gap-1 ${
+                              currentResult.status === 'ALREADY_CHECKED_IN'
+                                ? 'bg-amber-500/20 text-amber-300'
+                                : 'bg-emerald-500/20 text-emerald-300'
+                            }`}
+                          >
+                            <Check className="w-3 h-3" /> PRESENT (Checked In)
+                          </span>
+                        </div>
+                      )}
 
                       {/* Check-in Timestamp / Marshal */}
                       {currentResult.status === 'ALREADY_CHECKED_IN' && currentResult.data.attendedAt && (
@@ -656,9 +843,9 @@ export default function EntranceGateVerificationPage() {
                   )}
 
                   {/* Invalid Reason */}
-                  {!currentResult.valid && (
+                  {currentResult.status === 'INVALID' && (
                     <div className="p-4 bg-rose-950/30 border border-rose-500/20 rounded-2xl text-rose-300 text-xs font-medium text-center">
-                      {currentResult.message || 'Pass ID not found on database. Ticket may be expired or invalid.'}
+                      {currentResult.message || 'Pass ID not found on database. Ticket may be invalid or unrecognized.'}
                     </div>
                   )}
 
@@ -685,25 +872,30 @@ export default function EntranceGateVerificationPage() {
         </div>
 
         {/* ── Entrance Shift Quick Summary Counters ── */}
-        <div className="grid grid-cols-4 gap-2 pt-6">
-          <div className="p-3 bg-[#0C111D] border border-white/10 rounded-2xl text-center">
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Total Scans</span>
-            <span className="text-base font-black font-mono text-white">{totalScanned}</span>
+        <div className="grid grid-cols-5 gap-2 pt-6">
+          <div className="p-2.5 bg-[#0C111D] border border-white/10 rounded-2xl text-center">
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Total</span>
+            <span className="text-sm sm:text-base font-black font-mono text-white">{totalScanned}</span>
           </div>
 
-          <div className="p-3 bg-[#0C111D] border border-emerald-500/20 rounded-2xl text-center">
-            <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider block">Checked In</span>
-            <span className="text-base font-black font-mono text-emerald-400">{verifiedCount}</span>
+          <div className="p-2.5 bg-[#0C111D] border border-emerald-500/20 rounded-2xl text-center">
+            <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider block">Valid In</span>
+            <span className="text-sm sm:text-base font-black font-mono text-emerald-400">{verifiedCount}</span>
           </div>
 
-          <div className="p-3 bg-[#0C111D] border border-amber-500/20 rounded-2xl text-center">
-            <span className="text-[9px] font-bold text-amber-400 uppercase tracking-wider block">Already In</span>
-            <span className="text-base font-black font-mono text-amber-400">{alreadyCount}</span>
+          <div className="p-2.5 bg-[#0C111D] border border-amber-500/20 rounded-2xl text-center">
+            <span className="text-[9px] font-bold text-amber-400 uppercase tracking-wider block">Already</span>
+            <span className="text-sm sm:text-base font-black font-mono text-amber-400">{alreadyCount}</span>
           </div>
 
-          <div className="p-3 bg-[#0C111D] border border-rose-500/20 rounded-2xl text-center">
+          <div className="p-2.5 bg-[#0C111D] border border-orange-500/20 rounded-2xl text-center">
+            <span className="text-[9px] font-bold text-orange-400 uppercase tracking-wider block">Expired</span>
+            <span className="text-sm sm:text-base font-black font-mono text-orange-400">{expiredCount}</span>
+          </div>
+
+          <div className="p-2.5 bg-[#0C111D] border border-rose-500/20 rounded-2xl text-center">
             <span className="text-[9px] font-bold text-rose-400 uppercase tracking-wider block">Invalid</span>
-            <span className="text-base font-black font-mono text-rose-400">{invalidCount}</span>
+            <span className="text-sm sm:text-base font-black font-mono text-rose-400">{invalidCount}</span>
           </div>
         </div>
       </div>
@@ -753,6 +945,8 @@ export default function EntranceGateVerificationPage() {
                                 ? 'bg-emerald-500/20 text-emerald-400'
                                 : item.status === 'ALREADY_CHECKED_IN'
                                 ? 'bg-amber-500/20 text-amber-400'
+                                : item.status === 'EXPIRED'
+                                ? 'bg-orange-500/20 text-orange-400'
                                 : 'bg-rose-500/20 text-rose-400'
                             }`}
                           >

@@ -405,8 +405,12 @@ def update_attendance_status(pass_id):
         existing_memory = IN_MEMORY_REGISTRATIONS.get(pass_id)
         current_status = existing_memory.get('attendance_status') if existing_memory else None
 
-        # Supabase update
+        # Supabase update (case-insensitive ilike for registrations & event_attendance)
         supabase_updated = False
+        import datetime
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        clean_pid = (pass_id or '').strip()
+
         try:
             supabase = get_supabase_client()
             update_payload = {
@@ -414,26 +418,43 @@ def update_attendance_status(pass_id):
                 'attended_at': attended_at,
                 'attended_by': attended_by
             }
-            res = supabase.table('registrations').update(update_payload).eq('pass_id', pass_id).execute()
+            res = supabase.table('registrations').update(update_payload).ilike('pass_id', clean_pid).execute()
             if res.data and len(res.data) > 0:
                 supabase_updated = True
                 updated_item = res.data[0]
                 current_status = updated_item.get('attendance_status')
+
+            # Also update event_attendance table
+            try:
+                supabase.table('event_attendance').upsert({
+                    'pass_id': clean_pid,
+                    'attendance_status': new_status,
+                    'attended_at': attended_at,
+                    'attended_by': attended_by,
+                    'updated_at': now_iso
+                }, on_conflict='pass_id').execute()
+            except Exception as ea_err:
+                print(f"event_attendance table sync notice: {ea_err}")
+
         except Exception as sb_err:
             print(f"Supabase attendance update warning: {sb_err}")
 
-        # Update in-memory store
-        if pass_id in IN_MEMORY_REGISTRATIONS:
-            IN_MEMORY_REGISTRATIONS[pass_id]['attendance_status'] = new_status
-            IN_MEMORY_REGISTRATIONS[pass_id]['attendanceStatus'] = new_status
-            IN_MEMORY_REGISTRATIONS[pass_id]['attended_at'] = attended_at
-            IN_MEMORY_REGISTRATIONS[pass_id]['attendedAt'] = attended_at
-            IN_MEMORY_REGISTRATIONS[pass_id]['attended_by'] = attended_by
-            IN_MEMORY_REGISTRATIONS[pass_id]['attendedBy'] = attended_by
-        elif supabase_updated:
-            IN_MEMORY_REGISTRATIONS[pass_id] = {
-                'pass_id': pass_id,
-                'passId': pass_id,
+        # Update all matching keys in memory store (case-insensitive)
+        matched_any = False
+        for k, reg in list(IN_MEMORY_REGISTRATIONS.items()):
+            if k.strip().lower() == clean_pid.lower() or (reg.get('pass_id') or '').strip().lower() == clean_pid.lower():
+                reg['attendance_status'] = new_status
+                reg['attendanceStatus'] = new_status
+                reg['attended_at'] = attended_at
+                reg['attendedAt'] = attended_at
+                reg['attended_by'] = attended_by
+                reg['attendedBy'] = attended_by
+                matched_any = True
+
+        if not matched_any and supabase_updated:
+            IN_MEMORY_REGISTRATIONS[clean_pid] = {
+                'pass_id': clean_pid,
+                'passId': clean_pid,
                 'attendance_status': new_status,
                 'attendanceStatus': new_status,
                 'attended_at': attended_at,
@@ -515,15 +536,69 @@ def mark_all_remaining_as_absent():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+def check_tournament_expired(tourn_date=None, end_date=None, status=None):
+    """
+    Returns (is_expired: bool, date_str: str)
+    A tournament pass expires once the tournament date / end_date has concluded.
+    """
+    if status and str(status).strip().lower() in ['completed', 'concluded', 'ended', 'past']:
+        return True, tourn_date or 'Concluded'
+
+    raw = (end_date or tourn_date or '').strip()
+    if not raw or raw.lower() in ['upcoming', 'tba', 'scheduled', 'live', 'registering']:
+        return False, raw
+
+    import datetime
+    # 1. Try ISO parsing (e.g. 2026-05-18 or 2026-05-18T00:00:00)
+    try:
+        dt = datetime.datetime.fromisoformat(raw.replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        if dt.hour == 0 and dt.minute == 0:
+            dt = dt.replace(hour=23, minute=59, second=59)
+        if datetime.datetime.now(datetime.timezone.utc) > dt:
+            return True, raw
+    except Exception:
+        pass
+
+    # 2. Try standard date patterns with year
+    current_year = datetime.datetime.now().year
+    formats_with_year = [
+        '%d %b %Y', '%d %B %Y', '%Y-%m-%d', '%d/%m/%Y', '%b %d, %Y', '%B %d, %Y',
+        '%d-%m-%Y', '%d.%m.%Y'
+    ]
+    for fmt in formats_with_year:
+        try:
+            dt = datetime.datetime.strptime(raw, fmt)
+            dt = dt.replace(hour=23, minute=59, second=59)
+            if datetime.datetime.now() > dt:
+                return True, raw
+        except Exception:
+            pass
+
+    # 3. Formats without year (e.g. "18 May", "2 Jun")
+    for fmt in ['%d %b', '%d %B']:
+        try:
+            dt = datetime.datetime.strptime(raw, fmt)
+            dt = dt.replace(year=current_year, hour=23, minute=59, second=59)
+            if datetime.datetime.now() > dt:
+                return True, raw
+        except Exception:
+            pass
+
+    return False, raw
+
+
 @registrations_bp.route('/verify/<pass_id>', methods=['GET', 'POST'])
 def verify_registration_pass(pass_id):
     """
     Endpoint for Admin QR Scanner / Entrance Gate verification lookup.
-    Supports atomic auto-check-in to prevent race conditions during entrance scanning.
+    Supports atomic auto-check-in and automatic tournament expiration validation.
     Statuses:
       - 'VERIFIED': Valid pass, marked PRESENT (or ready to mark)
       - 'ALREADY_CHECKED_IN': Valid pass, was already checked in prior to this scan
-      - 'INVALID': Pass ID not recognized or expired
+      - 'EXPIRED': Pass has expired as tournament date has concluded
+      - 'INVALID': Pass ID not recognized
     """
     try:
         clean_id = (pass_id or '').strip()
@@ -545,7 +620,25 @@ def verify_registration_pass(pass_id):
         import datetime
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        # 1. Check memory store (case-insensitive)
+        # 1. Real-time Supabase Synchronization
+        sb_item = None
+        try:
+            supabase = get_supabase_client()
+            res = supabase.table('registrations').select('*').ilike('pass_id', clean_id).execute()
+            if res.data and len(res.data) > 0:
+                sb_item = res.data[0]
+                try:
+                    ea_res = supabase.table('event_attendance').select('*').ilike('pass_id', clean_id).execute()
+                    if ea_res.data and len(ea_res.data) > 0:
+                        sb_item['attendance_status'] = ea_res.data[0].get('attendance_status') or sb_item.get('attendance_status')
+                        sb_item['attended_at'] = ea_res.data[0].get('attended_at')
+                        sb_item['attended_by'] = ea_res.data[0].get('attended_by')
+                except Exception:
+                    pass
+        except Exception as sb_err:
+            print(f"Supabase verify sync notice: {sb_err}")
+
+        # 2. Check memory store (case-insensitive)
         matched_mem_key = None
         matched_mem_reg = None
         for k, reg in IN_MEMORY_REGISTRATIONS.items():
@@ -554,7 +647,39 @@ def verify_registration_pass(pass_id):
                 matched_mem_reg = reg
                 break
 
+        # If Supabase had fresher state, sync memory
+        if sb_item and matched_mem_reg:
+            matched_mem_reg['attendance_status'] = sb_item.get('attendance_status') or 'NOT_MARKED'
+            matched_mem_reg['attendanceStatus'] = sb_item.get('attendance_status') or 'NOT_MARKED'
+            matched_mem_reg['attended_at'] = sb_item.get('attended_at')
+            matched_mem_reg['attendedAt'] = sb_item.get('attended_at')
+            matched_mem_reg['attended_by'] = sb_item.get('attended_by')
+            matched_mem_reg['attendedBy'] = sb_item.get('attended_by')
+        elif sb_item and not matched_mem_reg:
+            matched_mem_reg = sb_item
+            IN_MEMORY_REGISTRATIONS[clean_id] = sb_item
+
         if matched_mem_reg:
+            tourn_slug = matched_mem_reg.get('tournament_slug') or matched_mem_reg.get('tournamentSlug') or ''
+            tourn_date = matched_mem_reg.get('tournament_date') or matched_mem_reg.get('date') or ''
+            tourn_status = matched_mem_reg.get('tournament_status') or matched_mem_reg.get('status') or ''
+
+            # Check tournament expiration
+            is_expired, exp_date_str = check_tournament_expired(tourn_date, status=tourn_status)
+            if is_expired:
+                return jsonify({
+                    'valid': False,
+                    'status': 'EXPIRED',
+                    'is_expired': True,
+                    'passId': matched_mem_reg.get('pass_id', clean_id),
+                    'message': f'This ticket pass has expired. Tournament concluded on {exp_date_str}.',
+                    'data': {
+                        **matched_mem_reg,
+                        'tournamentDate': exp_date_str,
+                        'isExpired': True,
+                    }
+                }), 200
+
             current_att = (matched_mem_reg.get('attendance_status') or matched_mem_reg.get('attendanceStatus') or 'NOT_MARKED').upper()
             
             # Check if ALREADY checked in
@@ -631,6 +756,42 @@ def verify_registration_pass(pass_id):
                 item = res.data[0]
                 current_att = (item.get('attendance_status') or 'NOT_MARKED').upper()
                 p_id = item.get('pass_id', clean_id)
+                t_slug = item.get('tournament_slug') or ''
+
+                # Fetch tournament to check date / expiration
+                tourn_date = item.get('tournament_date') or ''
+                tourn_status = item.get('tournament_status') or ''
+                try:
+                    t_res = supabase.table('tournaments').select('*').eq('slug', t_slug).execute()
+                    if t_res.data and len(t_res.data) > 0:
+                        t_item = t_res.data[0]
+                        tourn_date = t_item.get('end_date') or t_item.get('date') or tourn_date
+                        tourn_status = t_item.get('status') or tourn_status
+                except Exception:
+                    pass
+
+                # Check tournament expiration
+                is_expired, exp_date_str = check_tournament_expired(tourn_date, status=tourn_status)
+                if is_expired:
+                    return jsonify({
+                        'valid': False,
+                        'status': 'EXPIRED',
+                        'is_expired': True,
+                        'passId': p_id,
+                        'message': f'This ticket pass has expired. Tournament concluded on {exp_date_str}.',
+                        'data': {
+                            'passId': p_id,
+                            'pass_id': p_id,
+                            'tournamentTitle': item.get('tournament_title') or 'Esports Tournament',
+                            'tournamentSlug': t_slug,
+                            'tournamentDate': exp_date_str,
+                            'teamName': item.get('team_name') or 'Squad Entry',
+                            'captainName': item.get('captain_name') or 'Squad Captain',
+                            'college': item.get('college') or 'Collegiate Campus',
+                            'email': item.get('email') or '',
+                            'isExpired': True,
+                        }
+                    }), 200
 
                 # Check if ALREADY checked in
                 if current_att == 'PRESENT':
