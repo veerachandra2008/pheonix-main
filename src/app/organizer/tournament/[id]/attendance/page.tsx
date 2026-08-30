@@ -31,7 +31,8 @@ import {
   Check,
   AlertCircle,
   CreditCard,
-  Ticket
+  Ticket,
+  QrCode
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 import { tournaments as defaultTournaments } from '@/app/tournaments/data';
@@ -653,19 +654,27 @@ export default function TournamentAttendancePage() {
               </p>
             </div>
 
-            {/* Quick Batch Absent CTA */}
-            {stats.notMarked > 0 && (
-              <div className="shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            {/* Action CTAs */}
+            <div className="shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <Link
+                href="/verify"
+                className="px-5 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider rounded-2xl transition shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <QrCode className="h-4 w-4" />
+                Launch Gate QR Scanner
+              </Link>
+
+              {stats.notMarked > 0 && (
                 <button
                   type="button"
                   onClick={() => setShowBatchAbsentModal(true)}
                   className="px-5 py-3.5 bg-rose-500/10 hover:bg-rose-600 border border-rose-500/30 hover:border-rose-500 text-rose-300 hover:text-white text-xs font-black uppercase tracking-wider rounded-2xl transition shadow-lg shadow-rose-950/40 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <UserX className="h-4 w-4" />
-                  Mark Remaining as Absent ({stats.notMarked})
+                  Mark Absent ({stats.notMarked})
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </section>
 

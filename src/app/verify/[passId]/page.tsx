@@ -274,12 +274,21 @@ export default function VerifyPassPage(props: PageProps) {
             </div>
           </Link>
 
-          <Link
-            href="/tournaments"
-            className="text-xs text-slate-400 hover:text-white flex items-center gap-1 font-medium transition px-3 py-1.5 rounded-lg bg-white/5 border border-white/10"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to App
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/verify"
+              className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5 font-bold transition px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30"
+            >
+              <QrCode className="w-3.5 h-3.5" /> Gate Scanner Mode
+            </Link>
+
+            <Link
+              href="/tournaments"
+              className="text-xs text-slate-400 hover:text-white flex items-center gap-1 font-medium transition px-3 py-1.5 rounded-lg bg-white/5 border border-white/10"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> Back
+            </Link>
+          </div>
         </div>
       </header>
 

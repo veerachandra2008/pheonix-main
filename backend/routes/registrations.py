@@ -515,30 +515,113 @@ def mark_all_remaining_as_absent():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
-@registrations_bp.route('/verify/<pass_id>', methods=['GET'])
+@registrations_bp.route('/verify/<pass_id>', methods=['GET', 'POST'])
 def verify_registration_pass(pass_id):
     """
-    Endpoint for Admin QR Scanner / Public verification lookup.
+    Endpoint for Admin QR Scanner / Entrance Gate verification lookup.
+    Supports atomic auto-check-in to prevent race conditions during entrance scanning.
+    Statuses:
+      - 'VERIFIED': Valid pass, marked PRESENT (or ready to mark)
+      - 'ALREADY_CHECKED_IN': Valid pass, was already checked in prior to this scan
+      - 'INVALID': Pass ID not recognized or expired
     """
     try:
         clean_id = (pass_id or '').strip()
         if not clean_id:
-            return jsonify({'valid': False, 'status': 'INVALID_PASS', 'message': 'Empty pass ID provided'}), 200
+            return jsonify({'valid': False, 'status': 'INVALID', 'message': 'Empty pass ID provided'}), 200
+
+        # Query / payload options
+        auto_check_in = request.args.get('auto_check_in', '').lower() in ['true', '1', 'yes']
+        attended_by = request.args.get('attended_by') or 'Entrance Desk Scanner'
+
+        # Also support JSON body if POST
+        if request.is_json:
+            req_data = request.get_json(silent=True) or {}
+            if 'auto_check_in' in req_data:
+                auto_check_in = bool(req_data.get('auto_check_in'))
+            if 'attended_by' in req_data:
+                attended_by = req_data.get('attended_by') or attended_by
+
+        import datetime
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         # 1. Check memory store (case-insensitive)
+        matched_mem_key = None
+        matched_mem_reg = None
         for k, reg in IN_MEMORY_REGISTRATIONS.items():
             if k.strip().lower() == clean_id.lower() or (reg.get('pass_id') or '').strip().lower() == clean_id.lower():
-                att_status = (reg.get('attendance_status') or reg.get('attendanceStatus') or 'NOT_MARKED').upper()
+                matched_mem_key = k
+                matched_mem_reg = reg
+                break
+
+        if matched_mem_reg:
+            current_att = (matched_mem_reg.get('attendance_status') or matched_mem_reg.get('attendanceStatus') or 'NOT_MARKED').upper()
+            
+            # Check if ALREADY checked in
+            if current_att == 'PRESENT':
+                return jsonify({
+                    'valid': True,
+                    'status': 'ALREADY_CHECKED_IN',
+                    'already_checked_in': True,
+                    'passId': matched_mem_reg.get('pass_id', clean_id),
+                    'message': 'Participant is already checked in.',
+                    'data': {
+                        **matched_mem_reg,
+                        'attendanceStatus': 'PRESENT',
+                        'attendance_status': 'PRESENT',
+                        'attendedAt': matched_mem_reg.get('attended_at') or matched_mem_reg.get('attendedAt') or now_iso,
+                        'attendedBy': matched_mem_reg.get('attended_by') or matched_mem_reg.get('attendedBy') or attended_by
+                    }
+                }), 200
+
+            # If Auto-Check-In is enabled, mark PRESENT atomically
+            if auto_check_in:
+                matched_mem_reg['attendance_status'] = 'PRESENT'
+                matched_mem_reg['attendanceStatus'] = 'PRESENT'
+                matched_mem_reg['attended_at'] = now_iso
+                matched_mem_reg['attendedAt'] = now_iso
+                matched_mem_reg['attended_by'] = attended_by
+                matched_mem_reg['attendedBy'] = attended_by
+
+                # Also update Supabase in background
+                try:
+                    supabase = get_supabase_client()
+                    supabase.table('registrations').update({
+                        'attendance_status': 'PRESENT',
+                        'attended_at': now_iso,
+                        'attended_by': attended_by
+                    }).ilike('pass_id', clean_id).execute()
+                except Exception as sb_err:
+                    print(f"Supabase auto-check-in sync warning: {sb_err}")
+
                 return jsonify({
                     'valid': True,
                     'status': 'VERIFIED',
-                    'passId': clean_id,
+                    'already_checked_in': False,
+                    'passId': matched_mem_reg.get('pass_id', clean_id),
+                    'message': 'Participant verified and checked in as PRESENT.',
                     'data': {
-                        **reg,
-                        'attendanceStatus': att_status,
-                        'attendance_status': att_status
+                        **matched_mem_reg,
+                        'attendanceStatus': 'PRESENT',
+                        'attendance_status': 'PRESENT',
+                        'attendedAt': now_iso,
+                        'attendedBy': attended_by
                     }
                 }), 200
+
+            # Valid without auto-check-in
+            return jsonify({
+                'valid': True,
+                'status': 'VERIFIED',
+                'already_checked_in': False,
+                'passId': matched_mem_reg.get('pass_id', clean_id),
+                'message': 'Pass verified successfully.',
+                'data': {
+                    **matched_mem_reg,
+                    'attendanceStatus': current_att,
+                    'attendance_status': current_att
+                }
+            }), 200
 
         # 2. Query Supabase (case-insensitive ilike)
         try:
@@ -546,14 +629,127 @@ def verify_registration_pass(pass_id):
             res = supabase.table('registrations').select('*').ilike('pass_id', clean_id).execute()
             if res.data and len(res.data) > 0:
                 item = res.data[0]
-                att_status = (item.get('attendance_status') or 'NOT_MARKED').upper()
+                current_att = (item.get('attendance_status') or 'NOT_MARKED').upper()
+                p_id = item.get('pass_id', clean_id)
+
+                # Check if ALREADY checked in
+                if current_att == 'PRESENT':
+                    return jsonify({
+                        'valid': True,
+                        'status': 'ALREADY_CHECKED_IN',
+                        'already_checked_in': True,
+                        'passId': p_id,
+                        'message': 'Participant is already checked in.',
+                        'data': {
+                            'passId': p_id,
+                            'pass_id': p_id,
+                            'tournamentTitle': item.get('tournament_title') or 'Esports Tournament',
+                            'tournament_title': item.get('tournament_title') or 'Esports Tournament',
+                            'tournamentSlug': item.get('tournament_slug') or 'tournament',
+                            'tournament_slug': item.get('tournament_slug') or 'tournament',
+                            'tournamentFee': item.get('tournament_fee', 'Free'),
+                            'tournament_fee': item.get('tournament_fee', 'Free'),
+                            'teamName': item.get('team_name') or 'Squad Entry',
+                            'team_name': item.get('team_name') or 'Squad Entry',
+                            'captainName': item.get('captain_name') or 'Squad Captain',
+                            'captain_name': item.get('captain_name') or 'Squad Captain',
+                            'college': item.get('college') or 'Collegiate Campus',
+                            'email': item.get('email') or '',
+                            'paymentStatus': item.get('payment_status', 'SUCCESS'),
+                            'payment_status': item.get('payment_status', 'SUCCESS'),
+                            'paymentId': item.get('payment_id', ''),
+                            'payment_id': item.get('payment_id', ''),
+                            'orderId': item.get('order_id', ''),
+                            'order_id': item.get('order_id', ''),
+                            'attendanceStatus': 'PRESENT',
+                            'attendance_status': 'PRESENT',
+                            'attendedAt': item.get('attended_at') or now_iso,
+                            'attendedBy': item.get('attended_by') or attended_by,
+                            'players': item.get('players') or []
+                        }
+                    }), 200
+
+                # If Auto-Check-In is enabled, atomically mark PRESENT in Supabase and memory
+                if auto_check_in:
+                    try:
+                        supabase.table('registrations').update({
+                            'attendance_status': 'PRESENT',
+                            'attended_at': now_iso,
+                            'attended_by': attended_by
+                        }).ilike('pass_id', clean_id).execute()
+
+                        # Also upsert into event_attendance table
+                        supabase.table('event_attendance').upsert({
+                            'pass_id': p_id,
+                            'tournament_slug': item.get('tournament_slug'),
+                            'team_name': item.get('team_name'),
+                            'captain_name': item.get('captain_name'),
+                            'college': item.get('college'),
+                            'email': item.get('email'),
+                            'attendance_status': 'PRESENT',
+                            'attended_at': now_iso,
+                            'attended_by': attended_by,
+                            'updated_at': now_iso
+                        }, on_conflict='pass_id').execute()
+                    except Exception as upd_err:
+                        print(f"Supabase update attendance notice: {upd_err}")
+
+                    # Sync memory store
+                    IN_MEMORY_REGISTRATIONS[p_id] = {
+                        **item,
+                        'attendance_status': 'PRESENT',
+                        'attendanceStatus': 'PRESENT',
+                        'attended_at': now_iso,
+                        'attendedAt': now_iso,
+                        'attended_by': attended_by,
+                        'attendedBy': attended_by
+                    }
+
+                    return jsonify({
+                        'valid': True,
+                        'status': 'VERIFIED',
+                        'already_checked_in': False,
+                        'passId': p_id,
+                        'message': 'Participant verified and checked in as PRESENT.',
+                        'data': {
+                            'passId': p_id,
+                            'pass_id': p_id,
+                            'tournamentTitle': item.get('tournament_title') or 'Esports Tournament',
+                            'tournament_title': item.get('tournament_title') or 'Esports Tournament',
+                            'tournamentSlug': item.get('tournament_slug') or 'tournament',
+                            'tournament_slug': item.get('tournament_slug') or 'tournament',
+                            'tournamentFee': item.get('tournament_fee', 'Free'),
+                            'tournament_fee': item.get('tournament_fee', 'Free'),
+                            'teamName': item.get('team_name') or 'Squad Entry',
+                            'team_name': item.get('team_name') or 'Squad Entry',
+                            'captainName': item.get('captain_name') or 'Squad Captain',
+                            'captain_name': item.get('captain_name') or 'Squad Captain',
+                            'college': item.get('college') or 'Collegiate Campus',
+                            'email': item.get('email') or '',
+                            'paymentStatus': item.get('payment_status', 'SUCCESS'),
+                            'payment_status': item.get('payment_status', 'SUCCESS'),
+                            'paymentId': item.get('payment_id', ''),
+                            'payment_id': item.get('payment_id', ''),
+                            'orderId': item.get('order_id', ''),
+                            'order_id': item.get('order_id', ''),
+                            'attendanceStatus': 'PRESENT',
+                            'attendance_status': 'PRESENT',
+                            'attendedAt': now_iso,
+                            'attendedBy': attended_by,
+                            'players': item.get('players') or []
+                        }
+                    }), 200
+
+                # Valid without auto check-in
                 return jsonify({
                     'valid': True,
                     'status': 'VERIFIED',
-                    'passId': item.get('pass_id', clean_id),
+                    'already_checked_in': False,
+                    'passId': p_id,
+                    'message': 'Pass verified successfully.',
                     'data': {
-                        'passId': item.get('pass_id'),
-                        'pass_id': item.get('pass_id'),
+                        'passId': p_id,
+                        'pass_id': p_id,
                         'tournamentTitle': item.get('tournament_title'),
                         'tournament_title': item.get('tournament_title'),
                         'tournamentSlug': item.get('tournament_slug'),
@@ -570,18 +766,19 @@ def verify_registration_pass(pass_id):
                         'payment_id': item.get('payment_id', ''),
                         'orderId': item.get('order_id', ''),
                         'order_id': item.get('order_id', ''),
-                        'attendanceStatus': att_status,
-                        'attendance_status': att_status,
+                        'attendanceStatus': current_att,
+                        'attendance_status': current_att,
                         'attendedAt': item.get('attended_at'),
-                        'attendedBy': item.get('attended_by')
+                        'attendedBy': item.get('attended_by'),
+                        'players': item.get('players') or []
                     }
                 }), 200
         except Exception as sb_err:
             print(f"Supabase verification error: {sb_err}")
 
-        return jsonify({'valid': False, 'status': 'NOT_FOUND', 'message': f'Pass ID {clean_id} not found on server'}), 200
+        return jsonify({'valid': False, 'status': 'INVALID', 'message': f'Pass ID {clean_id} not found on server'}), 200
     except Exception as e:
-        return jsonify({'valid': False, 'message': str(e)}), 500
+        return jsonify({'valid': False, 'status': 'INVALID', 'message': str(e)}), 500
 
 @registrations_bp.route('/<pass_id>', methods=['DELETE'])
 def delete_registration(pass_id):

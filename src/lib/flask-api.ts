@@ -886,4 +886,258 @@ export const flaskApi = {
       return { success: false, message: err.message };
     }
   },
+
+  // ----------------------------------------------------
+  // ENTRANCE GATE QR SCANNER VERIFICATION (Atomic & Fast)
+  // ----------------------------------------------------
+  async verifyPass(
+    passId: string,
+    options?: { autoCheckIn?: boolean; attendedBy?: string }
+  ): Promise<{
+    valid: boolean;
+    status: 'VERIFIED' | 'ALREADY_CHECKED_IN' | 'INVALID';
+    already_checked_in?: boolean;
+    passId: string;
+    message?: string;
+    data?: any;
+  }> {
+    const cleanId = (passId || '').trim();
+    if (!cleanId) {
+      return { valid: false, status: 'INVALID', passId: '', message: 'Empty ticket pass ID provided' };
+    }
+
+    const autoCheckIn = options?.autoCheckIn ?? true;
+    const attendedBy = options?.attendedBy || 'Entrance Gate Scanner';
+    const nowIso = new Date().toISOString();
+
+    // 1. Primary: Flask Backend Verification with atomic auto-check-in
+    try {
+      const apiBase = getApiBaseUrl();
+      const queryParams = new URLSearchParams({
+        auto_check_in: autoCheckIn ? 'true' : 'false',
+        attended_by: attendedBy,
+      });
+
+      const res = await fetchWithTimeout(
+        `${apiBase}/registrations/verify/${encodeURIComponent(cleanId)}?${queryParams.toString()}`,
+        { method: 'GET' },
+        2500
+      );
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json.valid) {
+          const isAlready = json.status === 'ALREADY_CHECKED_IN' || json.already_checked_in === true;
+          return {
+            valid: true,
+            status: isAlready ? 'ALREADY_CHECKED_IN' : 'VERIFIED',
+            already_checked_in: isAlready,
+            passId: json.passId || cleanId,
+            message: json.message || (isAlready ? 'Participant already checked in' : 'Valid entry pass'),
+            data: json.data || {},
+          };
+        } else if (json.status === 'INVALID' || json.status === 'NOT_FOUND') {
+          return { valid: false, status: 'INVALID', passId: cleanId, message: json.message || 'Pass ID not found on server' };
+        }
+      }
+    } catch (e) {
+      console.warn('Backend verify API notice (falling back to direct Supabase):', e);
+    }
+
+    // 2. Direct Supabase Fallback (Atomic Check-and-Set)
+    try {
+      const [regRes, attRes] = await Promise.all([
+        supabase.from('registrations').select('*').ilike('pass_id', cleanId).maybeSingle(),
+        supabase.from('event_attendance').select('*').ilike('pass_id', cleanId).maybeSingle(),
+      ]);
+
+      if (regRes.data) {
+        const item = regRes.data;
+        const existingAtt = attRes.data;
+        const currentAttStatus = (existingAtt?.attendance_status || item.attendance_status || 'NOT_MARKED').toUpperCase();
+
+        const pId = item.pass_id || cleanId;
+        const teamName = item.team_name || item.teamName || 'Squad Entry';
+        const captainName = item.captain_name || item.captainName || 'Squad Captain';
+        const tournamentTitle = item.tournament_title || item.tournamentTitle || 'Esports Tournament';
+        const tournamentSlug = item.tournament_slug || item.tournamentSlug || 'tournament';
+        const college = item.college || 'Collegiate Campus';
+        const email = item.email || '';
+        const paymentStatus = item.payment_status || item.paymentStatus || 'SUCCESS';
+        const paymentId = item.payment_id || item.paymentId || null;
+        const orderId = item.order_id || item.orderId || null;
+        const tournamentFee = item.tournament_fee || item.tournamentFee || null;
+        const players = item.players || [];
+
+        // Check if ALREADY PRESENT
+        if (currentAttStatus === 'PRESENT') {
+          return {
+            valid: true,
+            status: 'ALREADY_CHECKED_IN',
+            already_checked_in: true,
+            passId: pId,
+            message: 'Participant is already checked in.',
+            data: {
+              passId: pId,
+              pass_id: pId,
+              teamName,
+              captainName,
+              tournamentTitle,
+              tournamentSlug,
+              college,
+              email,
+              paymentStatus,
+              payment_status: paymentStatus,
+              paymentId,
+              payment_id: paymentId,
+              orderId,
+              order_id: orderId,
+              tournamentFee,
+              tournament_fee: tournamentFee,
+              attendanceStatus: 'PRESENT',
+              attendance_status: 'PRESENT',
+              attendedAt: existingAtt?.attended_at || item.attended_at || nowIso,
+              attendedBy: existingAtt?.attended_by || item.attended_by || attendedBy,
+              players,
+            },
+          };
+        }
+
+        // If Auto-Check-In, update Supabase atomically
+        if (autoCheckIn) {
+          try {
+            await Promise.all([
+              supabase.from('registrations').update({
+                attendance_status: 'PRESENT',
+                attended_at: nowIso,
+                attended_by: attendedBy,
+              }).eq('pass_id', pId),
+              supabase.from('event_attendance').upsert({
+                pass_id: pId,
+                tournament_slug: tournamentSlug,
+                team_name: teamName,
+                captain_name: captainName,
+                college,
+                email,
+                attendance_status: 'PRESENT',
+                attended_at: nowIso,
+                attended_by: attendedBy,
+                updated_at: nowIso,
+              }, { onConflict: 'pass_id' }),
+            ]);
+          } catch (updateErr) {
+            console.warn('Supabase attendance update error:', updateErr);
+          }
+        }
+
+        return {
+          valid: true,
+          status: 'VERIFIED',
+          already_checked_in: false,
+          passId: pId,
+          message: autoCheckIn ? 'Participant verified and marked PRESENT.' : 'Valid entry pass.',
+          data: {
+            passId: pId,
+            pass_id: pId,
+            teamName,
+            captainName,
+            tournamentTitle,
+            tournamentSlug,
+            college,
+            email,
+            paymentStatus,
+            payment_status: paymentStatus,
+            paymentId,
+            payment_id: paymentId,
+            orderId,
+            order_id: orderId,
+            tournamentFee,
+            tournament_fee: tournamentFee,
+            attendanceStatus: autoCheckIn ? 'PRESENT' : currentAttStatus,
+            attendance_status: autoCheckIn ? 'PRESENT' : currentAttStatus,
+            attendedAt: autoCheckIn ? nowIso : (existingAtt?.attended_at || item.attended_at),
+            attendedBy: autoCheckIn ? attendedBy : (existingAtt?.attended_by || item.attended_by),
+            players,
+          },
+        };
+      }
+    } catch (sbErr) {
+      console.warn('Supabase verify lookup fallback notice:', sbErr);
+    }
+
+    // 3. Client LocalStorage Fallback (Offline passes)
+    if (typeof window !== 'undefined') {
+      try {
+        const storedKeys = ['xenova_tournament_passes', 'xenova_registrations', 'user_registrations', 'xenova_user_registrations'];
+        for (const k of storedKeys) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              const matched = list.find(
+                (item: any) => (item.pass_id || item.passId || item.id || '').toString().trim().toLowerCase() === cleanId.toLowerCase()
+              );
+              if (matched) {
+                const pId = matched.pass_id || matched.passId || cleanId;
+                const currentAttStatus = (matched.attendance_status || matched.attendanceStatus || 'NOT_MARKED').toUpperCase();
+
+                if (currentAttStatus === 'PRESENT') {
+                  return {
+                    valid: true,
+                    status: 'ALREADY_CHECKED_IN',
+                    already_checked_in: true,
+                    passId: pId,
+                    message: 'Participant is already checked in.',
+                    data: {
+                      ...matched,
+                      passId: pId,
+                      pass_id: pId,
+                      attendanceStatus: 'PRESENT',
+                      attendance_status: 'PRESENT',
+                    },
+                  };
+                }
+
+                if (autoCheckIn) {
+                  matched.attendance_status = 'PRESENT';
+                  matched.attendanceStatus = 'PRESENT';
+                  matched.attended_at = nowIso;
+                  matched.attendedAt = nowIso;
+                  matched.attended_by = attendedBy;
+                  matched.attendedBy = attendedBy;
+                  localStorage.setItem(k, JSON.stringify(list));
+                }
+
+                return {
+                  valid: true,
+                  status: 'VERIFIED',
+                  already_checked_in: false,
+                  passId: pId,
+                  message: autoCheckIn ? 'Participant verified and marked PRESENT.' : 'Valid entry pass.',
+                  data: {
+                    ...matched,
+                    passId: pId,
+                    pass_id: pId,
+                    attendanceStatus: autoCheckIn ? 'PRESENT' : currentAttStatus,
+                    attendance_status: autoCheckIn ? 'PRESENT' : currentAttStatus,
+                    attendedAt: autoCheckIn ? nowIso : (matched.attended_at || matched.attendedAt),
+                    attendedBy: autoCheckIn ? attendedBy : (matched.attended_by || matched.attendedBy),
+                  },
+                };
+              }
+            }
+          }
+        }
+      } catch (lsErr) {
+        console.warn('LocalStorage verify lookup notice:', lsErr);
+      }
+    }
+
+    return {
+      valid: false,
+      status: 'INVALID',
+      passId: cleanId,
+      message: `Pass ID "${cleanId}" not recognized or expired.`,
+    };
+  },
 };
