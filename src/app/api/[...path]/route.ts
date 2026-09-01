@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { sanitizeTournamentPayload } from '@/lib/tournaments-db';
 
 // Disable static optimization for API routes
 export const dynamic = 'force-dynamic';
@@ -235,8 +236,59 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     }
     if (method === 'POST') {
       const body = await req.json();
-      const { data, error } = await supabase.from('tournaments').insert([body]).select();
-      return NextResponse.json({ success: !error, data: data ? data[0] : body }, { status: error ? 400 : 201 });
+      const cleanPayload = sanitizeTournamentPayload(body);
+      const insertPayload = { slug: body.slug || cleanPayload.slug, ...cleanPayload };
+      const { data, error } = await supabase.from('tournaments').insert([insertPayload]).select();
+      return NextResponse.json({ success: !error, data: data ? data[0] : insertPayload }, { status: error ? 400 : 201 });
+    }
+    if (method === 'PATCH' || method === 'PUT') {
+      try {
+        const body = await req.json();
+        const targetSlug = idOrSlug && idOrSlug !== 'tournaments' ? idOrSlug : (body.slug || '');
+        const cleanPayload = sanitizeTournamentPayload(body);
+
+        if (!targetSlug) {
+          return NextResponse.json({ success: false, message: 'Tournament slug required.' }, { status: 400 });
+        }
+
+        const { data: existing } = await supabase
+          .from('tournaments')
+          .select('id, slug')
+          .eq('slug', targetSlug);
+
+        let resData;
+        if (existing && existing.length > 0) {
+          const { data, error } = await supabase
+            .from('tournaments')
+            .update(cleanPayload)
+            .eq('slug', targetSlug)
+            .select();
+
+          if (error) {
+            return NextResponse.json({ success: false, message: error.message }, { status: 400 });
+          }
+          resData = data ? data[0] : cleanPayload;
+        } else {
+          const insertPayload = { slug: targetSlug, ...cleanPayload };
+          const { data, error } = await supabase
+            .from('tournaments')
+            .insert([insertPayload])
+            .select();
+
+          if (error) {
+            return NextResponse.json({ success: false, message: error.message }, { status: 400 });
+          }
+          resData = data ? data[0] : insertPayload;
+        }
+
+        return NextResponse.json({
+          success: true,
+          data: resData,
+          message: 'Tournament updated successfully.'
+        }, { status: 200 });
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: err.message }, { status: 500 });
+      }
     }
     if (method === 'DELETE') {
       const { error } = await supabase.from('tournaments').delete().eq('slug', idOrSlug);
@@ -311,6 +363,216 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     if (method === 'DELETE') {
       const { error } = await supabase.from('registrations').delete().eq('pass_id', idOrSlug);
       return NextResponse.json({ success: !error, message: 'Registration deleted.' }, { status: 200 });
+    }
+  }
+
+  // 8. Rosters Endpoints
+  if (mainSegment === 'rosters') {
+    if (method === 'GET') {
+      try {
+        const url = new URL(req.url);
+        const tournamentSlug = url.searchParams.get('tournament_slug') || url.searchParams.get('tournamentSlug') || '';
+        const passId = url.searchParams.get('pass_id') || url.searchParams.get('passId') || '';
+        const organizerEmail = (url.searchParams.get('organizer_email') || url.searchParams.get('organizerEmail') || '').toLowerCase().trim();
+
+        let allowedSlugs: string[] = [];
+        if (organizerEmail && organizerEmail !== 'admin@xenova.gg') {
+          const { data: tourns } = await supabase.from('tournaments').select('*');
+          if (tourns && Array.isArray(tourns)) {
+            allowedSlugs = tourns
+              .filter((t: any) => {
+                const em = (t.createdBy || t.organizer_email || t.organizerEmail || t.contact_email || '').toLowerCase().trim();
+                const hst = (t.host || t.hostName || '').toLowerCase().trim();
+                return em === organizerEmail || hst.includes(organizerEmail);
+              })
+              .map((t: any) => (t.slug || '').toLowerCase().trim())
+              .filter(Boolean);
+          }
+        }
+
+        const [rostRes, regRes] = await Promise.all([
+          supabase.from('tournament_rosters').select('*'),
+          supabase.from('registrations').select('*'),
+        ]);
+
+        let dbRosters = rostRes.data || [];
+        let registrations = regRes.data || [];
+
+        if (tournamentSlug) {
+          const cleanSlug = tournamentSlug.toLowerCase().trim();
+          dbRosters = dbRosters.filter((r: any) => (r.tournament_slug || '').toLowerCase().trim() === cleanSlug);
+          registrations = registrations.filter((r: any) => (r.tournament_slug || '').toLowerCase().trim() === cleanSlug);
+        }
+
+        if (passId) {
+          dbRosters = dbRosters.filter((r: any) => r.pass_id === passId);
+          registrations = registrations.filter((r: any) => (r.pass_id || r.id) === passId);
+        }
+
+        if (organizerEmail && organizerEmail !== 'admin@xenova.gg') {
+          const slugSet = new Set(allowedSlugs);
+          dbRosters = dbRosters.filter((r: any) => slugSet.has((r.tournament_slug || '').toLowerCase().trim()));
+          registrations = registrations.filter((r: any) => slugSet.has((r.tournament_slug || '').toLowerCase().trim()));
+        }
+
+        const teamsMap = new Map<string, any>();
+
+        for (const reg of registrations) {
+          const pid = reg.pass_id || reg.id;
+          if (!pid) continue;
+          const regPlayers = Array.isArray(reg.players) ? reg.players : [];
+          teamsMap.set(pid, {
+            pass_id: pid,
+            tournament_slug: reg.tournament_slug || '',
+            tournament_title: reg.tournament_title || reg.tournament_slug || '',
+            team_name: reg.team_name || 'Squad Entry',
+            college: reg.college || 'Collegiate Campus',
+            captain_name: reg.captain_name || (regPlayers[0]?.name) || 'Captain',
+            email: reg.email,
+            registered_at: reg.registered_at || new Date().toISOString(),
+            players: regPlayers.length > 0 ? regPlayers.map((p: any, idx: number) => ({
+              slot: p.slot || idx + 1,
+              player_name: p.name || p.player_name || `Player ${idx + 1}`,
+              in_game_tag: p.inGameTag || p.in_game_tag || p.ign || `TAG_${idx + 1}`,
+              email: p.email || reg.email || '',
+              is_captain: p.isCaptain || p.is_captain || idx === 0
+            })) : []
+          });
+        }
+
+        for (const r of dbRosters) {
+          const pid = r.pass_id;
+          if (!pid) continue;
+          if (!teamsMap.has(pid)) {
+            teamsMap.set(pid, {
+              pass_id: pid,
+              tournament_slug: r.tournament_slug || '',
+              tournament_title: r.tournament_slug || '',
+              team_name: r.team_name || 'Squad Entry',
+              college: r.college || 'Collegiate Campus',
+              captain_name: r.is_captain ? r.player_name : '',
+              email: r.email,
+              players: []
+            });
+          }
+          const team = teamsMap.get(pid);
+          const existingSlotIdx = team.players.findIndex((p: any) => p.slot === r.slot);
+          const pObj = {
+            slot: r.slot,
+            player_name: r.player_name,
+            in_game_tag: r.in_game_tag,
+            email: r.email,
+            phone: r.phone,
+            college: r.college,
+            is_captain: r.is_captain
+          };
+          if (existingSlotIdx >= 0) {
+            team.players[existingSlotIdx] = pObj;
+          } else {
+            team.players.push(pObj);
+          }
+          if (r.is_captain) {
+            team.captain_name = r.player_name;
+          }
+        }
+
+        const teams = Array.from(teamsMap.values()).map((t) => {
+          t.players.sort((a: any, b: any) => (a.slot || 1) - (b.slot || 1));
+          return t;
+        });
+
+        return NextResponse.json({
+          success: true,
+          count: dbRosters.length,
+          teams_count: teams.length,
+          data: dbRosters,
+          teams: teams,
+          tournament_slug: tournamentSlug || 'all'
+        }, { status: 200 });
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: err.message }, { status: 500 });
+      }
+    }
+  }
+
+  // 9. Contact & Support Tickets Endpoints
+  if (mainSegment === 'contact' || mainSegment === 'contact_messages') {
+    if (method === 'POST') {
+      try {
+        const body = await req.json();
+        const payload = {
+          name: (body.name || '').trim(),
+          email: (body.email || '').trim().toLowerCase(),
+          phone: (body.phone || '').trim(),
+          college: (body.college || '').trim(),
+          category: body.category || 'General Inquiry',
+          subject: (body.subject || '').trim(),
+          message: (body.message || '').trim(),
+          status: 'unread',
+          created_at: new Date().toISOString(),
+        };
+
+        const { data, error } = await supabase.from('contact_messages').insert([payload]).select();
+        if (error) {
+          console.warn('Supabase contact insert warning:', error);
+          return NextResponse.json({ success: true, message: 'Message received.' }, { status: 200 });
+        }
+
+        return NextResponse.json({ 
+          success: true, 
+          message: 'Support ticket submitted successfully.', 
+          data: data?.[0] 
+        }, { status: 200 });
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: err.message }, { status: 400 });
+      }
+    }
+
+    if (method === 'GET') {
+      try {
+        const url = new URL(req.url);
+        const emailFilter = (url.searchParams.get('email') || '').trim().toLowerCase();
+
+        let query = supabase.from('contact_messages').select('*').order('created_at', { ascending: false });
+        if (emailFilter) {
+          query = query.eq('email', emailFilter);
+        }
+
+        const { data, error } = await query;
+        return NextResponse.json({ success: !error, data: data || [] }, { status: 200 });
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: err.message }, { status: 500 });
+      }
+    }
+
+    if (method === 'PATCH' || method === 'PUT') {
+      try {
+        const body = await req.json();
+        const updatePayload: any = {
+          updated_at: new Date().toISOString()
+        };
+
+        if (body.status) updatePayload.status = body.status;
+        if (body.admin_reply !== undefined) {
+          updatePayload.admin_reply = (body.admin_reply || '').trim();
+          updatePayload.admin_reply_at = new Date().toISOString();
+          updatePayload.admin_reply_by = body.admin_reply_by || 'Xenova Operations Desk';
+          if (!body.status) updatePayload.status = 'resolved';
+        }
+
+        const { error } = await supabase
+          .from('contact_messages')
+          .update(updatePayload)
+          .eq('id', idOrSlug);
+        return NextResponse.json({ success: !error, data: updatePayload }, { status: 200 });
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: err.message }, { status: 400 });
+      }
+    }
+
+    if (method === 'DELETE') {
+      const { error } = await supabase.from('contact_messages').delete().eq('id', idOrSlug);
+      return NextResponse.json({ success: !error }, { status: 200 });
     }
   }
 

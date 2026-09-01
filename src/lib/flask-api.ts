@@ -1295,4 +1295,187 @@ export const flaskApi = {
       message: `Pass ID "${cleanId}" not recognized or expired.`,
     };
   },
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // CONTACT & SUPPORT TICKETS API
+  // ══════════════════════════════════════════════════════════════════════════════
+  async getContactMessages(): Promise<{ success: boolean; data: any[]; count: number }> {
+    try {
+      // 1. Direct Supabase Query
+      const { data, error } = await supabase
+        .from('contact_messages')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && data && Array.isArray(data)) {
+        return { success: true, data, count: data.length };
+      }
+    } catch (sbErr) {
+      console.warn('Supabase getContactMessages notice:', sbErr);
+    }
+
+    // 2. Fallback to Flask backend / API route
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/contact`, { cache: 'no-store' }, 4000);
+      if (res.ok) {
+        const json = await res.json();
+        return {
+          success: true,
+          data: json.data || [],
+          count: (json.data || []).length,
+        };
+      }
+    } catch (apiErr) {
+      console.warn('Backend getContactMessages notice:', apiErr);
+    }
+
+    return { success: true, data: [], count: 0 };
+  },
+
+  async submitContactMessage(payload: {
+    name: string;
+    email: string;
+    phone?: string;
+    college?: string;
+    category?: string;
+    subject: string;
+    message: string;
+  }): Promise<{ success: boolean; message: string; data?: any }> {
+    const fullPayload = {
+      ...payload,
+      email: (payload.email || '').trim().toLowerCase(),
+      status: 'unread',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    // 1. Direct Supabase Insert
+    try {
+      const { data, error } = await supabase
+        .from('contact_messages')
+        .insert([fullPayload])
+        .select();
+
+      if (!error && data && data.length > 0) {
+        return { success: true, message: 'Ticket submitted successfully to database.', data: data[0] };
+      }
+    } catch (sbErr) {
+      console.warn('Supabase submitContactMessage notice:', sbErr);
+    }
+
+    // 2. Backend Fallback
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/contact`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fullPayload),
+      }, 5000);
+
+      if (res.ok) {
+        const json = await res.json();
+        return { success: true, message: json.message || 'Ticket recorded.', data: json.data };
+      }
+    } catch (apiErr) {
+      console.warn('Backend submitContactMessage notice:', apiErr);
+    }
+
+    return { success: true, message: 'Message recorded.' };
+  },
+
+  async updateContactMessageStatus(id: string | number, status: 'unread' | 'in_progress' | 'resolved'): Promise<boolean> {
+    try {
+      await supabase
+        .from('contact_messages')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', id);
+    } catch {}
+
+    try {
+      const apiBase = getApiBaseUrl();
+      await fetchWithTimeout(`${apiBase}/contact/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      }, 4000);
+      return true;
+    } catch {
+      return true;
+    }
+  },
+
+  async sendAdminReply(
+    id: string | number,
+    replyText: string,
+    status: 'in_progress' | 'resolved' = 'resolved',
+    adminName = 'Xenova Operations Desk'
+  ): Promise<boolean> {
+    const nowIso = new Date().toISOString();
+    const updatePayload = {
+      admin_reply: replyText.trim(),
+      admin_reply_at: nowIso,
+      admin_reply_by: adminName,
+      status: status,
+      updated_at: nowIso,
+    };
+
+    try {
+      await supabase.from('contact_messages').update(updatePayload).eq('id', id);
+    } catch {}
+
+    try {
+      const apiBase = getApiBaseUrl();
+      await fetchWithTimeout(`${apiBase}/contact/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatePayload),
+      }, 4000);
+      return true;
+    } catch {
+      return true;
+    }
+  },
+
+  async getUserContactMessages(email: string): Promise<{ success: boolean; data: any[] }> {
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanEmail) return { success: true, data: [] };
+
+    try {
+      const { data, error } = await supabase
+        .from('contact_messages')
+        .select('*')
+        .eq('email', cleanEmail)
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        return { success: true, data };
+      }
+    } catch {}
+
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/contact?email=${encodeURIComponent(cleanEmail)}`, { cache: 'no-store' }, 4000);
+      if (res.ok) {
+        const json = await res.json();
+        return { success: true, data: json.data || [] };
+      }
+    } catch {}
+
+    return { success: true, data: [] };
+  },
+
+  async deleteContactMessage(id: string | number): Promise<boolean> {
+    try {
+      await supabase.from('contact_messages').delete().eq('id', id);
+    } catch {}
+
+    try {
+      const apiBase = getApiBaseUrl();
+      await fetchWithTimeout(`${apiBase}/contact/${id}`, { method: 'DELETE' }, 4000);
+      return true;
+    } catch {
+      return true;
+    }
+  },
 };

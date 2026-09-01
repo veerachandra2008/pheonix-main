@@ -19,6 +19,9 @@ import {
   Headphones
 } from 'lucide-react';
 import FinalCTA from '@/components/xenova/FinalCTA';
+import { flaskApi } from '@/lib/flask-api';
+import { supabase } from '@/lib/supabase';
+import { getApiBaseUrl } from '@/lib/api-config';
 
 export default function ContactPage() {
   const [formData, setFormData] = useState({
@@ -33,25 +36,64 @@ export default function ContactPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
+    if (!formData.name.trim() || !formData.email.trim() || !formData.subject.trim() || !formData.message.trim()) {
+      alert('Please fill in all required fields.');
+      return;
+    }
 
-    // Simulate direct dispatch
-    setTimeout(() => {
+    setIsSubmitting(true);
+    setErrorMessage(null);
+
+    const payload = {
+      name: formData.name.trim(),
+      email: formData.email.trim().toLowerCase(),
+      phone: formData.phone.trim(),
+      college: formData.college.trim(),
+      category: formData.category,
+      subject: formData.subject.trim(),
+      message: formData.message.trim(),
+    };
+
+    try {
+      // Submit directly to backend database
+      const res = await flaskApi.submitContactMessage(payload);
+      if (res && res.success) {
+        // Save local tracking so Navbar and My Tickets page instantly show the ticket
+        try {
+          localStorage.setItem('xenova_last_contact_email', payload.email);
+          const prevTickets = JSON.parse(localStorage.getItem('xenova_user_contact_tickets') || '[]');
+          if (res?.data?.id && !prevTickets.includes(res.data.id)) {
+            prevTickets.push(res.data.id);
+            localStorage.setItem('xenova_user_contact_tickets', JSON.stringify(prevTickets));
+          }
+        } catch {}
+
+        // Broadcast event so Navbar displays the "Admin Replies" button immediately
+        window.dispatchEvent(new Event('xenova-contact-ticket-submitted'));
+
+        setSubmitted(true);
+        setFormData({
+          name: '',
+          email: '',
+          phone: '',
+          college: '',
+          category: 'Tournament Dispute / Match Issue',
+          subject: '',
+          message: '',
+        });
+      } else {
+        setErrorMessage(res?.message || 'Failed to submit message to database.');
+      }
+    } catch (err: any) {
+      console.error('Failed to submit contact message:', err);
+      setErrorMessage('Failed to send message. Please check your connection or reach out on WhatsApp.');
+    } finally {
       setIsSubmitting(false);
-      setSubmitted(true);
-      setFormData({
-        name: '',
-        email: '',
-        phone: '',
-        college: '',
-        category: 'Tournament Dispute / Match Issue',
-        subject: '',
-        message: '',
-      });
-    }, 800);
+    }
   };
 
   return (
@@ -167,10 +209,10 @@ export default function ContactPage() {
 
               <div className="pt-2">
                 <a
-                  href="mailto:veerachandra2008@gmail.com"
+                  href="mailto:xenovaesports1@gmail.com"
                   className="text-lg sm:text-xl font-bold font-mono text-white hover:text-cyan-400 tracking-tight transition block truncate"
                 >
-                  veerachandra2008@gmail.com
+                  xenovaesports1@gmail.com
                 </a>
                 <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
                   For university festival partnerships, brand sponsorships, campus ambassador applications, and payment queries.
@@ -215,15 +257,32 @@ export default function ContactPage() {
                   <p className="text-xs text-zinc-300 max-w-md mx-auto leading-relaxed">
                     Thank you! Your ticket request has been received by our tournament operations desk. We will reach out to your provided email or phone number shortly.
                   </p>
-                  <button
-                    onClick={() => setSubmitted(false)}
-                    className="mt-4 px-6 py-2.5 rounded-xl bg-emerald-500 text-zinc-950 text-xs font-black uppercase tracking-wider hover:bg-emerald-400 transition"
-                  >
-                    Send Another Message
-                  </button>
+                  <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                    <Link
+                      href="/my-tickets"
+                      className="px-6 py-2.5 rounded-xl bg-emerald-500 text-zinc-950 text-xs font-black uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/25 inline-flex items-center gap-2"
+                    >
+                      <span>Track Status & Admin Replies</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
+
+                    <button
+                      onClick={() => setSubmitted(false)}
+                      className="px-5 py-2.5 rounded-xl bg-white/10 text-white text-xs font-bold uppercase tracking-wider hover:bg-white/15 transition"
+                    >
+                      Send Another
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <form onSubmit={handleSubmit} className="space-y-5">
+                  {errorMessage && (
+                    <div className="p-4 rounded-xl border border-rose-500/40 bg-rose-950/30 text-rose-300 text-xs flex items-center gap-2.5">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                      <span>{errorMessage}</span>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-300 mb-1.5">

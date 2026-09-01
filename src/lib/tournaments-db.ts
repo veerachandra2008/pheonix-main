@@ -23,6 +23,96 @@ export interface TournamentRegistrationRecord {
 
 let memoryTournamentsCache: Tournament[] | null = null;
 
+export const VALID_TOURNAMENT_COLUMNS = new Set([
+  'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
+  'prize', 'prize_1st', 'prize_2nd', 'prize_3rd', 'date', 'region', 'format',
+  'teams', 'filled', 'fee', 'description', 'rules', 'schedule', 'map_pool',
+  'contact_email', 'discord_url', 'organizer_email',
+  'organizer_name', 'organizer_phone', 'organizer_college', 'contact_phone', 'college'
+]);
+
+export interface PrizeTier {
+  id: string;
+  label: string;
+  amount: string;
+  rankKey?: '1st' | '2nd' | '3rd' | 'other';
+}
+
+/**
+ * Extract prize tiers from tournament object (supports embedded tiers or fallback to prize_1st/2nd/3rd)
+ */
+export function extractPrizeTiers(tournament: any): PrizeTier[] {
+  if (!tournament) return [];
+
+  // 1. Try to parse embedded PRIZE_TIERS from description
+  const desc = tournament.description || '';
+  const match = desc.match(/<!--\s*PRIZE_TIERS:(.*?)\s*-->/);
+  if (match && match[1]) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.filter((t) => t && (t.label || t.amount));
+      }
+    } catch {}
+  }
+
+  // 2. Fallback to prize_1st, prize_2nd, prize_3rd
+  const tiers: PrizeTier[] = [];
+  if (tournament.prize_1st && tournament.prize_1st.trim()) {
+    tiers.push({ id: 'tier-1', label: '1st Place (Champion)', amount: tournament.prize_1st.trim(), rankKey: '1st' });
+  }
+  if (tournament.prize_2nd && tournament.prize_2nd.trim()) {
+    tiers.push({ id: 'tier-2', label: '2nd Place (Runner-Up)', amount: tournament.prize_2nd.trim(), rankKey: '2nd' });
+  }
+  if (tournament.prize_3rd && tournament.prize_3rd.trim()) {
+    tiers.push({ id: 'tier-3', label: '3rd Place (Bronze)', amount: tournament.prize_3rd.trim(), rankKey: '3rd' });
+  }
+
+  return tiers;
+}
+
+/**
+ * Strip metadata tags like <!-- PRIZE_TIERS:... --> from public description text
+ */
+export function cleanDescriptionText(desc: string | undefined): string {
+  if (!desc) return '';
+  return desc.replace(/<!--\s*PRIZE_TIERS:.*?\s*-->/g, '').trim();
+}
+
+/**
+ * Embed prize tiers into description string without altering visible text
+ */
+export function embedPrizeTiersInDescription(rawDesc: string | undefined, tiers: PrizeTier[]): string {
+  const clean = cleanDescriptionText(rawDesc);
+  if (!tiers || tiers.length === 0) return clean;
+  const jsonStr = JSON.stringify(tiers);
+  return clean ? `${clean}\n\n<!-- PRIZE_TIERS:${jsonStr} -->` : `<!-- PRIZE_TIERS:${jsonStr} -->`;
+}
+
+export function sanitizeTournamentPayload(data: Record<string, any>): Record<string, any> {
+  const sanitized: Record<string, any> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (key === 'statusColor') {
+      sanitized['status_color'] = value;
+    } else if (key === 'organizerEmail' || key === 'createdBy') {
+      sanitized['organizer_email'] = value;
+    } else if (VALID_TOURNAMENT_COLUMNS.has(key)) {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
+export function invalidateTournamentsCache() {
+  memoryTournamentsCache = null;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem('xenova_tournaments_cache');
+      window.dispatchEvent(new Event('xenova-tournaments-updated'));
+    } catch {}
+  }
+}
+
 /**
  * Fetch all tournaments directly from Supabase (<50ms) with in-memory caching and non-blocking API fallback
  */

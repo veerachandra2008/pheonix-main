@@ -14,7 +14,8 @@ import {
   Sparkles,
   CalendarDays,
   CheckCircle2,
-  Ticket
+  Ticket,
+  MessageSquare
 } from 'lucide-react';
 import { flaskApi, getCached } from '@/lib/flask-api';
 
@@ -196,21 +197,37 @@ export default function AdminDashboardPage() {
       )}
 
       {/* Quick Action Navigation Panels */}
-      <section className="grid gap-6 lg:grid-cols-3">
+      <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <Link
-          href="/admin/organizer-applications"
-          className="group flex items-center justify-between gap-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-6 transition hover:border-rose-400/50 hover:bg-rose-500/15 cursor-pointer"
+          href="/admin/contact-messages"
+          className="group flex items-center justify-between gap-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 p-6 transition hover:border-rose-400/60 hover:bg-rose-500/15 cursor-pointer shadow-lg shadow-rose-500/5"
         >
           <div className="flex items-center gap-4">
             <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-rose-400/30 bg-rose-400/10 text-rose-300">
-              <Users className="h-5 w-5" />
+              <MessageSquare className="h-5 w-5" />
             </span>
             <div>
-              <h3 className="text-sm font-black uppercase tracking-widest text-rose-300">Organizer Approvals</h3>
-              <p className="mt-1 text-xs text-slate-400">{stats.pendingApplications} requests awaiting clearance.</p>
+              <h3 className="text-sm font-black uppercase tracking-widest text-rose-300">Support Desk</h3>
+              <p className="mt-1 text-xs text-slate-400">Incoming inquiries & dispute tickets.</p>
             </div>
           </div>
           <ArrowRight className="h-5 w-5 text-rose-300 transition group-hover:translate-x-1" />
+        </Link>
+
+        <Link
+          href="/admin/organizer-applications"
+          className="group flex items-center justify-between gap-4 rounded-2xl border border-purple-500/20 bg-purple-500/10 p-6 transition hover:border-purple-400/50 hover:bg-purple-500/15 cursor-pointer"
+        >
+          <div className="flex items-center gap-4">
+            <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-purple-400/30 bg-purple-400/10 text-purple-300">
+              <Users className="h-5 w-5" />
+            </span>
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-widest text-purple-300">Organizer Approvals</h3>
+              <p className="mt-1 text-xs text-slate-400">{stats.pendingApplications} requests awaiting clearance.</p>
+            </div>
+          </div>
+          <ArrowRight className="h-5 w-5 text-purple-300 transition group-hover:translate-x-1" />
         </Link>
 
         <Link

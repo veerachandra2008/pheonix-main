@@ -132,12 +132,23 @@ CREATE TABLE IF NOT EXISTS tournaments (
     description TEXT,
     rules TEXT,
     schedule TEXT,
-    map_pool TEXT,
     contact_email TEXT,
+    contact_phone TEXT,
     discord_url TEXT,
     organizer_email TEXT,
+    organizer_name TEXT,
+    organizer_phone TEXT,
+    organizer_college TEXT,
+    college TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure columns exist if table was already created
+ALTER TABLE tournaments ADD COLUMN IF NOT EXISTS organizer_name TEXT;
+ALTER TABLE tournaments ADD COLUMN IF NOT EXISTS organizer_phone TEXT;
+ALTER TABLE tournaments ADD COLUMN IF NOT EXISTS organizer_college TEXT;
+ALTER TABLE tournaments ADD COLUMN IF NOT EXISTS contact_phone TEXT;
+ALTER TABLE tournaments ADD COLUMN IF NOT EXISTS college TEXT;
 
 -- 5. REGISTRATIONS TABLE (Single Source of Truth for Free & Paid Entries + 4-Player Rosters)
 CREATE TABLE IF NOT EXISTS registrations (
@@ -210,6 +221,34 @@ CREATE TABLE IF NOT EXISTS tournament_rosters (
     CONSTRAINT unique_pass_slot UNIQUE (pass_id, slot)
 );
 
+-- 9. CONTACT MESSAGES TABLE (Support tickets, contact desk, tournament disputes)
+CREATE TABLE IF NOT EXISTS contact_messages (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    phone TEXT,
+    college TEXT,
+    category TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    message TEXT NOT NULL,
+    status TEXT DEFAULT 'unread',
+    admin_reply TEXT,
+    admin_reply_at TIMESTAMPTZ,
+    admin_reply_by TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Ensure columns exist if table was already created
+ALTER TABLE contact_messages ADD COLUMN IF NOT EXISTS admin_reply TEXT;
+ALTER TABLE contact_messages ADD COLUMN IF NOT EXISTS admin_reply_at TIMESTAMPTZ;
+ALTER TABLE contact_messages ADD COLUMN IF NOT EXISTS admin_reply_by TEXT;
+
+-- Contact messages index
+CREATE INDEX IF NOT EXISTS idx_contact_messages_email ON contact_messages(email);
+CREATE INDEX IF NOT EXISTS idx_contact_messages_category ON contact_messages(category);
+CREATE INDEX IF NOT EXISTS idx_contact_messages_created_at ON contact_messages(created_at DESC);
+
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_follows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE colleges ENABLE ROW LEVEL SECURITY;
@@ -220,6 +259,7 @@ ALTER TABLE registrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE organizer_applications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tournament_rosters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contact_messages ENABLE ROW LEVEL SECURITY;
 
 -- Allow public read and write policies
 CREATE POLICY "Allow public read users" ON users FOR SELECT USING (true);
@@ -261,6 +301,11 @@ CREATE POLICY "Allow public read tournament_rosters" ON tournament_rosters FOR S
 CREATE POLICY "Allow public insert tournament_rosters" ON tournament_rosters FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update tournament_rosters" ON tournament_rosters FOR UPDATE USING (true);
 CREATE POLICY "Allow public delete tournament_rosters" ON tournament_rosters FOR DELETE USING (true);
+
+CREATE POLICY "Allow public read contact_messages" ON contact_messages FOR SELECT USING (true);
+CREATE POLICY "Allow public insert contact_messages" ON contact_messages FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update contact_messages" ON contact_messages FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete contact_messages" ON contact_messages FOR DELETE USING (true);
 
 -- ====================================================================
 -- SEED DATA

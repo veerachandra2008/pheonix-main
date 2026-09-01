@@ -113,7 +113,8 @@ VALID_TOURNAMENT_COLUMNS = {
     'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
     'prize', 'date', 'region', 'format', 'teams', 'filled', 'fee', 'organizer_email',
     'description', 'rules', 'schedule', 'prize_1st', 'prize_2nd', 'prize_3rd',
-    'map_pool', 'contact_email', 'discord_url'
+    'map_pool', 'contact_email', 'discord_url',
+    'organizer_name', 'organizer_phone', 'organizer_college', 'contact_phone', 'college'
 }
 
 def sanitize_tournament_payload(data):
@@ -161,19 +162,29 @@ def create_tournament():
 
 @tournaments_bp.route('/<slug>', methods=['PATCH', 'PUT'])
 def update_tournament(slug):
-    """Update tournament details or status"""
+    """Update tournament details or status with upsert into Supabase and memory"""
     api_cache.clear_prefix('tournaments')
     data = request.get_json() or {}
     clean_data = sanitize_tournament_payload(data)
     
     # Update in memory
+    found_mem = False
     for t in IN_MEMORY_TOURNAMENTS:
         if t.get('slug') == slug:
-            t.update(data)
+            t.update(clean_data)
+            found_mem = True
+            break
+    if not found_mem:
+        IN_MEMORY_TOURNAMENTS.insert(0, {'slug': slug, **clean_data})
             
     try:
         supabase = get_supabase_client()
-        res = supabase.table('tournaments').update(clean_data).eq('slug', slug).execute()
+        existing = supabase.table('tournaments').select('id').eq('slug', slug).execute()
+        if existing.data and len(existing.data) > 0:
+            res = supabase.table('tournaments').update(clean_data).eq('slug', slug).execute()
+        else:
+            insert_data = {'slug': slug, **clean_data}
+            res = supabase.table('tournaments').insert(insert_data).execute()
         return jsonify({'success': True, 'data': res.data}), 200
     except Exception as e:
         print(f"Supabase update tournament warning: {e}")

@@ -217,12 +217,12 @@ export default function FinalCTA({ showCTA }: FinalCTAProps) {
               </a>
 
               <a
-                href="mailto:veerachandra2008@gmail.com"
+                href="mailto:xenovaesports1@gmail.com"
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-white text-xs font-bold tracking-wide transition shadow-lg hover:scale-105"
                 title="Send Support Email"
               >
                 <Mail className="w-3.5 h-3.5 text-emerald-400" />
-                <span>veerachandra2008@gmail.com</span>
+                <span>xenovaesports1@gmail.com</span>
               </a>
 
               <Link

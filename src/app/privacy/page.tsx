@@ -120,10 +120,10 @@ export default function PrivacyPolicyPage() {
             </p>
             <div className="pt-2 flex flex-wrap gap-4">
               <a
-                href="mailto:veerachandra2008@gmail.com?subject=Privacy%20Data%20Request"
+                href="mailto:xenovaesports1@gmail.com?subject=Privacy%20Data%20Request"
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-xs font-bold"
               >
-                <Mail className="w-3.5 h-3.5 text-emerald-400" /> veerachandra2008@gmail.com
+                <Mail className="w-3.5 h-3.5 text-emerald-400" /> xenovaesports1@gmail.com
               </a>
               <a
                 href="tel:+917993728522"

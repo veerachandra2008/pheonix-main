@@ -70,7 +70,7 @@ export default function PartnersPage() {
 
           <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
             <a
-              href="mailto:veerachandra2008@gmail.com?subject=Partnership%20Inquiry%20-%20XENOVA"
+              href="mailto:xenovaesports1@gmail.com?subject=Partnership%20Inquiry%20-%20XENOVA"
               className="blob-btn bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black px-8 py-4 text-xs sm:text-sm uppercase tracking-wider rounded-2xl transition shadow-xl shadow-emerald-500/25 hover:scale-105 inline-flex items-center gap-2"
             >
               <Mail className="w-4 h-4" />
@@ -153,7 +153,7 @@ export default function PartnersPage() {
             </div>
             <div className="pt-6 border-t border-white/10">
               <a
-                href="mailto:veerachandra2008@gmail.com?subject=Brand%20Sponsorship%20Inquiry"
+                href="mailto:xenovaesports1@gmail.com?subject=Brand%20Sponsorship%20Inquiry"
                 className="inline-flex items-center gap-2 text-cyan-400 text-xs font-black uppercase tracking-wider hover:underline"
               >
                 <span>Inquire Title Sponsorship</span> &rarr;
@@ -212,10 +212,10 @@ export default function PartnersPage() {
               +91 79937 28522
             </a>
             <a
-              href="mailto:veerachandra2008@gmail.com"
+              href="mailto:xenovaesports1@gmail.com"
               className="px-6 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-black uppercase tracking-wider transition shadow-lg shadow-emerald-500/20"
             >
-              veerachandra2008@gmail.com
+              xenovaesports1@gmail.com
             </a>
           </div>
         </div>

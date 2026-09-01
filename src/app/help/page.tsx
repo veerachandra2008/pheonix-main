@@ -51,7 +51,7 @@ const faqs: FAQItem[] = [
     category: 'tickets',
     question: 'Can I transfer my Tournament Pass to another teammate?',
     answer:
-      'Team captains can modify roster substitutes up to 2 hours before the tournament bracket freeze. Go to your Dashboard, navigate to your active registrations, and update player handles or contact support at veerachandra2008@gmail.com.',
+      'Team captains can modify roster substitutes up to 2 hours before the tournament bracket freeze. Go to your Dashboard, navigate to your active registrations, and update player handles or contact support at xenovaesports1@gmail.com.',
   },
   {
     id: 'r-1',
@@ -228,10 +228,10 @@ export default function HelpCenterPage() {
             </div>
             <div className="mt-6 pt-4 border-t border-white/10">
               <a
-                href="mailto:veerachandra2008@gmail.com"
+                href="mailto:xenovaesports1@gmail.com"
                 className="inline-flex items-center gap-2 text-cyan-400 hover:text-cyan-300 font-mono text-xs sm:text-sm font-extrabold group-hover:translate-x-1 transition-transform truncate max-w-full"
               >
-                <span>veerachandra2008@gmail.com</span>
+                <span>xenovaesports1@gmail.com</span>
                 <ArrowRight className="w-4 h-4 shrink-0" />
               </a>
               <span className="block text-[10px] text-zinc-500 mt-1 uppercase font-bold tracking-wider">&lt; 15 mins average response time</span>

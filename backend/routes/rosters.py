@@ -69,14 +69,44 @@ def save_tournament_rosters_to_db(supabase, pass_id, tournament_slug, team_name,
 @rosters_bp.route('/', methods=['GET'])
 def get_rosters():
     """
-    Get 4-player rosters grouped by tournaments or filtered by tournament_slug
+    Get 4-player rosters grouped by tournaments or filtered by tournament_slug or organizer_email
     Query Params:
       - tournament_slug: string (optional)
       - pass_id: string (optional)
+      - organizer_email: string (optional)
     """
     try:
         tournament_slug = request.args.get('tournament_slug', '').strip().lower()
         pass_id = request.args.get('pass_id', '').strip()
+        organizer_email = request.args.get('organizer_email', '').strip().lower()
+
+        allowed_slugs = set()
+        if organizer_email and organizer_email != 'admin@xenova.gg':
+            try:
+                supabase = get_supabase_client()
+                t_res = supabase.table('tournaments').select('*').execute()
+                if t_res.data:
+                    for t in t_res.data:
+                        c_by = (t.get('createdBy') or t.get('organizer_email') or t.get('contact_email') or '').strip().lower()
+                        hst = (t.get('host') or '').strip().lower()
+                        if c_by == organizer_email or organizer_email in hst:
+                            s = (t.get('slug') or '').strip().lower()
+                            if s:
+                                allowed_slugs.add(s)
+            except Exception as t_err:
+                print(f"Notice fetching organizer tournaments: {t_err}")
+
+            try:
+                from routes.tournaments import IN_MEMORY_TOURNAMENTS
+                for t in IN_MEMORY_TOURNAMENTS:
+                    c_by = (t.get('createdBy') or t.get('organizer_email') or t.get('contact_email') or '').strip().lower()
+                    hst = (t.get('host') or '').strip().lower()
+                    if c_by == organizer_email or organizer_email in hst:
+                        s = (t.get('slug') or '').strip().lower()
+                        if s:
+                            allowed_slugs.add(s)
+            except Exception:
+                pass
 
         db_rosters = []
         try:
@@ -136,6 +166,10 @@ def get_rosters():
                                 })
             except Exception as e:
                 print(f"Fallback registrations roster extraction notice: {e}")
+
+        # Filter by organizer_email if requested
+        if organizer_email and organizer_email != 'admin@xenova.gg':
+            db_rosters = [r for r in db_rosters if (r.get('tournament_slug') or '').strip().lower() in allowed_slugs]
 
         # Group by team / pass_id
         teams_map = {}

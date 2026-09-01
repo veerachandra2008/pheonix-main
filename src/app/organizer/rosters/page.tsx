@@ -59,6 +59,9 @@ export default function OrganizerRostersHubPage() {
     setLoading(true);
     try {
       const apiBase = getApiBaseUrl();
+      const cleanEmail = (userEmail || '').trim().toLowerCase();
+      const cleanName = (userName || '').trim().toLowerCase();
+      const isAdmin = userRole === 'admin' || cleanEmail === 'admin@xenova.gg';
 
       // 1. Fetch tournaments from Supabase + Backend API
       let tournsList: any[] = [];
@@ -77,11 +80,12 @@ export default function OrganizerRostersHubPage() {
         if (tRes.ok) {
           const tData = await tRes.json();
           if (tData.success && Array.isArray(tData.data) && tData.data.length > 0) {
-            const seenSlugs = new Set(tournsList.map((t: any) => t.slug));
+            const seenSlugs = new Set(tournsList.map((t: any) => (t.slug || '').toLowerCase().trim()));
             for (const t of tData.data) {
-              if (!seenSlugs.has(t.slug)) {
+              const s = (t.slug || '').toLowerCase().trim();
+              if (s && !seenSlugs.has(s)) {
                 tournsList.push(t);
-                seenSlugs.add(t.slug);
+                seenSlugs.add(s);
               }
             }
           }
@@ -90,30 +94,37 @@ export default function OrganizerRostersHubPage() {
         console.warn('Notice loading tournaments:', e);
       }
 
-      if (tournsList.length === 0) {
+      if (isAdmin && tournsList.length === 0) {
         tournsList = defaultTournaments;
       }
 
-      // Filter tournaments for this organizer
-      if (userRole !== 'admin') {
-        const cleanEmail = (userEmail || '').trim().toLowerCase();
-        const cleanName = (userName || '').trim().toLowerCase();
+      // Filter tournaments strictly for this organizer
+      if (!isAdmin) {
         tournsList = tournsList.filter((t: any) => {
-          const createdBy = (t.createdBy || t.organizer_email || '').trim().toLowerCase();
-          const host = (t.host || '').trim().toLowerCase();
-          return (
-            (cleanEmail && (createdBy === cleanEmail || host.includes(cleanEmail))) ||
-            (cleanName && (host === cleanName || host.includes(cleanName))) ||
-            true
-          );
+          const createdBy = (t.createdBy || t.organizer_email || t.organizerEmail || t.contact_email || '').trim().toLowerCase();
+          const host = (t.host || t.hostName || '').trim().toLowerCase();
+          const emailMatch = cleanEmail && (createdBy === cleanEmail || host.includes(cleanEmail) || createdBy.includes(cleanEmail));
+          const nameMatch = cleanName && (host === cleanName || host.includes(cleanName));
+          return emailMatch || nameMatch;
         });
       }
       setTournaments(tournsList);
 
+      // Collect all slugs, titles, and IDs of this organizer's tournaments
+      const orgSlugs = new Set<string>();
+      const orgTitles = new Set<string>();
+      tournsList.forEach((t: any) => {
+        if (t.slug) orgSlugs.add(t.slug.toLowerCase().trim());
+        if (t.id) orgSlugs.add(String(t.id).toLowerCase().trim());
+        if (t.title) orgTitles.add(t.title.toLowerCase().trim());
+        if (t.name) orgTitles.add(t.name.toLowerCase().trim());
+      });
+
       // 2. Fetch 4-player rosters from backend & Supabase
       let fetchedRosters: TeamRoster[] = [];
       try {
-        const rRes = await fetch(`${apiBase}/rosters`, { cache: 'no-store' });
+        const queryParams = !isAdmin && cleanEmail ? `?organizer_email=${encodeURIComponent(cleanEmail)}` : '';
+        const rRes = await fetch(`${apiBase}/rosters${queryParams}`, { cache: 'no-store' });
         if (rRes.ok) {
           const rData = await rRes.json();
           if (rData.success && Array.isArray(rData.teams)) {
@@ -151,33 +162,39 @@ export default function OrganizerRostersHubPage() {
               const p3 = slots.find((s: any) => s.slot === 3) || {};
               const p4 = slots.find((s: any) => s.slot === 4) || {};
 
+              const regPlayers = Array.isArray(reg.players) ? reg.players : [];
+              const rp1 = regPlayers[0] || {};
+              const rp2 = regPlayers[1] || {};
+              const rp3 = regPlayers[2] || {};
+              const rp4 = regPlayers[3] || {};
+
               const playersList: Player[] = [
                 {
                   slot: 1,
-                  player_name: p1.player_name || p1.name || reg.captain_name || reg.name || 'Captain',
-                  in_game_tag: p1.in_game_tag || p1.game_id || p1.inGameTag || reg.in_game_id || 'IGN_1',
-                  email: p1.email || reg.email || 'captain@squad.gg',
+                  player_name: p1.player_name || p1.name || rp1.name || reg.captain_name || reg.name || 'Captain',
+                  in_game_tag: p1.in_game_tag || p1.game_id || p1.inGameTag || rp1.inGameTag || reg.in_game_id || 'IGN_1',
+                  email: p1.email || rp1.email || reg.email || 'captain@squad.gg',
                   is_captain: true,
                 },
                 {
                   slot: 2,
-                  player_name: p2.player_name || p2.name || 'Player 2',
-                  in_game_tag: p2.in_game_tag || p2.game_id || p2.inGameTag || 'IGN_2',
-                  email: p2.email || 'p2@squad.gg',
+                  player_name: p2.player_name || p2.name || rp2.name || 'Player 2',
+                  in_game_tag: p2.in_game_tag || p2.game_id || p2.inGameTag || rp2.inGameTag || 'IGN_2',
+                  email: p2.email || rp2.email || 'p2@squad.gg',
                   is_captain: false,
                 },
                 {
                   slot: 3,
-                  player_name: p3.player_name || p3.name || 'Player 3',
-                  in_game_tag: p3.in_game_tag || p3.game_id || p3.inGameTag || 'IGN_3',
-                  email: p3.email || 'p3@squad.gg',
+                  player_name: p3.player_name || p3.name || rp3.name || 'Player 3',
+                  in_game_tag: p3.in_game_tag || p3.game_id || p3.inGameTag || rp3.inGameTag || 'IGN_3',
+                  email: p3.email || rp3.email || 'p3@squad.gg',
                   is_captain: false,
                 },
                 {
                   slot: 4,
-                  player_name: p4.player_name || p4.name || 'Player 4',
-                  in_game_tag: p4.in_game_tag || p4.game_id || p4.inGameTag || 'IGN_4',
-                  email: p4.email || 'p4@squad.gg',
+                  player_name: p4.player_name || p4.name || rp4.name || 'Player 4',
+                  in_game_tag: p4.in_game_tag || p4.game_id || p4.inGameTag || rp4.inGameTag || 'IGN_4',
+                  email: p4.email || rp4.email || 'p4@squad.gg',
                   is_captain: false,
                 },
               ];
@@ -200,6 +217,19 @@ export default function OrganizerRostersHubPage() {
         }
       }
 
+      // Filter rosters so only teams registered for this organizer's tournaments are kept
+      if (!isAdmin) {
+        fetchedRosters = fetchedRosters.filter((team) => {
+          const teamSlug = (team.tournament_slug || '').toLowerCase().trim();
+          const teamTitle = (team.tournament_title || '').toLowerCase().trim();
+          return (
+            (teamSlug && orgSlugs.has(teamSlug)) ||
+            (teamTitle && orgTitles.has(teamTitle)) ||
+            Array.from(orgSlugs).some((s) => s && (teamSlug === s || teamSlug.includes(s) || s.includes(teamSlug)))
+          );
+        });
+      }
+
       setRosters(fetchedRosters);
     } catch (e) {
       console.error('Failed to load roster hub data:', e);
@@ -217,9 +247,70 @@ export default function OrganizerRostersHubPage() {
       }
       try {
         const user = JSON.parse(rawSession);
-        setSession(user);
+        const email = (user.email || '').trim().toLowerCase();
+        const role = (user.role || '').toLowerCase();
+
+        // 1. Root Platform Admin
+        if (role === 'admin' || email === 'admin@xenova.gg') {
+          setSession(user);
+          setAuthLoading(false);
+          loadData(user.email, 'admin', user.name || user.hostName);
+          return;
+        }
+
+        // 2. Check organizer status
+        let isApprovedOrganizer = role === 'organizer' || role === 'host';
+        let hostName = user.hostName || user.name || 'Verified Host';
+
+        try {
+          const { supabase } = await import('@/lib/supabase');
+          const { data } = await supabase
+            .from('organizer_applications')
+            .select('*')
+            .eq('email', email);
+
+          if (data && data.length > 0) {
+            const app = data[0];
+            const status = (app.status || '').toUpperCase();
+            if (status === 'APPROVED') {
+              isApprovedOrganizer = true;
+              hostName = app.host_name || user.name || 'Verified Host';
+            }
+          }
+        } catch (sbErr) {
+          console.warn('Rosters organizer verification notice:', sbErr);
+        }
+
+        if (!isApprovedOrganizer) {
+          try {
+            const apiBase = getApiBaseUrl();
+            const res = await fetch(`${apiBase}/auth/organizers`, { cache: 'no-store' });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && Array.isArray(json.data)) {
+                const matched = json.data.find(
+                  (a: any) => (a.email || '').toLowerCase().trim() === email
+                );
+                if (matched) {
+                  isApprovedOrganizer = true;
+                  hostName = matched.name || matched.host_name || user.name;
+                }
+              }
+            }
+          } catch (apiErr) {
+            console.warn('API organizer lookup notice:', apiErr);
+          }
+        }
+
+        if (!isApprovedOrganizer) {
+          router.replace('/organizer/apply');
+          return;
+        }
+
+        const validSession = { ...user, role: 'organizer', hostName };
+        setSession(validSession);
         setAuthLoading(false);
-        loadData(user.email, user.role, user.name);
+        loadData(validSession.email, 'organizer', validSession.hostName || validSession.name);
       } catch {
         router.replace('/login');
       }
@@ -229,14 +320,15 @@ export default function OrganizerRostersHubPage() {
 
   // Filter rosters by selected tournament & search query
   const filteredRosters = rosters.filter((team) => {
+    const teamSlug = (team.tournament_slug || '').toLowerCase().trim();
     const matchesTourn =
       selectedTournament === 'all' ||
-      (team.tournament_slug || '').toLowerCase() === selectedTournament.toLowerCase();
+      teamSlug === selectedTournament.toLowerCase().trim();
 
     if (!matchesTourn) return false;
 
     if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
 
     const teamMatch =
       (team.team_name || '').toLowerCase().includes(q) ||
@@ -330,11 +422,17 @@ export default function OrganizerRostersHubPage() {
         <section className="relative overflow-hidden rounded-3xl border border-white/15 bg-[#0C111D] p-6 sm:p-8 shadow-2xl mb-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="space-y-2 max-w-2xl">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-black uppercase tracking-wider">
                   <Users className="h-3.5 w-3.5" />
                   4-Player Squad Registry
                 </span>
+                {session?.email && session.role !== 'admin' && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold uppercase tracking-wider">
+                    <UserCheck className="h-3.5 w-3.5" />
+                    Host: {session.hostName || session.name || session.email}
+                  </span>
+                )}
               </div>
               <h1 className="text-2xl sm:text-4xl font-black italic uppercase tracking-tight text-white">
                 Tournament Rosters Hub
@@ -348,14 +446,15 @@ export default function OrganizerRostersHubPage() {
             <div className="flex flex-wrap items-center gap-3">
               <button
                 onClick={handleExportCSV}
-                className="inline-flex items-center gap-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 transition text-xs font-black uppercase tracking-wider text-white rounded-xl shadow-lg shadow-emerald-600/20"
+                disabled={totalPlayers === 0}
+                className="inline-flex items-center gap-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition text-xs font-black uppercase tracking-wider text-white rounded-xl shadow-lg shadow-emerald-600/20"
               >
                 <Download className="h-4 w-4" />
                 Export CSV ({totalPlayers} Players)
               </button>
 
               <button
-                onClick={() => session && loadData(session.email, session.role, session.name)}
+                onClick={() => session && loadData(session.email, session.role, session.hostName || session.name)}
                 className="inline-flex items-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/15 transition text-xs font-bold uppercase tracking-wider text-slate-200 rounded-xl"
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -375,7 +474,7 @@ export default function OrganizerRostersHubPage() {
               onChange={(e) => setSelectedTournament(e.target.value)}
               className="w-full pl-11 pr-4 py-3.5 bg-[#0C111D] border border-white/10 focus:border-indigo-500 rounded-2xl text-white text-sm outline-none font-bold uppercase tracking-wider appearance-none cursor-pointer"
             >
-              <option value="all">All Tournaments ({rosters.length} Squads)</option>
+              <option value="all">All Hosted Tournaments ({rosters.length} Squads)</option>
               {tournaments.map((t) => (
                 <option key={t.slug} value={t.slug}>
                   {t.title || t.name} ({t.game})
@@ -403,12 +502,28 @@ export default function OrganizerRostersHubPage() {
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent mx-auto" />
             <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Loading 4-Player Rosters...</p>
           </div>
+        ) : tournaments.length === 0 ? (
+          <div className="border border-dashed border-white/10 bg-[#0C111D] p-16 rounded-3xl text-center space-y-4">
+            <Trophy className="h-12 w-12 text-indigo-400 mx-auto" />
+            <h3 className="text-lg font-black uppercase text-white">No Hosted Tournaments Yet</h3>
+            <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+              You haven&apos;t launched any tournaments under this organizer account. Launch a tournament to start collecting team registrations, managing 4-player rosters, and verifying squad in-game tags.
+            </p>
+            <div className="pt-2">
+              <Link
+                href="/organizer/tournament/create"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase tracking-wider rounded-xl transition shadow-lg shadow-indigo-600/25"
+              >
+                <Trophy className="h-4 w-4" /> Launch Your First Tournament
+              </Link>
+            </div>
+          </div>
         ) : filteredRosters.length === 0 ? (
           <div className="border border-dashed border-white/10 bg-[#0C111D] p-16 rounded-3xl text-center space-y-3">
             <Users className="h-12 w-12 text-slate-600 mx-auto" />
             <h3 className="text-base font-bold text-white">No squad rosters found</h3>
             <p className="text-xs text-slate-500 max-w-sm mx-auto">
-              No registered 4-player teams match the selected tournament filter or search query.
+              No registered 4-player teams match the selected tournament filter or search query for your hosted events.
             </p>
           </div>
         ) : (

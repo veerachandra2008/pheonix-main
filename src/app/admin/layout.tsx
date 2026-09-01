@@ -13,7 +13,8 @@ import {
   LogOut, 
   Users,
   ShieldCheck,
-  Ticket
+  Ticket,
+  MessageSquare
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 
@@ -93,6 +94,7 @@ export default function AdminLayout({
 
   const navItems = [
     { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { href: '/admin/contact-messages', label: 'Support & Inquiries', icon: MessageSquare },
     { href: '/admin/organizer-applications', label: 'Applications', icon: Users },
     { href: '/admin/organizer-management', label: 'Organizers', icon: Users },
     { href: '/admin/colleges', label: 'Colleges', icon: Building2 },

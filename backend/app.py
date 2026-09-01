@@ -24,6 +24,7 @@ from routes.notifications import notifications_bp
 from routes.applications import applications_bp
 from routes.attendance import attendance_bp
 from routes.rosters import rosters_bp
+from routes.contact import contact_bp
 
 def create_app():
     app = Flask(__name__)
@@ -43,6 +44,7 @@ def create_app():
     app.register_blueprint(tournaments_bp, url_prefix='/api/tournaments')
     app.register_blueprint(notifications_bp, url_prefix='/api/notifications')
     app.register_blueprint(applications_bp, url_prefix='/api/applications')
+    app.register_blueprint(contact_bp, url_prefix='/api/contact')
 
     @app.route('/', methods=['GET'])
     @app.route('/health', methods=['GET'])

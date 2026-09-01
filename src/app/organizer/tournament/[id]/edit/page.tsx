@@ -22,11 +22,24 @@ import {
   ShieldAlert,
   Layers,
   Mail,
-  MessageSquare
+  MessageSquare,
+  Plus,
+  Trash2,
+  Medal,
+  Award,
+  ShieldCheck
 } from 'lucide-react';
 
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
+import { 
+  sanitizeTournamentPayload, 
+  invalidateTournamentsCache,
+  extractPrizeTiers,
+  cleanDescriptionText,
+  embedPrizeTiersInDescription,
+  PrizeTier
+} from '@/lib/tournaments-db';
 
 const GAME_PRESETS: Record<string, string> = {
   'Valorant': '/valorant.jpg',
@@ -47,6 +60,12 @@ export default function EditTournamentPage() {
   const [imageMode, setImageMode] = useState<'preset' | 'upload' | 'url'>('preset');
   const [imagePreview, setImagePreview] = useState('/valorant.jpg');
 
+  const [prizeTiers, setPrizeTiers] = useState<PrizeTier[]>([
+    { id: 'tier-1', label: '1st Place (Champion)', amount: '', rankKey: '1st' },
+    { id: 'tier-2', label: '2nd Place (Runner-Up)', amount: '', rankKey: '2nd' },
+    { id: 'tier-3', label: '3rd Place (Bronze)', amount: '', rankKey: '3rd' },
+  ]);
+
   const [formData, setFormData] = useState({
     title: '',
     slug: '',
@@ -54,15 +73,16 @@ export default function EditTournamentPage() {
     format: 'Single Elimination',
     teams: '32',
     prize: '₹50,000',
-    prize_1st: '',
-    prize_2nd: '',
-    prize_3rd: '',
     date: '18-20 May 2026',
     region: 'Online',
     fee: 'Free',
     image: '/valorant.jpg',
     status: 'Registering',
     host: '',
+    organizer_name: '',
+    organizer_email: '',
+    organizer_phone: '',
+    organizer_college: '',
     description: '',
     rules: '',
     schedule: '',
@@ -70,6 +90,43 @@ export default function EditTournamentPage() {
     contact_email: '',
     discord_url: '',
   });
+
+  const handleAddPrizeTier = (presetLabel?: string, defaultAmount?: string) => {
+    const newId = `tier-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const count = prizeTiers.length + 1;
+    const label = presetLabel || `${count}th Place Prize`;
+    const amount = defaultAmount || '';
+    
+    let rankKey: '1st' | '2nd' | '3rd' | 'other' = 'other';
+    if (label.toLowerCase().includes('1st')) rankKey = '1st';
+    else if (label.toLowerCase().includes('2nd')) rankKey = '2nd';
+    else if (label.toLowerCase().includes('3rd')) rankKey = '3rd';
+
+    setPrizeTiers((prev) => [...prev, { id: newId, label, amount, rankKey }]);
+  };
+
+  const handleDeletePrizeTier = (id: string) => {
+    setPrizeTiers((prev) => prev.filter((tier) => tier.id !== id));
+  };
+
+  const handleUpdatePrizeTier = (id: string, field: 'label' | 'amount', value: string) => {
+    setPrizeTiers((prev) =>
+      prev.map((tier) => {
+        if (tier.id === id) {
+          const updated = { ...tier, [field]: value };
+          if (field === 'label') {
+            const l = value.toLowerCase();
+            if (l.includes('1st')) updated.rankKey = '1st';
+            else if (l.includes('2nd')) updated.rankKey = '2nd';
+            else if (l.includes('3rd')) updated.rankKey = '3rd';
+            else updated.rankKey = 'other';
+          }
+          return updated;
+        }
+        return tier;
+      })
+    );
+  };
 
   const loadTournament = async (userEmail: string, userRole: string, userName?: string) => {
     setLoading(true);
@@ -136,6 +193,9 @@ export default function EditTournamentPage() {
           format: 'Single Elimination',
           teams: '32',
           prize: '₹50,000',
+          prize_1st: '₹1,25,000 + Trophy',
+          prize_2nd: '₹75,000 + Silver',
+          prize_3rd: '₹50,000 + Bronze',
           date: '18-20 May 2026',
           region: 'Malla Reddy University',
           fee: '₹1000/team',
@@ -158,22 +218,35 @@ export default function EditTournamentPage() {
         format: found.format || 'Single Elimination',
         teams: String(found.teams || '32').replace(/[^0-9]/g, '') || '32',
         prize: found.prize || '₹50,000',
-        prize_1st: found.prize_1st || '',
-        prize_2nd: found.prize_2nd || '',
-        prize_3rd: found.prize_3rd || '',
         date: found.date || 'Upcoming',
         region: found.region || 'Online',
         fee: found.fee || 'Free',
         image: found.image || '/valorant.jpg',
         status: found.status || 'Registering',
-        host: found.host || userName || 'Verified Host',
-        description: found.description || '',
+        host: found.host || found.organizer_name || userName || 'Verified Host',
+        organizer_name: found.organizer_name || found.host || userName || 'Verified Host',
+        organizer_email: found.organizer_email || found.contact_email || userEmail || '',
+        organizer_phone: found.organizer_phone || found.contact_phone || '',
+        organizer_college: found.organizer_college || found.college || '',
+        description: cleanDescriptionText(found.description),
         rules: found.rules || '',
         schedule: found.schedule || '',
         map_pool: found.map_pool || '',
-        contact_email: found.contact_email || userEmail || '',
+        contact_email: found.contact_email || found.organizer_email || userEmail || '',
         discord_url: found.discord_url || '',
       });
+
+      // Populate prize tiers dynamically (from embedded metadata or columns)
+      const loadedTiers = extractPrizeTiers(found);
+      if (loadedTiers.length === 0) {
+        loadedTiers.push(
+          { id: 'tier-1', label: '1st Place (Champion)', amount: '₹1,25,000 + Trophy', rankKey: '1st' },
+          { id: 'tier-2', label: '2nd Place (Runner-Up)', amount: '₹75,000 + Silver', rankKey: '2nd' },
+          { id: 'tier-3', label: '3rd Place (Bronze)', amount: '₹50,000 + Bronze', rankKey: '3rd' }
+        );
+      }
+      setPrizeTiers(loadedTiers);
+
       setImagePreview(found.image || '/valorant.jpg');
     } catch (e) {
       console.error('Failed to load tournament for edit:', e);
@@ -224,36 +297,80 @@ export default function EditTournamentPage() {
 
     setSubmitting(true);
     try {
-      const updatePayload = {
+      // Resolve 1st, 2nd, 3rd place from prize tiers
+      const p1Tier = prizeTiers.find((t) => t.rankKey === '1st' || t.label.toLowerCase().includes('1st')) || prizeTiers[0];
+      const p2Tier = prizeTiers.find((t) => (t.rankKey === '2nd' || t.label.toLowerCase().includes('2nd')) && t.id !== p1Tier?.id) || prizeTiers.find((t) => t.id !== p1Tier?.id);
+      const p3Tier = prizeTiers.find((t) => (t.rankKey === '3rd' || t.label.toLowerCase().includes('3rd')) && t.id !== p1Tier?.id && t.id !== p2Tier?.id) || prizeTiers.find((t) => t.id !== p1Tier?.id && t.id !== p2Tier?.id);
+
+      const p1 = p1Tier?.amount?.trim() || '';
+      const p2 = p2Tier?.amount?.trim() || '';
+      const p3 = p3Tier?.amount?.trim() || '';
+
+      const organizerName = (formData.organizer_name.trim() || formData.host.trim() || session?.hostName || session?.name || 'Verified Host').trim();
+      const organizerEmail = (formData.organizer_email.trim() || session?.email || '').trim().toLowerCase();
+      const organizerPhone = (formData.organizer_phone.trim() || session?.phone || '').trim();
+      const organizerCollege = (formData.organizer_college.trim() || session?.college || '').trim();
+
+      const fullDescription = embedPrizeTiersInDescription(formData.description, prizeTiers);
+
+      const cleanPayload = sanitizeTournamentPayload({
         title: formData.title.trim(),
-        name: formData.title.trim(),
         game: formData.game,
         format: formData.format,
-        teams: `${formData.teams} Teams`,
+        teams: formData.teams.includes('Teams') ? formData.teams : `${formData.teams} Teams`,
         prize: formData.prize.trim(),
-        prize_1st: formData.prize_1st.trim(),
-        prize_2nd: formData.prize_2nd.trim(),
-        prize_3rd: formData.prize_3rd.trim(),
+        prize_1st: p1,
+        prize_2nd: p2,
+        prize_3rd: p3,
         date: formData.date.trim(),
         region: formData.region,
         fee: formData.fee.trim(),
         image: formData.image || imagePreview,
         status: formData.status,
         status_color: formData.status === 'Live' ? '#EF4444' : formData.status === 'Registering' ? '#10B981' : '#38BDF8',
-        description: formData.description.trim(),
+        host: organizerName,
+        organizer_name: organizerName,
+        organizer_email: organizerEmail,
+        organizer_phone: organizerPhone,
+        organizer_college: organizerCollege,
+        contact_email: formData.contact_email.trim() || organizerEmail,
+        contact_phone: organizerPhone,
+        college: organizerCollege,
+        description: fullDescription,
         rules: formData.rules.trim(),
         schedule: formData.schedule.trim(),
         map_pool: formData.map_pool.trim(),
-        contact_email: formData.contact_email.trim(),
         discord_url: formData.discord_url.trim(),
-      };
+      });
 
-      // 1. Direct Supabase Update
+      const targetSlug = formData.slug || rawId;
+
+      // 1. Direct Supabase Update or Insert (Upsert)
       try {
-        await supabase
+        const { data: existingRows } = await supabase
           .from('tournaments')
-          .update(updatePayload)
-          .eq('slug', formData.slug);
+          .select('id, slug')
+          .eq('slug', targetSlug);
+
+        if (existingRows && existingRows.length > 0) {
+          const { error: updateError } = await supabase
+            .from('tournaments')
+            .update(cleanPayload)
+            .eq('slug', targetSlug);
+
+          if (updateError) {
+            console.warn('Supabase update notice:', updateError);
+          }
+        } else {
+          const insertPayload = { slug: targetSlug, ...cleanPayload };
+          const { error: insertError } = await supabase
+            .from('tournaments')
+            .insert([insertPayload]);
+
+          if (insertError) {
+            console.warn('Supabase insert notice:', insertError);
+          }
+        }
       } catch (sbErr) {
         console.warn('Direct Supabase tournament update notice:', sbErr);
       }
@@ -261,17 +378,20 @@ export default function EditTournamentPage() {
       // 2. Backend API Update
       try {
         const apiBase = getApiBaseUrl();
-        await fetch(`${apiBase}/tournaments/${formData.slug}`, {
+        await fetch(`${apiBase}/tournaments/${encodeURIComponent(targetSlug)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updatePayload),
+          body: JSON.stringify({ slug: targetSlug, ...cleanPayload }),
         });
       } catch (apiErr) {
         console.warn('Backend tournament update notice:', apiErr);
       }
 
+      // 3. Invalidate client-side caches so user side portal immediately fetches fresh data
+      invalidateTournamentsCache();
+
       alert('Tournament details and rules updated successfully!');
-      router.push(`/organizer/tournament/${formData.slug}`);
+      router.push(`/organizer/tournament/${targetSlug}`);
     } catch (err: any) {
       console.error(err);
       alert(err.message || 'Failed to update tournament');
@@ -557,44 +677,161 @@ export default function EditTournamentPage() {
 
           {/* ═══════════════ PRIZE BREAKDOWN SECTION ═══════════════ */}
           <div className="space-y-4 pt-4 border-t border-white/10">
-            <h3 className="text-sm font-black uppercase tracking-wider text-amber-400 flex items-center gap-2">
-              <Crown className="h-4 w-4" /> Prize Distribution Podium Breakdown
-            </h3>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-1">
-                <label className="text-[10px] font-black uppercase text-amber-300">1st Place (Champion)</label>
-                <input
-                  type="text"
-                  value={formData.prize_1st}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, prize_1st: e.target.value }))}
-                  placeholder="e.g. ₹1,25,000 + Trophy"
-                  className="w-full px-3 py-2 bg-black/50 border border-amber-500/30 rounded-xl text-white text-xs font-bold outline-none"
-                />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-wider text-amber-400 flex items-center gap-2">
+                  <Crown className="h-4 w-4" /> Prize Distribution Podium Breakdown
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Configure custom cash rewards, trophies, and awards. Add or delete prize tiers as needed.
+                </p>
               </div>
 
-              <div className="p-4 rounded-2xl bg-zinc-800/30 border border-zinc-700 space-y-1">
-                <label className="text-[10px] font-black uppercase text-slate-300">2nd Place (Runner-Up)</label>
-                <input
-                  type="text"
-                  value={formData.prize_2nd}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, prize_2nd: e.target.value }))}
-                  placeholder="e.g. ₹75,000 + Silver"
-                  className="w-full px-3 py-2 bg-black/50 border border-zinc-700 rounded-xl text-white text-xs font-bold outline-none"
-                />
-              </div>
-
-              <div className="p-4 rounded-2xl bg-amber-900/15 border border-amber-800/40 space-y-1">
-                <label className="text-[10px] font-black uppercase text-amber-500">3rd Place (Bronze)</label>
-                <input
-                  type="text"
-                  value={formData.prize_3rd}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, prize_3rd: e.target.value }))}
-                  placeholder="e.g. ₹50,000 + Bronze"
-                  className="w-full px-3 py-2 bg-black/50 border border-amber-800/40 rounded-xl text-white text-xs font-bold outline-none"
-                />
-              </div>
+              <button
+                type="button"
+                onClick={() => handleAddPrizeTier()}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-black uppercase tracking-wider transition self-start sm:self-auto shadow-sm"
+              >
+                <Plus className="h-4 w-4" /> Add Prize Position
+              </button>
             </div>
+
+            {/* Quick Add Presets Bar */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Quick Add:</span>
+              {!prizeTiers.some((t) => t.label.toLowerCase().includes('1st')) && (
+                <button
+                  type="button"
+                  onClick={() => handleAddPrizeTier('1st Place (Champion)', '₹1,25,000 + Trophy')}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[11px] font-bold flex items-center gap-1 transition"
+                >
+                  <Plus className="h-3 w-3" /> 1st Place
+                </button>
+              )}
+              {!prizeTiers.some((t) => t.label.toLowerCase().includes('2nd')) && (
+                <button
+                  type="button"
+                  onClick={() => handleAddPrizeTier('2nd Place (Runner-Up)', '₹75,000 + Silver')}
+                  className="px-2.5 py-1 rounded-lg bg-zinc-700/30 hover:bg-zinc-700/50 border border-zinc-600 text-slate-300 text-[11px] font-bold flex items-center gap-1 transition"
+                >
+                  <Plus className="h-3 w-3" /> 2nd Place
+                </button>
+              )}
+              {!prizeTiers.some((t) => t.label.toLowerCase().includes('3rd')) && (
+                <button
+                  type="button"
+                  onClick={() => handleAddPrizeTier('3rd Place (Bronze)', '₹50,000 + Bronze')}
+                  className="px-2.5 py-1 rounded-lg bg-amber-900/20 hover:bg-amber-900/30 border border-amber-800/50 text-amber-400 text-[11px] font-bold flex items-center gap-1 transition"
+                >
+                  <Plus className="h-3 w-3" /> 3rd Place
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => handleAddPrizeTier('4th Place', '₹25,000')}
+                className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-[11px] font-bold flex items-center gap-1 transition"
+              >
+                <Plus className="h-3 w-3" /> 4th Place
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAddPrizeTier('MVP / Top Fragger', '₹10,000 + MVP Trophy')}
+                className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-[11px] font-bold flex items-center gap-1 transition"
+              >
+                <Plus className="h-3 w-3" /> MVP Award
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAddPrizeTier('Best Sniper / IGL', '₹5,000 Special Prize')}
+                className="px-2.5 py-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 text-[11px] font-bold flex items-center gap-1 transition"
+              >
+                <Plus className="h-3 w-3" /> Special Award
+              </button>
+            </div>
+
+            {/* Prize Tiers Grid */}
+            {prizeTiers.length === 0 ? (
+              <div className="p-8 rounded-2xl border border-dashed border-white/15 text-center space-y-3 bg-black/20">
+                <Crown className="h-8 w-8 text-slate-600 mx-auto" />
+                <p className="text-xs font-bold text-slate-400">No prize tiers defined.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrizeTiers([
+                      { id: 'tier-1', label: '1st Place (Champion)', amount: '₹1,25,000 + Trophy', rankKey: '1st' },
+                      { id: 'tier-2', label: '2nd Place (Runner-Up)', amount: '₹75,000 + Silver', rankKey: '2nd' },
+                      { id: 'tier-3', label: '3rd Place (Bronze)', amount: '₹50,000 + Bronze', rankKey: '3rd' },
+                    ]);
+                  }}
+                  className="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-xl text-xs font-black uppercase tracking-wider transition"
+                >
+                  Restore Default Top 3 Podium
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {prizeTiers.map((tier, idx) => {
+                  const isGold = tier.label.toLowerCase().includes('1st') || tier.rankKey === '1st' || (idx === 0 && !tier.rankKey);
+                  const isSilver = tier.label.toLowerCase().includes('2nd') || tier.rankKey === '2nd' || (idx === 1 && !tier.rankKey);
+                  const isBronze = tier.label.toLowerCase().includes('3rd') || tier.rankKey === '3rd' || (idx === 2 && !tier.rankKey);
+                  const isMvp = tier.label.toLowerCase().includes('mvp') || tier.label.toLowerCase().includes('fragger');
+
+                  let cardStyle = 'bg-white/5 border-white/10 text-indigo-300';
+                  let badgeStyle = 'text-indigo-300 bg-indigo-500/15 border-indigo-500/30';
+                  let inputBorder = 'border-white/10 focus:border-indigo-500';
+
+                  if (isGold) {
+                    cardStyle = 'bg-amber-500/10 border-amber-500/30 text-amber-300';
+                    badgeStyle = 'text-amber-300 bg-amber-500/20 border-amber-500/40';
+                    inputBorder = 'border-amber-500/30 focus:border-amber-400';
+                  } else if (isSilver) {
+                    cardStyle = 'bg-zinc-800/30 border-zinc-700 text-slate-300';
+                    badgeStyle = 'text-slate-300 bg-zinc-700/40 border-zinc-600';
+                    inputBorder = 'border-zinc-700 focus:border-slate-400';
+                  } else if (isBronze) {
+                    cardStyle = 'bg-amber-900/15 border-amber-800/40 text-amber-500';
+                    badgeStyle = 'text-amber-400 bg-amber-900/30 border-amber-800/50';
+                    inputBorder = 'border-amber-800/40 focus:border-amber-500';
+                  } else if (isMvp) {
+                    cardStyle = 'bg-rose-500/10 border-rose-500/30 text-rose-300';
+                    badgeStyle = 'text-rose-300 bg-rose-500/20 border-rose-500/40';
+                    inputBorder = 'border-rose-500/30 focus:border-rose-400';
+                  }
+
+                  return (
+                    <div key={tier.id} className={`p-4 rounded-2xl border ${cardStyle} space-y-2.5 transition relative group shadow-sm`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <input
+                          type="text"
+                          value={tier.label}
+                          onChange={(e) => handleUpdatePrizeTier(tier.id, 'label', e.target.value)}
+                          placeholder="Tier Label (e.g. 1st Place)"
+                          className={`text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border bg-black/40 ${badgeStyle} outline-none w-full max-w-[200px]`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePrizeTier(tier.id)}
+                          title="Delete this prize tier"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/15 border border-transparent hover:border-rose-500/30 transition shrink-0"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="space-y-1">
+                        <input
+                          type="text"
+                          value={tier.amount}
+                          onChange={(e) => handleUpdatePrizeTier(tier.id, 'amount', e.target.value)}
+                          placeholder="e.g. ₹1,25,000 + Trophy"
+                          className={`w-full px-3 py-2 bg-black/60 border ${inputBorder} rounded-xl text-white text-xs font-bold outline-none transition placeholder:text-slate-600`}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* ═══════════════ DESCRIPTION / SYNOPSIS ═══════════════ */}
@@ -639,7 +876,69 @@ export default function EditTournamentPage() {
             />
           </div>
 
-          {/* Map Pool & Organizer Contacts */}
+          {/* Organizer & Marshal Profile Details */}
+          <div className="space-y-4 pt-6 border-t border-white/10">
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-emerald-400 flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4" /> Verified Organizer & Marshal Details
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                These details will be displayed on the tournament details page so players know who launched and manages this tournament.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-300">Organizer / Host Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.organizer_name || formData.host}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, organizer_name: e.target.value, host: e.target.value }))}
+                  placeholder="e.g. Veera Chandra"
+                  className="w-full px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-bold outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-300">Organizer College / Affiliation *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.organizer_college}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, organizer_college: e.target.value }))}
+                  placeholder="e.g. Nexus Institute of Technology"
+                  className="w-full px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-bold outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-300">Organizer Phone / WhatsApp Number *</label>
+                <input
+                  type="tel"
+                  required
+                  value={formData.organizer_phone}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, organizer_phone: e.target.value }))}
+                  placeholder="e.g. +91 98765 43210"
+                  className="w-full px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-bold outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-300">Organizer Official Email *</label>
+                <input
+                  type="email"
+                  required
+                  value={formData.organizer_email || formData.contact_email}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, organizer_email: e.target.value, contact_email: e.target.value }))}
+                  placeholder="e.g. organizer@esports.edu"
+                  className="w-full px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-bold outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Map Pool & Discord */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-white/10">
             <div className="space-y-1.5">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-300">Competitive Map Pool</label>
@@ -654,13 +953,13 @@ export default function EditTournamentPage() {
 
             <div className="space-y-1.5">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                <Mail className="h-3.5 w-3.5 text-indigo-400" /> Host Contact / Discord
+                <Mail className="h-3.5 w-3.5 text-indigo-400" /> Discord / Community Invite Link
               </label>
               <input
                 type="text"
-                value={formData.contact_email}
-                onChange={(e) => setFormData((prev) => ({ ...prev, contact_email: e.target.value }))}
-                placeholder="e.g. organizer@esports.edu or Discord invite"
+                value={formData.discord_url}
+                onChange={(e) => setFormData((prev) => ({ ...prev, discord_url: e.target.value }))}
+                placeholder="e.g. https://discord.gg/yourserver"
                 className="w-full px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-bold outline-none focus:border-indigo-500"
               />
             </div>

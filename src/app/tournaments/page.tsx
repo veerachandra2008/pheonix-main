@@ -108,8 +108,15 @@ function TournamentsContent() {
       }
     }
     loadData();
+
+    const handleUpdateEvent = () => {
+      loadData();
+    };
+    window.addEventListener('xenova-tournaments-updated', handleUpdateEvent);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('xenova-tournaments-updated', handleUpdateEvent);
     };
   }, []);
 

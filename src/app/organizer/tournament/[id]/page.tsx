@@ -26,6 +26,7 @@ import {
 
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
+import { invalidateTournamentsCache } from '@/lib/tournaments-db';
 
 export default function TournamentManagePage() {
   const router = useRouter();
@@ -247,6 +248,7 @@ export default function TournamentManagePage() {
         }
       } catch {}
 
+      invalidateTournamentsCache();
       router.replace('/organizer/dashboard');
     } catch (e) {
       console.error(e);

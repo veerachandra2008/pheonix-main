@@ -186,7 +186,7 @@ export default function AboutPage() {
             </a>
 
             <a
-              href="mailto:veerachandra2008@gmail.com"
+              href="mailto:xenovaesports1@gmail.com"
               className="inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-black uppercase tracking-wider transition shadow-xl shadow-emerald-500/20"
             >
               <Mail className="w-4 h-4" />
