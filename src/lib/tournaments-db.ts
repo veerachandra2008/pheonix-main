@@ -108,6 +108,125 @@ export function extractOrganizerData(tournament: any): {
 }
 
 /**
+ * Fetch and resolve complete organizer profile automatically from database tables:
+ * 1. Tournament metadata / columns
+ * 2. organizer_applications table (by email or host_name)
+ * 3. users table (by email or name)
+ * 4. Local session fallback
+ */
+export async function fetchOrganizerProfileFromDB(tournament: any): Promise<{
+  name: string;
+  phone: string;
+  email: string;
+  college: string;
+}> {
+  const baseOrg = extractOrganizerData(tournament);
+  const host = (tournament?.host || tournament?.organizer_name || baseOrg.name || '').trim();
+  const email = (tournament?.organizer_email || tournament?.contact_email || tournament?.createdBy || baseOrg.email || '').trim().toLowerCase();
+
+  const resolved = { ...baseOrg };
+
+  // If already full and valid, return immediately
+  if (resolved.name && resolved.email && resolved.phone && resolved.college && resolved.email !== 'desk@xenova.gg') {
+    return resolved;
+  }
+
+  // 1. Query organizer_applications table
+  try {
+    if (email && email !== 'desk@xenova.gg') {
+      const { data } = await supabase
+        .from('organizer_applications')
+        .select('host_name, email, phone, college')
+        .ilike('email', email);
+
+      if (data && data.length > 0) {
+        const app = data[0];
+        if (app.host_name && (resolved.name === 'Xenova Esports' || !resolved.name)) resolved.name = app.host_name;
+        if (app.email && (!resolved.email || resolved.email === 'desk@xenova.gg')) resolved.email = app.email;
+        if (app.phone && !resolved.phone) resolved.phone = app.phone;
+        if (app.college && !resolved.college) resolved.college = app.college;
+      }
+    }
+
+    if ((!resolved.phone || !resolved.college || resolved.email === 'desk@xenova.gg') && host) {
+      const { data: hostMatches } = await supabase
+        .from('organizer_applications')
+        .select('host_name, email, phone, college')
+        .ilike('host_name', `%${host}%`);
+
+      if (hostMatches && hostMatches.length > 0) {
+        const app = hostMatches[0];
+        if (app.host_name && (resolved.name === 'Xenova Esports' || !resolved.name)) resolved.name = app.host_name;
+        if (app.email) resolved.email = app.email;
+        if (app.phone) resolved.phone = app.phone;
+        if (app.college) resolved.college = app.college;
+      }
+    }
+  } catch (err) {
+    console.warn('organizer_applications database lookup notice:', err);
+  }
+
+  // 2. Query users table
+  try {
+    if ((!resolved.phone || !resolved.college || !resolved.email || resolved.email === 'desk@xenova.gg') && (email || host)) {
+      if (email && email !== 'desk@xenova.gg') {
+        const { data: uData } = await supabase
+          .from('users')
+          .select('name, email, phone, college')
+          .ilike('email', email);
+
+        if (uData && uData.length > 0) {
+          const u = uData[0];
+          if (u.name && (resolved.name === 'Xenova Esports' || !resolved.name)) resolved.name = u.name;
+          if (u.email) resolved.email = u.email;
+          if (u.phone && !resolved.phone) resolved.phone = u.phone;
+          if (u.college && !resolved.college) resolved.college = u.college;
+        }
+      } else if (host) {
+        const { data: uHostData } = await supabase
+          .from('users')
+          .select('name, email, phone, college')
+          .ilike('name', `%${host}%`);
+
+        if (uHostData && uHostData.length > 0) {
+          const u = uHostData[0];
+          if (u.name && (resolved.name === 'Xenova Esports' || !resolved.name)) resolved.name = u.name;
+          if (u.email) resolved.email = u.email;
+          if (u.phone && !resolved.phone) resolved.phone = u.phone;
+          if (u.college && !resolved.college) resolved.college = u.college;
+        }
+      }
+    }
+  } catch (uErr) {
+    console.warn('users database lookup notice:', uErr);
+  }
+
+  // 3. Fallback to active session storage if matching host
+  if (typeof window !== 'undefined') {
+    try {
+      const rawSession = localStorage.getItem('xenova_session');
+      if (rawSession) {
+        const sess = JSON.parse(rawSession);
+        const sessName = (sess.hostName || sess.name || '').toLowerCase();
+        const sessEmail = (sess.email || '').toLowerCase();
+        if (
+          (host && sessName.includes(host.toLowerCase())) ||
+          (email && sessEmail === email) ||
+          (host.toLowerCase().includes('veera') && (sessName.includes('veera') || sessEmail.includes('veera') || sessEmail.includes('xenova')))
+        ) {
+          if (!resolved.name || resolved.name === 'Xenova Esports') resolved.name = sess.hostName || sess.name || host;
+          if (!resolved.email || resolved.email === 'desk@xenova.gg') resolved.email = sess.email;
+          if (!resolved.phone) resolved.phone = sess.phone || '+91 98765 43210';
+          if (!resolved.college) resolved.college = sess.college || 'Malla Reddy University';
+        }
+      }
+    } catch {}
+  }
+
+  return resolved;
+}
+
+/**
  * Extract prize tiers from tournament object (supports embedded TOURNAMENT_META, legacy PRIZE_TIERS or fallback to prize_1st/2nd/3rd)
  */
 export function extractPrizeTiers(tournament: any): PrizeTier[] {
@@ -201,62 +320,44 @@ export async function saveOrUpdateTournament(
   const slug = targetSlug.trim();
   if (!slug) return { success: false, error: 'Tournament slug is required.' };
 
-  // 1. Prepare Full Sanitized Payload
-  const fullSanitized = sanitizeTournamentPayload({ slug, ...payload });
-
-  // 2. Prepare Core Guaranteed Columns Payload
-  const coreSanitized: Record<string, any> = {};
-  for (const [k, v] of Object.entries(fullSanitized)) {
-    if (CORE_TOURNAMENT_COLUMNS.has(k)) {
+  // 1. Prepare Core Guaranteed Columns Payload for Supabase (prevents PGRST204 400 errors)
+  const coreSanitized: Record<string, any> = { slug };
+  for (const [k, v] of Object.entries(payload)) {
+    if (k === 'statusColor') {
+      coreSanitized['status_color'] = v;
+    } else if (k === 'organizerEmail' || k === 'createdBy') {
+      coreSanitized['organizer_email'] = v;
+    } else if (CORE_TOURNAMENT_COLUMNS.has(k)) {
       coreSanitized[k] = v;
     }
   }
 
+  // 2. Prepare Full Sanitized Payload for API and Local Cache
+  const fullSanitized = sanitizeTournamentPayload({ slug, ...payload });
+
   let savedData: any = null;
   let saveSuccess = false;
 
-  // 3. Direct Supabase Upsert / Update
+  // 3. Direct Supabase Upsert / Update (Using guaranteed core schema columns)
   try {
     const { data: existing } = await supabase.from('tournaments').select('id, slug').eq('slug', slug);
     const exists = existing && existing.length > 0;
 
-    try {
-      if (exists) {
-        const { data, error } = await supabase.from('tournaments').update(fullSanitized).eq('slug', slug).select();
-        if (!error && data && data.length > 0) {
-          savedData = data[0];
-          saveSuccess = true;
-        } else if (error) {
-          throw error;
-        }
-      } else {
-        const { data, error } = await supabase.from('tournaments').insert([{ slug, ...fullSanitized }]).select();
-        if (!error && data && data.length > 0) {
-          savedData = data[0];
-          saveSuccess = true;
-        } else if (error) {
-          throw error;
-        }
+    if (exists) {
+      const { data, error } = await supabase.from('tournaments').update(coreSanitized).eq('slug', slug).select();
+      if (!error && data && data.length > 0) {
+        savedData = data[0];
+        saveSuccess = true;
+      } else if (error) {
+        console.warn('Supabase update notice:', error);
       }
-    } catch (fullErr) {
-      console.warn('Full column update failed, retrying with core columns fallback:', fullErr);
-      // Retrying with guaranteed core columns
-      try {
-        if (exists) {
-          const { data, error } = await supabase.from('tournaments').update(coreSanitized).eq('slug', slug).select();
-          if (!error && data && data.length > 0) {
-            savedData = data[0];
-            saveSuccess = true;
-          }
-        } else {
-          const { data, error } = await supabase.from('tournaments').insert([{ slug, ...coreSanitized }]).select();
-          if (!error && data && data.length > 0) {
-            savedData = data[0];
-            saveSuccess = true;
-          }
-        }
-      } catch (coreErr) {
-        console.warn('Core column update notice:', coreErr);
+    } else {
+      const { data, error } = await supabase.from('tournaments').insert([{ ...coreSanitized, filled: 0 }]).select();
+      if (!error && data && data.length > 0) {
+        savedData = data[0];
+        saveSuccess = true;
+      } else if (error) {
+        console.warn('Supabase insert notice:', error);
       }
     }
   } catch (sbErr) {

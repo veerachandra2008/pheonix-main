@@ -31,11 +31,13 @@ import {
   Phone,
   Building2
 } from 'lucide-react';
+import { tournaments as defaultTournaments } from '../data';
 import { 
   getUserRegistrations, 
   extractPrizeTiers, 
   cleanDescriptionText, 
   extractOrganizerData,
+  fetchOrganizerProfileFromDB,
   getTournamentBySlug,
   PrizeTier 
 } from '@/lib/tournaments-db';
@@ -176,14 +178,6 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
             .eq('tournament_slug', activeSlug)
         ]);
 
-        if (!isMounted) return;
-
-        let found: any = null;
-        if (sbTournamentRes.data && Array.isArray(sbTournamentRes.data) && sbTournamentRes.data.length > 0) {
-          found = sbTournamentRes.data[0];
-        }
-
-        // Check backend API fallback if not found in Supabase direct select
         let found = await getTournamentBySlug(activeSlug);
         if (!found && sbTournamentRes.data && sbTournamentRes.data.length > 0) {
           found = sbTournamentRes.data[0];
@@ -209,25 +203,8 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
 
         setTournament(found);
 
-        // Dynamically resolve organizer details strictly for THIS tournament
-        const resolvedOrg = extractOrganizerData(found);
-
-        if ((!resolvedOrg.phone || !resolvedOrg.college) && resolvedOrg.email) {
-          try {
-            const { data: appData } = await supabase
-              .from('organizer_applications')
-              .select('host_name, email, phone, college')
-              .eq('email', resolvedOrg.email);
-
-            if (appData && appData.length > 0) {
-              const app = appData[0];
-              if (!resolvedOrg.phone && app.phone) resolvedOrg.phone = app.phone;
-              if (!resolvedOrg.college && app.college) resolvedOrg.college = app.college;
-              if (resolvedOrg.name === 'Xenova Esports' && app.host_name) resolvedOrg.name = app.host_name;
-            }
-          } catch {}
-        }
-
+        // Dynamically resolve organizer details strictly for THIS tournament from database tables
+        const resolvedOrg = await fetchOrganizerProfileFromDB(found);
         setOrganizerInfo(resolvedOrg);
 
         // Check user registration status
@@ -566,12 +543,12 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
 
                     <div className="p-3.5 rounded-2xl bg-black/50 border border-white/5 space-y-1">
                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 font-sans">Contact Email</span>
-                      <p className="text-emerald-400 font-semibold truncate">{organizerInfo.email || tournament.contact_email || 'desk@xenova.gg'}</p>
+                      <p className="text-emerald-400 font-semibold truncate">{organizerInfo.email || tournament.contact_email || 'xenovaesports1@gmail.com'}</p>
                     </div>
 
                     <div className="p-3.5 rounded-2xl bg-black/50 border border-white/5 space-y-1">
                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 font-sans">Direct Phone / Hotline</span>
-                      <p className="text-cyan-400 font-semibold">{organizerInfo.phone || tournament.contact_phone || 'Available via WhatsApp'}</p>
+                      <p className="text-cyan-400 font-semibold">{organizerInfo.phone || tournament.contact_phone || '+91 98765 43210'}</p>
                     </div>
                   </div>
                 </div>

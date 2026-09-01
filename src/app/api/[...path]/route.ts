@@ -238,18 +238,13 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
       const body = await req.json();
       const cleanPayload = sanitizeTournamentPayload(body);
       const insertPayload = { slug: body.slug || cleanPayload.slug, ...cleanPayload };
-      let { data, error } = await supabase.from('tournaments').insert([insertPayload]).select();
       
-      if (error) {
-        // Fallback to core columns if custom columns not in schema cache
-        const corePayload: Record<string, any> = {};
-        for (const [k, v] of Object.entries(insertPayload)) {
-          if (CORE_TOURNAMENT_COLUMNS.has(k)) corePayload[k] = v;
-        }
-        const fallbackRes = await supabase.from('tournaments').insert([corePayload]).select();
-        data = fallbackRes.data;
-        error = fallbackRes.error;
+      const corePayload: Record<string, any> = {};
+      for (const [k, v] of Object.entries(insertPayload)) {
+        if (CORE_TOURNAMENT_COLUMNS.has(k)) corePayload[k] = v;
       }
+      
+      const { data, error } = await supabase.from('tournaments').insert([corePayload]).select();
       return NextResponse.json({ success: !error, data: data ? data[0] : insertPayload }, { status: error ? 400 : 201 });
     }
     if (method === 'PATCH' || method === 'PUT') {
@@ -262,6 +257,11 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
           return NextResponse.json({ success: false, message: 'Tournament slug required.' }, { status: 400 });
         }
 
+        const corePayload: Record<string, any> = {};
+        for (const [k, v] of Object.entries(cleanPayload)) {
+          if (CORE_TOURNAMENT_COLUMNS.has(k)) corePayload[k] = v;
+        }
+
         const { data: existing } = await supabase
           .from('tournaments')
           .select('id, slug')
@@ -269,43 +269,25 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
 
         let resData;
         if (existing && existing.length > 0) {
-          let { data, error } = await supabase
+          const { data, error } = await supabase
             .from('tournaments')
-            .update(cleanPayload)
+            .update(corePayload)
             .eq('slug', targetSlug)
             .select();
 
           if (error) {
-            // Fallback to core columns
-            const corePayload: Record<string, any> = {};
-            for (const [k, v] of Object.entries(cleanPayload)) {
-              if (CORE_TOURNAMENT_COLUMNS.has(k)) corePayload[k] = v;
-            }
-            const fallbackRes = await supabase
-              .from('tournaments')
-              .update(corePayload)
-              .eq('slug', targetSlug)
-              .select();
-            data = fallbackRes.data;
+            console.warn('Supabase API route update notice:', error);
           }
           resData = data && data.length > 0 ? data[0] : cleanPayload;
         } else {
-          const insertPayload = { slug: targetSlug, ...cleanPayload };
-          let { data, error } = await supabase
+          const insertPayload = { slug: targetSlug, ...corePayload };
+          const { data, error } = await supabase
             .from('tournaments')
             .insert([insertPayload])
             .select();
 
           if (error) {
-            const corePayload: Record<string, any> = {};
-            for (const [k, v] of Object.entries(insertPayload)) {
-              if (CORE_TOURNAMENT_COLUMNS.has(k)) corePayload[k] = v;
-            }
-            const fallbackRes = await supabase
-              .from('tournaments')
-              .insert([corePayload])
-              .select();
-            data = fallbackRes.data;
+            console.warn('Supabase API route insert notice:', error);
           }
           resData = data && data.length > 0 ? data[0] : insertPayload;
         }
