@@ -543,12 +543,12 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
 
                     <div className="p-3.5 rounded-2xl bg-black/50 border border-white/5 space-y-1">
                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 font-sans">Contact Email</span>
-                      <p className="text-emerald-400 font-semibold truncate">{organizerInfo.email || tournament.contact_email || 'xenovaesports1@gmail.com'}</p>
+                      <p className="text-emerald-400 font-semibold truncate">{organizerInfo.email || tournament.contact_email || tournament.organizer_email || 'desk@xenova.gg'}</p>
                     </div>
 
                     <div className="p-3.5 rounded-2xl bg-black/50 border border-white/5 space-y-1">
                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 font-sans">Direct Phone / Hotline</span>
-                      <p className="text-cyan-400 font-semibold">{organizerInfo.phone || tournament.contact_phone || '+91 98765 43210'}</p>
+                      <p className="text-cyan-400 font-semibold">{organizerInfo.phone || tournament.contact_phone || tournament.organizer_phone || 'Available on WhatsApp'}</p>
                     </div>
                   </div>
                 </div>

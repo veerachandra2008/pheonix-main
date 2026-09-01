@@ -276,32 +276,6 @@ export default function CreateTournamentPage() {
       const organizerPhone = (formData.organizer_phone.trim() || session?.phone || '').trim();
       const organizerCollege = (formData.organizer_college.trim() || session?.college || '').trim();
 
-      const newTournament = {
-        title: formData.title.trim(),
-        name: formData.title.trim(),
-        slug,
-        host: organizerName,
-        organizer_name: organizerName,
-        organizer_email: organizerEmail,
-        organizer_phone: organizerPhone,
-        organizer_college: organizerCollege,
-        contact_email: formData.contact_email.trim() || organizerEmail,
-        contact_phone: organizerPhone,
-        college: organizerCollege,
-        createdBy: organizerEmail,
-        image: formData.image || imagePreview,
-        game: formData.game,
-        status: formData.status,
-        status_color: formData.status === 'Live' ? '#EF4444' : formData.status === 'Registering' ? '#10B981' : '#38BDF8',
-        prize: formData.prize.trim(),
-        prize_1st: p1 || formData.prize.trim(),
-        prize_2nd: p2 || '',
-        prize_3rd: p3 || '',
-        date: formData.date.trim(),
-        region: formData.region,
-        format: formData.format,
-        teams: `${formData.teams} Teams`,
-        fee: formData.fee.trim(),
       const fullDescription = embedTournamentMetadata(formData.description, {
         prizeTiers,
         organizer: {
@@ -313,9 +287,8 @@ export default function CreateTournamentPage() {
       });
 
       const newTournament = {
-        title: formData.title.trim(),
-        name: formData.title.trim(),
         slug,
+        title: formData.title.trim(),
         host: organizerName,
         organizer_name: organizerName,
         organizer_email: organizerEmail,
@@ -324,7 +297,6 @@ export default function CreateTournamentPage() {
         contact_email: formData.contact_email.trim() || organizerEmail,
         contact_phone: organizerPhone,
         college: organizerCollege,
-        createdBy: organizerEmail,
         image: formData.image || imagePreview,
         game: formData.game,
         status: formData.status,

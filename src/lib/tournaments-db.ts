@@ -201,23 +201,25 @@ export async function fetchOrganizerProfileFromDB(tournament: any): Promise<{
     console.warn('users database lookup notice:', uErr);
   }
 
-  // 3. Fallback to active session storage if matching host
+  // 3. Fallback to active session storage ONLY IF matching this tournament's host or email
   if (typeof window !== 'undefined') {
     try {
       const rawSession = localStorage.getItem('xenova_session');
       if (rawSession) {
         const sess = JSON.parse(rawSession);
-        const sessName = (sess.hostName || sess.name || '').toLowerCase();
-        const sessEmail = (sess.email || '').toLowerCase();
-        if (
-          (host && sessName.includes(host.toLowerCase())) ||
-          (email && sessEmail === email) ||
-          (host.toLowerCase().includes('veera') && (sessName.includes('veera') || sessEmail.includes('veera') || sessEmail.includes('xenova')))
-        ) {
+        const sessName = (sess.hostName || sess.name || '').trim().toLowerCase();
+        const sessEmail = (sess.email || '').trim().toLowerCase();
+        const cleanHost = host.toLowerCase();
+        const cleanEmail = email.toLowerCase();
+
+        // Strict match: Only bind if session explicitly matches this tournament's organizer
+        const isOrganizerMatch = (cleanEmail && sessEmail === cleanEmail) || (cleanHost && sessName && (sessName === cleanHost || sessName.includes(cleanHost) || cleanHost.includes(sessName)));
+
+        if (isOrganizerMatch) {
           if (!resolved.name || resolved.name === 'Xenova Esports') resolved.name = sess.hostName || sess.name || host;
           if (!resolved.email || resolved.email === 'desk@xenova.gg') resolved.email = sess.email;
-          if (!resolved.phone) resolved.phone = sess.phone || '+91 98765 43210';
-          if (!resolved.college) resolved.college = sess.college || 'Malla Reddy University';
+          if (!resolved.phone && sess.phone) resolved.phone = sess.phone;
+          if (!resolved.college && sess.college) resolved.college = sess.college;
         }
       }
     } catch {}
@@ -284,6 +286,38 @@ export function embedPrizeTiersInDescription(rawDesc: string | undefined, tiers:
   return embedTournamentMetadata(rawDesc, { prizeTiers: tiers });
 }
 
+export const VALID_TOURNAMENT_COLUMNS = new Set([
+  'slug',
+  'title',
+  'host',
+  'image',
+  'game',
+  'status',
+  'status_color',
+  'prize',
+  'date',
+  'region',
+  'format',
+  'teams',
+  'filled',
+  'fee',
+  'description',
+  'rules',
+  'schedule',
+  'map_pool',
+  'contact_email',
+  'discord_url',
+  'organizer_email',
+  'organizer_name',
+  'organizer_phone',
+  'organizer_college',
+  'contact_phone',
+  'college',
+  'prize_1st',
+  'prize_2nd',
+  'prize_3rd',
+]);
+
 export function sanitizeTournamentPayload(data: Record<string, any>): Record<string, any> {
   const sanitized: Record<string, any> = {};
   for (const [key, value] of Object.entries(data)) {
@@ -309,9 +343,8 @@ export function invalidateTournamentsCache() {
 }
 
 /**
- * Bulletproof Tournament Update & Save Handler
- * Attempts saving all columns to Supabase. If missing columns cause 400, it falls back to
- * core columns with embedded metadata in description, calls API, updates local cache, and invalidates cache.
+ * Direct Supabase Tournament Update & Save Handler
+ * Persists all first-class columns directly into Supabase PostgreSQL table.
  */
 export async function saveOrUpdateTournament(
   targetSlug: string,
@@ -320,48 +353,50 @@ export async function saveOrUpdateTournament(
   const slug = targetSlug.trim();
   if (!slug) return { success: false, error: 'Tournament slug is required.' };
 
-  // 1. Prepare Core Guaranteed Columns Payload for Supabase (prevents PGRST204 400 errors)
-  const coreSanitized: Record<string, any> = { slug };
-  for (const [k, v] of Object.entries(payload)) {
-    if (k === 'statusColor') {
-      coreSanitized['status_color'] = v;
-    } else if (k === 'organizerEmail' || k === 'createdBy') {
-      coreSanitized['organizer_email'] = v;
-    } else if (CORE_TOURNAMENT_COLUMNS.has(k)) {
-      coreSanitized[k] = v;
-    }
-  }
-
-  // 2. Prepare Full Sanitized Payload for API and Local Cache
-  const fullSanitized = sanitizeTournamentPayload({ slug, ...payload });
+  // 1. Prepare Full Sanitized Payload with all real database columns
+  const cleanPayload = sanitizeTournamentPayload({ slug, ...payload });
 
   let savedData: any = null;
   let saveSuccess = false;
 
-  // 3. Direct Supabase Upsert / Update (Using guaranteed core schema columns)
+  // 2. Direct Supabase Upsert / Update
   try {
     const { data: existing } = await supabase.from('tournaments').select('id, slug').eq('slug', slug);
     const exists = existing && existing.length > 0;
 
     if (exists) {
-      const { data, error } = await supabase.from('tournaments').update(coreSanitized).eq('slug', slug).select();
+      const { data, error } = await supabase.from('tournaments').update(cleanPayload).eq('slug', slug).select();
       if (!error && data && data.length > 0) {
         savedData = data[0];
         saveSuccess = true;
+        console.log('TOURNAMENT UPDATE SUCCEEDED', { slug, data: savedData });
       } else if (error) {
-        console.warn('Supabase update notice:', error);
+        console.error('TOURNAMENT UPDATE FAILED', {
+          code: error?.code,
+          message: error?.message,
+          details: error?.details,
+          hint: error?.hint,
+          payload: cleanPayload,
+        });
       }
     } else {
-      const { data, error } = await supabase.from('tournaments').insert([{ ...coreSanitized, filled: 0 }]).select();
+      const { data, error } = await supabase.from('tournaments').insert([{ ...cleanPayload, filled: 0 }]).select();
       if (!error && data && data.length > 0) {
         savedData = data[0];
         saveSuccess = true;
+        console.log('TOURNAMENT INSERT SUCCEEDED', { slug, data: savedData });
       } else if (error) {
-        console.warn('Supabase insert notice:', error);
+        console.error('TOURNAMENT INSERT FAILED', {
+          code: error?.code,
+          message: error?.message,
+          details: error?.details,
+          hint: error?.hint,
+          payload: cleanPayload,
+        });
       }
     }
   } catch (sbErr) {
-    console.warn('Supabase tournament save notice:', sbErr);
+    console.error('Supabase tournament save exception:', sbErr);
   }
 
   // 4. Backend / Next.js API Update

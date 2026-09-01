@@ -112,9 +112,9 @@ def get_tournaments():
 VALID_TOURNAMENT_COLUMNS = {
     'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
     'prize', 'date', 'region', 'format', 'teams', 'filled', 'fee', 'organizer_email',
-    'description', 'rules', 'schedule', 'prize_1st', 'prize_2nd', 'prize_3rd',
-    'map_pool', 'contact_email', 'discord_url',
-    'organizer_name', 'organizer_phone', 'organizer_college', 'contact_phone', 'college'
+    'description', 'rules', 'schedule', 'map_pool', 'contact_email', 'discord_url',
+    'organizer_name', 'organizer_phone', 'organizer_college', 'contact_phone',
+    'college', 'prize_1st', 'prize_2nd', 'prize_3rd'
 }
 
 def sanitize_tournament_payload(data):
@@ -122,6 +122,8 @@ def sanitize_tournament_payload(data):
     for k, v in data.items():
         if k == 'statusColor':
             sanitized['status_color'] = v
+        elif k == 'organizerEmail' or k == 'createdBy':
+            sanitized['organizer_email'] = v
         elif k in VALID_TOURNAMENT_COLUMNS:
             sanitized[k] = v
     return sanitized

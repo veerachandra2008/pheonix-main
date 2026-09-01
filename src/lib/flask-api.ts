@@ -1,6 +1,7 @@
 // src/lib/flask-api.ts
 import { supabase } from './supabase';
 import { getApiBaseUrl, fetchWithTimeout } from './api-config';
+import { saveOrUpdateTournament } from './tournaments-db';
 
 export interface CreateOrderParams {
   tournamentId?: string;
@@ -554,8 +555,8 @@ export const flaskApi = {
 
   async updateTournament(slug: string, payload: any) {
     clearAdminCache();
-    const { data, error } = await supabase.from('tournaments').update(payload).eq('slug', slug);
-    return { success: !error, data };
+    const result = await saveOrUpdateTournament(slug, payload);
+    return { success: result.success, data: result.data, error: result.error };
   },
 
   async deleteTournament(slug: string) {

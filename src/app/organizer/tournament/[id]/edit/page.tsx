@@ -279,22 +279,8 @@ export default function EditTournamentPage() {
       });
 
       const payload = {
-        title: formData.title.trim(),
-        name: formData.title.trim(),
         slug: targetSlug,
-        game: formData.game,
-        format: formData.format,
-        teams: formData.teams.includes('Teams') ? formData.teams : `${formData.teams} Teams`,
-        prize: formData.prize.trim(),
-        prize_1st: p1 || formData.prize.trim(),
-        prize_2nd: p2,
-        prize_3rd: p3,
-        date: formData.date.trim(),
-        region: formData.region,
-        fee: formData.fee.trim(),
-        image: formData.image || imagePreview,
-        status: formData.status,
-        status_color: formData.status === 'Live' ? '#EF4444' : formData.status === 'Registering' ? '#10B981' : '#38BDF8',
+        title: formData.title.trim(),
         host: organizerName,
         organizer_name: organizerName,
         organizer_email: organizerEmail,
@@ -303,6 +289,19 @@ export default function EditTournamentPage() {
         contact_email: formData.contact_email.trim() || organizerEmail,
         contact_phone: organizerPhone,
         college: organizerCollege,
+        image: formData.image || imagePreview,
+        game: formData.game,
+        status: formData.status,
+        status_color: formData.status === 'Live' ? '#EF4444' : formData.status === 'Registering' ? '#10B981' : '#38BDF8',
+        prize: formData.prize.trim(),
+        prize_1st: p1 || formData.prize.trim(),
+        prize_2nd: p2 || '',
+        prize_3rd: p3 || '',
+        date: formData.date.trim(),
+        region: formData.region,
+        format: formData.format,
+        teams: formData.teams.includes('Teams') ? formData.teams : `${formData.teams} Teams`,
+        fee: formData.fee.trim(),
         description: fullDescription,
         rules: formData.rules.trim(),
         schedule: formData.schedule.trim(),
@@ -310,7 +309,7 @@ export default function EditTournamentPage() {
         discord_url: formData.discord_url.trim(),
       };
 
-      // Resilient Save
+      // Direct Database Save
       const result = await saveOrUpdateTournament(targetSlug, payload);
       if (!result.success) {
         throw new Error(result.error || 'Failed to update tournament.');
@@ -319,9 +318,7 @@ export default function EditTournamentPage() {
       alert('Tournament details, prize breakdown, and organizer details updated successfully!');
       router.push(`/organizer/tournament/${targetSlug}`);
     } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Failed to update tournament');
-      console.error(err);
+      console.error('Failed to update tournament:', err);
       alert(err.message || 'Failed to update tournament');
     } finally {
       setSubmitting(false);
