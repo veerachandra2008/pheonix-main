@@ -93,16 +93,25 @@ export function extractOrganizerData(tournament: any): {
   college: string;
 } {
   if (!tournament) {
-    return { name: 'Xenova Esports', phone: '', email: '', college: '' };
+    return { name: '', phone: '', email: '', college: '' };
   }
 
-  const meta = extractTournamentMetadata(tournament);
-  const metaOrg = meta.organizer || {};
+  const name = (tournament.organizer_name || tournament.host || '').trim();
+  const phone = (tournament.organizer_phone || tournament.contact_phone || '').trim();
+  const email = (tournament.organizer_email || tournament.contact_email || tournament.createdBy || '').trim().toLowerCase();
+  const college = (tournament.organizer_college || tournament.college || '').trim();
 
-  const name = (tournament.organizer_name || tournament.host || metaOrg.name || 'Xenova Esports').trim();
-  const phone = (tournament.organizer_phone || tournament.contact_phone || metaOrg.phone || '').trim();
-  const email = (tournament.organizer_email || tournament.contact_email || tournament.createdBy || metaOrg.email || '').trim().toLowerCase();
-  const college = (tournament.organizer_college || tournament.college || metaOrg.college || '').trim();
+  // Backward compatibility fallback to metadata only if columns were empty
+  if (!name || !phone || !email || !college) {
+    const meta = extractTournamentMetadata(tournament);
+    const metaOrg = meta.organizer || {};
+    return {
+      name: name || metaOrg.name || 'Xenova Host',
+      phone: phone || metaOrg.phone || '',
+      email: email || metaOrg.email || '',
+      college: college || metaOrg.college || '',
+    };
+  }
 
   return { name, phone, email, college };
 }
@@ -234,25 +243,7 @@ export async function fetchOrganizerProfileFromDB(tournament: any): Promise<{
 export function extractPrizeTiers(tournament: any): PrizeTier[] {
   if (!tournament) return [];
 
-  // 1. Check in TOURNAMENT_META
-  const meta = extractTournamentMetadata(tournament);
-  if (meta.prizeTiers && Array.isArray(meta.prizeTiers) && meta.prizeTiers.length > 0) {
-    return meta.prizeTiers.filter((t) => t && (t.label || t.amount));
-  }
-
-  // 2. Try legacy PRIZE_TIERS from description
-  const desc = tournament.description || '';
-  const match = desc.match(/<!--\s*PRIZE_TIERS:(.*?)\s*-->/);
-  if (match && match[1]) {
-    try {
-      const parsed = JSON.parse(match[1]);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.filter((t) => t && (t.label || t.amount));
-      }
-    } catch {}
-  }
-
-  // 3. Fallback to prize_1st, prize_2nd, prize_3rd
+  // 1. Primary: Direct physical database columns
   const tiers: PrizeTier[] = [];
   if (tournament.prize_1st && tournament.prize_1st.trim()) {
     tiers.push({ id: 'tier-1', label: '1st Place (Champion)', amount: tournament.prize_1st.trim(), rankKey: '1st' });
@@ -262,6 +253,27 @@ export function extractPrizeTiers(tournament: any): PrizeTier[] {
   }
   if (tournament.prize_3rd && tournament.prize_3rd.trim()) {
     tiers.push({ id: 'tier-3', label: '3rd Place (Bronze)', amount: tournament.prize_3rd.trim(), rankKey: '3rd' });
+  }
+
+  if (tiers.length > 0) {
+    return tiers;
+  }
+
+  // 2. Backward compatibility fallback: Check in TOURNAMENT_META or PRIZE_TIERS
+  const meta = extractTournamentMetadata(tournament);
+  if (meta.prizeTiers && Array.isArray(meta.prizeTiers) && meta.prizeTiers.length > 0) {
+    return meta.prizeTiers.filter((t) => t && (t.label || t.amount));
+  }
+
+  const desc = tournament.description || '';
+  const match = desc.match(/<!--\s*PRIZE_TIERS:(.*?)\s*-->/);
+  if (match && match[1]) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.filter((t) => t && (t.label || t.amount));
+      }
+    } catch {}
   }
 
   return tiers;
@@ -405,7 +417,7 @@ export async function saveOrUpdateTournament(
     const res = await fetch(`${apiBase}/tournaments/${encodeURIComponent(slug)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slug, ...fullSanitized }),
+      body: JSON.stringify({ slug, ...cleanPayload }),
     });
     if (res.ok) {
       const json = await res.json();
@@ -420,8 +432,9 @@ export async function saveOrUpdateTournament(
   if (typeof window !== 'undefined') {
     try {
       const localCustom = JSON.parse(localStorage.getItem('xenova_custom_tournaments') || '{}');
-      localCustom[slug] = { slug, ...fullSanitized, ...(savedData || {}) };
+      localCustom[slug] = { slug, ...cleanPayload, ...(savedData || {}) };
       localStorage.setItem('xenova_custom_tournaments', JSON.stringify(localCustom));
+      invalidateTournamentsCache();
     } catch {}
   }
 

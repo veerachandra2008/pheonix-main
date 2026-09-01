@@ -268,16 +268,6 @@ export default function EditTournamentPage() {
       const organizerPhone = (formData.organizer_phone.trim() || session?.phone || '').trim();
       const organizerCollege = (formData.organizer_college.trim() || session?.college || '').trim();
 
-      const fullDescription = embedTournamentMetadata(formData.description, {
-        prizeTiers,
-        organizer: {
-          name: organizerName,
-          email: organizerEmail,
-          phone: organizerPhone,
-          college: organizerCollege,
-        },
-      });
-
       const payload = {
         slug: targetSlug,
         title: formData.title.trim(),
@@ -302,7 +292,7 @@ export default function EditTournamentPage() {
         format: formData.format,
         teams: formData.teams.includes('Teams') ? formData.teams : `${formData.teams} Teams`,
         fee: formData.fee.trim(),
-        description: fullDescription,
+        description: formData.description.trim(),
         rules: formData.rules.trim(),
         schedule: formData.schedule.trim(),
         map_pool: formData.map_pool.trim(),
