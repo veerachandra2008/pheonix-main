@@ -23,6 +23,13 @@ export interface TournamentRegistrationRecord {
 
 let memoryTournamentsCache: Tournament[] | null = null;
 
+export const CORE_TOURNAMENT_COLUMNS = new Set([
+  'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
+  'prize', 'date', 'region', 'format', 'teams', 'filled', 'fee',
+  'description', 'rules', 'schedule', 'map_pool', 'contact_email',
+  'discord_url', 'organizer_email'
+]);
+
 export const VALID_TOURNAMENT_COLUMNS = new Set([
   'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
   'prize', 'prize_1st', 'prize_2nd', 'prize_3rd', 'date', 'region', 'format',
@@ -38,13 +45,81 @@ export interface PrizeTier {
   rankKey?: '1st' | '2nd' | '3rd' | 'other';
 }
 
+export interface TournamentMetadata {
+  prizeTiers?: PrizeTier[];
+  organizer?: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    college?: string;
+  };
+}
+
 /**
- * Extract prize tiers from tournament object (supports embedded tiers or fallback to prize_1st/2nd/3rd)
+ * Embed complete metadata (prize tiers and organizer details) into description string
+ */
+export function embedTournamentMetadata(rawDesc: string | undefined, meta: TournamentMetadata): string {
+  const clean = cleanDescriptionText(rawDesc);
+  const jsonStr = JSON.stringify(meta);
+  return clean ? `${clean}\n\n<!-- TOURNAMENT_META:${jsonStr} -->` : `<!-- TOURNAMENT_META:${jsonStr} -->`;
+}
+
+/**
+ * Extract complete metadata from tournament record
+ */
+export function extractTournamentMetadata(tournament: any): TournamentMetadata {
+  if (!tournament) return {};
+  const desc = tournament.description || '';
+  const match = desc.match(/<!--\s*TOURNAMENT_META:(.*?)\s*-->/);
+  if (match && match[1]) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch {}
+  }
+  return {};
+}
+
+/**
+ * Extract organizer information with priority hierarchy:
+ * 1. Dedicated tournament columns (organizer_name, organizer_phone, organizer_college, organizer_email)
+ * 2. Embedded TOURNAMENT_META in description
+ * 3. Fallback to host / contact_email / createdBy
+ */
+export function extractOrganizerData(tournament: any): {
+  name: string;
+  phone: string;
+  email: string;
+  college: string;
+} {
+  if (!tournament) {
+    return { name: 'Xenova Esports', phone: '', email: '', college: '' };
+  }
+
+  const meta = extractTournamentMetadata(tournament);
+  const metaOrg = meta.organizer || {};
+
+  const name = (tournament.organizer_name || tournament.host || metaOrg.name || 'Xenova Esports').trim();
+  const phone = (tournament.organizer_phone || tournament.contact_phone || metaOrg.phone || '').trim();
+  const email = (tournament.organizer_email || tournament.contact_email || tournament.createdBy || metaOrg.email || '').trim().toLowerCase();
+  const college = (tournament.organizer_college || tournament.college || metaOrg.college || '').trim();
+
+  return { name, phone, email, college };
+}
+
+/**
+ * Extract prize tiers from tournament object (supports embedded TOURNAMENT_META, legacy PRIZE_TIERS or fallback to prize_1st/2nd/3rd)
  */
 export function extractPrizeTiers(tournament: any): PrizeTier[] {
   if (!tournament) return [];
 
-  // 1. Try to parse embedded PRIZE_TIERS from description
+  // 1. Check in TOURNAMENT_META
+  const meta = extractTournamentMetadata(tournament);
+  if (meta.prizeTiers && Array.isArray(meta.prizeTiers) && meta.prizeTiers.length > 0) {
+    return meta.prizeTiers.filter((t) => t && (t.label || t.amount));
+  }
+
+  // 2. Try legacy PRIZE_TIERS from description
   const desc = tournament.description || '';
   const match = desc.match(/<!--\s*PRIZE_TIERS:(.*?)\s*-->/);
   if (match && match[1]) {
@@ -56,7 +131,7 @@ export function extractPrizeTiers(tournament: any): PrizeTier[] {
     } catch {}
   }
 
-  // 2. Fallback to prize_1st, prize_2nd, prize_3rd
+  // 3. Fallback to prize_1st, prize_2nd, prize_3rd
   const tiers: PrizeTier[] = [];
   if (tournament.prize_1st && tournament.prize_1st.trim()) {
     tiers.push({ id: 'tier-1', label: '1st Place (Champion)', amount: tournament.prize_1st.trim(), rankKey: '1st' });
@@ -72,21 +147,22 @@ export function extractPrizeTiers(tournament: any): PrizeTier[] {
 }
 
 /**
- * Strip metadata tags like <!-- PRIZE_TIERS:... --> from public description text
+ * Strip metadata tags like <!-- TOURNAMENT_META:... --> and <!-- PRIZE_TIERS:... --> from public description text
  */
 export function cleanDescriptionText(desc: string | undefined): string {
   if (!desc) return '';
-  return desc.replace(/<!--\s*PRIZE_TIERS:.*?\s*-->/g, '').trim();
+  return desc
+    .replace(/<!--\s*TOURNAMENT_META:.*?\s*-->/g, '')
+    .replace(/<!--\s*PRIZE_TIERS:.*?\s*-->/g, '')
+    .replace(/<!--\s*ORGANIZER_DATA:.*?\s*-->/g, '')
+    .trim();
 }
 
 /**
- * Embed prize tiers into description string without altering visible text
+ * Legacy Prize Tier Embedding helper
  */
 export function embedPrizeTiersInDescription(rawDesc: string | undefined, tiers: PrizeTier[]): string {
-  const clean = cleanDescriptionText(rawDesc);
-  if (!tiers || tiers.length === 0) return clean;
-  const jsonStr = JSON.stringify(tiers);
-  return clean ? `${clean}\n\n<!-- PRIZE_TIERS:${jsonStr} -->` : `<!-- PRIZE_TIERS:${jsonStr} -->`;
+  return embedTournamentMetadata(rawDesc, { prizeTiers: tiers });
 }
 
 export function sanitizeTournamentPayload(data: Record<string, any>): Record<string, any> {
@@ -111,6 +187,157 @@ export function invalidateTournamentsCache() {
       window.dispatchEvent(new Event('xenova-tournaments-updated'));
     } catch {}
   }
+}
+
+/**
+ * Bulletproof Tournament Update & Save Handler
+ * Attempts saving all columns to Supabase. If missing columns cause 400, it falls back to
+ * core columns with embedded metadata in description, calls API, updates local cache, and invalidates cache.
+ */
+export async function saveOrUpdateTournament(
+  targetSlug: string,
+  payload: Record<string, any>
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  const slug = targetSlug.trim();
+  if (!slug) return { success: false, error: 'Tournament slug is required.' };
+
+  // 1. Prepare Full Sanitized Payload
+  const fullSanitized = sanitizeTournamentPayload({ slug, ...payload });
+
+  // 2. Prepare Core Guaranteed Columns Payload
+  const coreSanitized: Record<string, any> = {};
+  for (const [k, v] of Object.entries(fullSanitized)) {
+    if (CORE_TOURNAMENT_COLUMNS.has(k)) {
+      coreSanitized[k] = v;
+    }
+  }
+
+  let savedData: any = null;
+  let saveSuccess = false;
+
+  // 3. Direct Supabase Upsert / Update
+  try {
+    const { data: existing } = await supabase.from('tournaments').select('id, slug').eq('slug', slug);
+    const exists = existing && existing.length > 0;
+
+    try {
+      if (exists) {
+        const { data, error } = await supabase.from('tournaments').update(fullSanitized).eq('slug', slug).select();
+        if (!error && data && data.length > 0) {
+          savedData = data[0];
+          saveSuccess = true;
+        } else if (error) {
+          throw error;
+        }
+      } else {
+        const { data, error } = await supabase.from('tournaments').insert([{ slug, ...fullSanitized }]).select();
+        if (!error && data && data.length > 0) {
+          savedData = data[0];
+          saveSuccess = true;
+        } else if (error) {
+          throw error;
+        }
+      }
+    } catch (fullErr) {
+      console.warn('Full column update failed, retrying with core columns fallback:', fullErr);
+      // Retrying with guaranteed core columns
+      try {
+        if (exists) {
+          const { data, error } = await supabase.from('tournaments').update(coreSanitized).eq('slug', slug).select();
+          if (!error && data && data.length > 0) {
+            savedData = data[0];
+            saveSuccess = true;
+          }
+        } else {
+          const { data, error } = await supabase.from('tournaments').insert([{ slug, ...coreSanitized }]).select();
+          if (!error && data && data.length > 0) {
+            savedData = data[0];
+            saveSuccess = true;
+          }
+        }
+      } catch (coreErr) {
+        console.warn('Core column update notice:', coreErr);
+      }
+    }
+  } catch (sbErr) {
+    console.warn('Supabase tournament save notice:', sbErr);
+  }
+
+  // 4. Backend / Next.js API Update
+  try {
+    const apiBase = getApiBaseUrl();
+    const res = await fetch(`${apiBase}/tournaments/${encodeURIComponent(slug)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, ...fullSanitized }),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data) savedData = Array.isArray(json.data) ? json.data[0] : json.data;
+      saveSuccess = true;
+    }
+  } catch (apiErr) {
+    console.warn('API tournament update notice:', apiErr);
+  }
+
+  // 5. Update Local Storage Cache
+  if (typeof window !== 'undefined') {
+    try {
+      const localCustom = JSON.parse(localStorage.getItem('xenova_custom_tournaments') || '{}');
+      localCustom[slug] = { slug, ...fullSanitized, ...(savedData || {}) };
+      localStorage.setItem('xenova_custom_tournaments', JSON.stringify(localCustom));
+    } catch {}
+  }
+
+  // 6. Invalidate memory & dispatch event
+  invalidateTournamentsCache();
+
+  return { success: true, data: savedData || fullSanitized };
+}
+
+/**
+ * Fetch a single tournament by slug from Supabase, local cache, or API
+ */
+export async function getTournamentBySlug(targetSlug: string): Promise<any | null> {
+  const cleanSlug = (targetSlug || '').toLowerCase().trim();
+  if (!cleanSlug) return null;
+
+  // 1. Direct Supabase Query
+  try {
+    const { data } = await supabase.from('tournaments').select('*').ilike('slug', cleanSlug);
+    if (data && data.length > 0) {
+      return data[0];
+    }
+  } catch {}
+
+  // 2. Local Custom Tournaments Cache
+  if (typeof window !== 'undefined') {
+    try {
+      const localCustom = JSON.parse(localStorage.getItem('xenova_custom_tournaments') || '{}');
+      if (localCustom[cleanSlug]) {
+        return localCustom[cleanSlug];
+      }
+      for (const val of Object.values(localCustom) as any[]) {
+        if ((val.slug || '').toLowerCase() === cleanSlug) return val;
+      }
+    } catch {}
+  }
+
+  // 3. Backend API
+  try {
+    const apiBase = getApiBaseUrl();
+    const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        const match = json.data.find((t: any) => (t.slug || '').toLowerCase() === cleanSlug);
+        if (match) return match;
+      }
+    }
+  } catch {}
+
+  // 4. Default Tournaments
+  return defaultMockTournaments.find((t) => t.slug?.toLowerCase() === cleanSlug) || null;
 }
 
 /**

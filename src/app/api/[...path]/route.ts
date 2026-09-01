@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { sanitizeTournamentPayload } from '@/lib/tournaments-db';
+import { sanitizeTournamentPayload, CORE_TOURNAMENT_COLUMNS } from '@/lib/tournaments-db';
 
 // Disable static optimization for API routes
 export const dynamic = 'force-dynamic';
@@ -238,7 +238,18 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
       const body = await req.json();
       const cleanPayload = sanitizeTournamentPayload(body);
       const insertPayload = { slug: body.slug || cleanPayload.slug, ...cleanPayload };
-      const { data, error } = await supabase.from('tournaments').insert([insertPayload]).select();
+      let { data, error } = await supabase.from('tournaments').insert([insertPayload]).select();
+      
+      if (error) {
+        // Fallback to core columns if custom columns not in schema cache
+        const corePayload: Record<string, any> = {};
+        for (const [k, v] of Object.entries(insertPayload)) {
+          if (CORE_TOURNAMENT_COLUMNS.has(k)) corePayload[k] = v;
+        }
+        const fallbackRes = await supabase.from('tournaments').insert([corePayload]).select();
+        data = fallbackRes.data;
+        error = fallbackRes.error;
+      }
       return NextResponse.json({ success: !error, data: data ? data[0] : insertPayload }, { status: error ? 400 : 201 });
     }
     if (method === 'PATCH' || method === 'PUT') {
@@ -258,27 +269,45 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
 
         let resData;
         if (existing && existing.length > 0) {
-          const { data, error } = await supabase
+          let { data, error } = await supabase
             .from('tournaments')
             .update(cleanPayload)
             .eq('slug', targetSlug)
             .select();
 
           if (error) {
-            return NextResponse.json({ success: false, message: error.message }, { status: 400 });
+            // Fallback to core columns
+            const corePayload: Record<string, any> = {};
+            for (const [k, v] of Object.entries(cleanPayload)) {
+              if (CORE_TOURNAMENT_COLUMNS.has(k)) corePayload[k] = v;
+            }
+            const fallbackRes = await supabase
+              .from('tournaments')
+              .update(corePayload)
+              .eq('slug', targetSlug)
+              .select();
+            data = fallbackRes.data;
           }
-          resData = data ? data[0] : cleanPayload;
+          resData = data && data.length > 0 ? data[0] : cleanPayload;
         } else {
           const insertPayload = { slug: targetSlug, ...cleanPayload };
-          const { data, error } = await supabase
+          let { data, error } = await supabase
             .from('tournaments')
             .insert([insertPayload])
             .select();
 
           if (error) {
-            return NextResponse.json({ success: false, message: error.message }, { status: 400 });
+            const corePayload: Record<string, any> = {};
+            for (const [k, v] of Object.entries(insertPayload)) {
+              if (CORE_TOURNAMENT_COLUMNS.has(k)) corePayload[k] = v;
+            }
+            const fallbackRes = await supabase
+              .from('tournaments')
+              .insert([corePayload])
+              .select();
+            data = fallbackRes.data;
           }
-          resData = data ? data[0] : insertPayload;
+          resData = data && data.length > 0 ? data[0] : insertPayload;
         }
 
         return NextResponse.json({

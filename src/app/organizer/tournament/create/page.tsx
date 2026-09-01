@@ -26,9 +26,10 @@ import { supabase } from '@/lib/supabase';
 import { 
   sanitizeTournamentPayload, 
   invalidateTournamentsCache,
-  embedPrizeTiersInDescription,
+  embedTournamentMetadata,
   extractPrizeTiers,
   cleanDescriptionText,
+  saveOrUpdateTournament,
   PrizeTier
 } from '@/lib/tournaments-db';
 
@@ -301,45 +302,54 @@ export default function CreateTournamentPage() {
         format: formData.format,
         teams: `${formData.teams} Teams`,
         fee: formData.fee.trim(),
-        description: embedPrizeTiersInDescription(formData.description, prizeTiers),
+      const fullDescription = embedTournamentMetadata(formData.description, {
+        prizeTiers,
+        organizer: {
+          name: organizerName,
+          email: organizerEmail,
+          phone: organizerPhone,
+          college: organizerCollege,
+        },
+      });
+
+      const newTournament = {
+        title: formData.title.trim(),
+        name: formData.title.trim(),
+        slug,
+        host: organizerName,
+        organizer_name: organizerName,
+        organizer_email: organizerEmail,
+        organizer_phone: organizerPhone,
+        organizer_college: organizerCollege,
+        contact_email: formData.contact_email.trim() || organizerEmail,
+        contact_phone: organizerPhone,
+        college: organizerCollege,
+        createdBy: organizerEmail,
+        image: formData.image || imagePreview,
+        game: formData.game,
+        status: formData.status,
+        status_color: formData.status === 'Live' ? '#EF4444' : formData.status === 'Registering' ? '#10B981' : '#38BDF8',
+        prize: formData.prize.trim(),
+        prize_1st: p1 || formData.prize.trim(),
+        prize_2nd: p2 || '',
+        prize_3rd: p3 || '',
+        date: formData.date.trim(),
+        region: formData.region,
+        format: formData.format,
+        teams: `${formData.teams} Teams`,
+        fee: formData.fee.trim(),
+        description: fullDescription,
         rules: formData.rules.trim(),
         schedule: formData.schedule.trim(),
         map_pool: formData.map_pool.trim(),
         discord_url: formData.discord_url.trim(),
       };
 
-      // 1. Direct Supabase Insert
-      const cleanTournament = sanitizeTournamentPayload(newTournament);
-      try {
-        await supabase.from('tournaments').upsert([
-          {
-            slug: newTournament.slug,
-            ...cleanTournament,
-            filled: 0
-          }
-        ], { onConflict: 'slug' });
-      } catch (sbErr) {
-        console.warn('Direct Supabase tournament create notice:', sbErr);
+      // Resilient Save
+      const result = await saveOrUpdateTournament(slug, newTournament);
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to launch tournament.');
       }
-
-      // 2. Submit to Backend API
-      try {
-        const apiBase = getApiBaseUrl();
-        const res = await fetch(`${apiBase}/tournaments/`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ slug: newTournament.slug, ...cleanTournament }),
-        });
-        if (!res.ok) {
-          const data = await res.json();
-          console.warn('API tournament create notice:', data);
-        }
-      } catch (apiErr) {
-        console.warn('Backend API tournament create warning:', apiErr);
-      }
-
-      // Invalidate cache so user portal immediately displays newly launched tournament
-      invalidateTournamentsCache();
 
       alert(`Tournament "${formData.title}" launched successfully!`);
       router.push('/organizer/dashboard');

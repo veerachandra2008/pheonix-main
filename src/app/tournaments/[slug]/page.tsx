@@ -31,8 +31,14 @@ import {
   Phone,
   Building2
 } from 'lucide-react';
-import { tournaments as defaultTournaments } from '../data';
-import { getUserRegistrations, extractPrizeTiers, cleanDescriptionText, PrizeTier } from '@/lib/tournaments-db';
+import { 
+  getUserRegistrations, 
+  extractPrizeTiers, 
+  cleanDescriptionText, 
+  extractOrganizerData,
+  getTournamentBySlug,
+  PrizeTier 
+} from '@/lib/tournaments-db';
 import { flaskApi } from '@/lib/flask-api';
 import { supabase } from '@/lib/supabase';
 import { getApiBaseUrl } from '@/lib/api-config';
@@ -178,28 +184,9 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
         }
 
         // Check backend API fallback if not found in Supabase direct select
-        if (!found) {
-          try {
-            const { getApiBaseUrl } = await import('@/lib/api-config');
-            const apiBase = getApiBaseUrl();
-            const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
-            if (res.ok) {
-              const json = await res.json();
-              if (json.success && Array.isArray(json.data)) {
-                found = json.data.find((t: any) =>
-                  (t.slug || '').toLowerCase().trim() === activeSlug.toLowerCase().trim() ||
-                  String(t.id || '').trim() === activeSlug.trim()
-                );
-              }
-            }
-          } catch {}
-        }
-
-        // If not in Supabase or API, fallback to default tournaments or local mock
-        if (!found) {
-          found = defaultTournaments.find(
-            (t) => t.slug?.toLowerCase() === activeSlug.toLowerCase()
-          );
+        let found = await getTournamentBySlug(activeSlug);
+        if (!found && sbTournamentRes.data && sbTournamentRes.data.length > 0) {
+          found = sbTournamentRes.data[0];
         }
 
         if (!found) {
@@ -223,30 +210,20 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
         setTournament(found);
 
         // Dynamically resolve organizer details strictly for THIS tournament
-        const orgName = (found.organizer_name || found.host || 'Xenova Esports').trim();
-        const orgEmail = (found.organizer_email || found.contact_email || found.createdBy || '').trim().toLowerCase();
-        const orgPhone = (found.organizer_phone || found.contact_phone || '').trim();
-        const orgCollege = (found.organizer_college || found.college || '').trim();
+        const resolvedOrg = extractOrganizerData(found);
 
-        const resolvedOrg = {
-          name: orgName,
-          email: orgEmail,
-          phone: orgPhone,
-          college: orgCollege,
-        };
-
-        if ((!resolvedOrg.phone || !resolvedOrg.college) && orgEmail) {
+        if ((!resolvedOrg.phone || !resolvedOrg.college) && resolvedOrg.email) {
           try {
             const { data: appData } = await supabase
               .from('organizer_applications')
               .select('host_name, email, phone, college')
-              .eq('email', orgEmail);
+              .eq('email', resolvedOrg.email);
 
             if (appData && appData.length > 0) {
               const app = appData[0];
               if (!resolvedOrg.phone && app.phone) resolvedOrg.phone = app.phone;
               if (!resolvedOrg.college && app.college) resolvedOrg.college = app.college;
-              if (orgName === 'Xenova Esports' && app.host_name) resolvedOrg.name = app.host_name;
+              if (resolvedOrg.name === 'Xenova Esports' && app.host_name) resolvedOrg.name = app.host_name;
             }
           } catch {}
         }

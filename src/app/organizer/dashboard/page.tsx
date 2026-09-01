@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
+import { extractOrganizerData } from '@/lib/tournaments-db';
 
 export default function OrganizerDashboard() {
   const router = useRouter();
@@ -92,6 +93,23 @@ export default function OrganizerDashboard() {
         console.warn('Dashboard API fetch notice:', apiErr);
       }
 
+      // 3. Local Custom Tournaments Cache (Instant Load)
+      if (typeof window !== 'undefined') {
+        try {
+          const localCustom = JSON.parse(localStorage.getItem('xenova_custom_tournaments') || '{}');
+          for (const t of Object.values(localCustom) as any[]) {
+            if (t && t.slug) {
+              const idx = allTournaments.findIndex((x) => x.slug === t.slug);
+              if (idx >= 0) {
+                allTournaments[idx] = { ...allTournaments[idx], ...t };
+              } else {
+                allTournaments.unshift(t);
+              }
+            }
+          }
+        } catch {}
+      }
+
       setRegistrations(allRegistrations);
 
       // Filter: Show only tournaments hosted / created by this organizer
@@ -99,10 +117,11 @@ export default function OrganizerDashboard() {
         const cleanEmail = (userEmail || '').trim().toLowerCase();
         const cleanName = (userName || '').trim().toLowerCase();
         allTournaments = allTournaments.filter((t: any) => {
-          const createdBy = (t.createdBy || t.organizer_email || '').trim().toLowerCase();
-          const host = (t.host || '').trim().toLowerCase();
-          const emailMatch = cleanEmail && (createdBy === cleanEmail || host.includes(cleanEmail));
-          const nameMatch = cleanName && (host === cleanName || host.includes(cleanName));
+          const org = extractOrganizerData(t);
+          const createdBy = (t.createdBy || t.organizer_email || org.email || '').trim().toLowerCase();
+          const host = (t.host || t.organizer_name || org.name || '').trim().toLowerCase();
+          const emailMatch = cleanEmail && (createdBy === cleanEmail || host.includes(cleanEmail) || org.email === cleanEmail);
+          const nameMatch = cleanName && (host === cleanName || host.includes(cleanName) || org.name.toLowerCase().includes(cleanName));
           return emailMatch || nameMatch;
         });
       }
@@ -483,76 +502,86 @@ export default function OrganizerDashboard() {
                       </div>
 
                       {/* Details */}
-                      <div className="p-5 space-y-3">
-                        <h3 className="text-xl font-black italic uppercase tracking-tight text-white group-hover:text-indigo-400 transition-colors">
-                          {tournament.title || tournament.name}
-                        </h3>
+                      <div className="p-5 space-y-3 flex-1 flex flex-col justify-between">
+                        <div>
+                          <h3 className="text-xl font-black italic uppercase tracking-tight text-white group-hover:text-indigo-400 transition-colors line-clamp-1">
+                            {tournament.title || tournament.name}
+                          </h3>
+                        </div>
 
                         <div className="grid grid-cols-2 gap-2 text-xs text-slate-400 font-semibold pt-1">
-                          <span className="flex items-center gap-1.5 truncate">
+                          <span className="flex items-center gap-1.5 truncate" title={tournament.date || '18-20 May 2026'}>
                             <Calendar className="h-3.5 w-3.5 text-slate-500 shrink-0" />
-                            {tournament.date || '18-20 May 2026'}
+                            <span className="truncate">{tournament.date || '18-20 May 2026'}</span>
                           </span>
-                          <span className="flex items-center gap-1.5 truncate">
+                          <span className="flex items-center gap-1.5 truncate" title={tournament.region || 'Online'}>
                             <MapPin className="h-3.5 w-3.5 text-slate-500 shrink-0" />
-                            {tournament.region || 'Online'}
+                            <span className="truncate">{tournament.region || 'Online'}</span>
                           </span>
-                          <span className="flex items-center gap-1.5 truncate">
+                          <span className="flex items-center gap-1.5 truncate" title={tournament.format || 'Single Elimination'}>
                             <Gamepad2 className="h-3.5 w-3.5 text-slate-500 shrink-0" />
-                            {tournament.format || 'Single Elimination'}
+                            <span className="truncate">{tournament.format || 'Single Elimination'}</span>
                           </span>
-                          <span className="flex items-center gap-1.5 truncate">
+                          <span className="flex items-center gap-1.5 truncate" title={`Slots: ${tournament.teams || '32 Teams'}`}>
                             <Users className="h-3.5 w-3.5 text-slate-500 shrink-0" />
-                            Slots: {tournament.teams || '32 Teams'}
+                            <span className="truncate">Slots: {tournament.teams || '32 Teams'}</span>
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Actions */}
-                    <div className="p-5 pt-0 border-t border-white/5 mt-3 flex flex-wrap items-center justify-between gap-2">
-                      <Link
-                        href={`/organizer/tournament/${tournamentSlug}/attendance`}
-                        className="flex-1 min-w-[130px] py-2.5 bg-emerald-600 hover:bg-emerald-500 transition text-xs font-black uppercase tracking-wider text-white text-center rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <ShieldCheck className="h-3.5 w-3.5" />
-                        Attendance Desk
-                      </Link>
+                    {/* Actions Footer */}
+                    <div className="p-5 pt-3.5 border-t border-white/5 bg-black/20 mt-auto space-y-2">
+                      {/* Row 1: Primary Operation Buttons (Attendance & Rosters) */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <Link
+                          href={`/organizer/tournament/${tournamentSlug}/attendance`}
+                          className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 transition text-xs font-black uppercase tracking-wider text-white text-center rounded-xl shadow-md shadow-emerald-950/40 flex items-center justify-center gap-1.5 cursor-pointer border border-emerald-400/20"
+                        >
+                          <ShieldCheck className="h-3.5 w-3.5 text-emerald-200 shrink-0" />
+                          <span className="truncate">Attendance</span>
+                        </Link>
 
-                      <Link
-                        href={`/organizer/tournament/${tournamentSlug}`}
-                        className="py-2.5 px-3.5 bg-white/10 hover:bg-white/15 transition text-xs font-black uppercase tracking-wider text-slate-200 text-center rounded-xl flex items-center gap-1.5 border border-white/10 cursor-pointer"
-                      >
-                        <Users className="h-3.5 w-3.5 text-emerald-400" />
-                        Rosters ({regCount})
-                      </Link>
+                        <Link
+                          href={`/organizer/tournament/${tournamentSlug}`}
+                          className="py-2.5 px-3 bg-white/10 hover:bg-white/15 transition text-xs font-black uppercase tracking-wider text-slate-200 text-center rounded-xl flex items-center justify-center gap-1.5 border border-white/10 cursor-pointer"
+                        >
+                          <Users className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                          <span className="truncate">Rosters ({regCount})</span>
+                        </Link>
+                      </div>
 
-                      <Link
-                        href={`/organizer/tournament/${tournamentSlug}/edit`}
-                        className="py-2.5 px-3.5 bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 hover:border-indigo-500 transition text-xs font-black uppercase tracking-wider text-indigo-300 hover:text-white text-center rounded-xl cursor-pointer"
-                        title="Edit Rules & Details"
-                      >
-                        Edit
-                      </Link>
+                      {/* Row 2: Secondary Controls (Edit, Public View, Delete) */}
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/organizer/tournament/${tournamentSlug}/edit`}
+                          className="flex-1 py-2.5 px-3 bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 hover:border-indigo-500 transition text-xs font-black uppercase tracking-wider text-indigo-300 hover:text-white text-center rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
+                          title="Edit Rules & Details"
+                        >
+                          <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                          <span>Edit Rules</span>
+                        </Link>
 
-                      <Link
-                        href={`/tournaments/${tournamentSlug}`}
-                        target="_blank"
-                        className="p-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-slate-300 rounded-xl transition"
-                        title="View Public Page"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                      </Link>
+                        <Link
+                          href={`/tournaments/${tournamentSlug}`}
+                          target="_blank"
+                          className="py-2.5 px-3 bg-white/5 border border-white/10 hover:bg-white/15 hover:border-white/20 text-slate-300 hover:text-white text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+                          title="View Public Tournament Page"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          <span>View</span>
+                        </Link>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteTournament(tournamentSlug, tournament.title || tournament.name)}
-                        disabled={deletingSlug === tournamentSlug}
-                        className="p-2.5 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-600 hover:border-rose-500 text-rose-400 hover:text-white rounded-xl transition cursor-pointer disabled:opacity-50"
-                        title="Delete Tournament"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTournament(tournamentSlug, tournament.title || tournament.name)}
+                          disabled={deletingSlug === tournamentSlug}
+                          className="p-2.5 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-600 hover:border-rose-500 text-rose-400 hover:text-white rounded-xl transition cursor-pointer disabled:opacity-50 shrink-0 flex items-center justify-center"
+                          title="Delete Tournament"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   </motion.article>
                 );

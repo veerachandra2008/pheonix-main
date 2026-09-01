@@ -37,7 +37,10 @@ import {
   invalidateTournamentsCache,
   extractPrizeTiers,
   cleanDescriptionText,
-  embedPrizeTiersInDescription,
+  embedTournamentMetadata,
+  extractOrganizerData,
+  saveOrUpdateTournament,
+  getTournamentBySlug,
   PrizeTier
 } from '@/lib/tournaments-db';
 
@@ -131,59 +134,9 @@ export default function EditTournamentPage() {
   const loadTournament = async (userEmail: string, userRole: string, userName?: string) => {
     setLoading(true);
     try {
-      let found: any = null;
-      const cleanId = (rawId || '').toLowerCase().trim();
+      let found = await getTournamentBySlug(rawId);
 
-      // 1. Direct Supabase Query (Fastest)
-      try {
-        const { data: sbData } = await supabase.from('tournaments').select('*');
-        if (sbData && Array.isArray(sbData)) {
-          found = sbData.find((t: any) => {
-            const s = (t.slug || '').toLowerCase().trim();
-            const idStr = String(t.id || '').toLowerCase().trim();
-            const title = (t.title || t.name || '').toLowerCase().trim();
-            return (
-              s === cleanId ||
-              idStr === cleanId ||
-              title === cleanId ||
-              (cleanId && s.includes(cleanId)) ||
-              (s && cleanId.includes(s))
-            );
-          });
-        }
-      } catch (sbErr) {
-        console.warn('Edit page Supabase fetch notice:', sbErr);
-      }
-
-      // 2. Query Backend API
-      try {
-        const apiBase = getApiBaseUrl();
-        const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && Array.isArray(data.data)) {
-            const match = data.data.find((t: any) => {
-              const s = (t.slug || '').toLowerCase().trim();
-              const idStr = String(t.id || '').toLowerCase().trim();
-              const title = (t.title || t.name || '').toLowerCase().trim();
-              return (
-                s === cleanId ||
-                idStr === cleanId ||
-                title === cleanId ||
-                (cleanId && s.includes(cleanId)) ||
-                (s && cleanId.includes(s))
-              );
-            });
-            if (match) {
-              found = { ...(found || {}), ...match };
-            }
-          }
-        }
-      } catch (apiErr) {
-        console.warn('Edit page API fetch notice:', apiErr);
-      }
-
-      // 3. Fallback Tournament if not found in database yet
+      // Fallback Tournament if not found in database yet
       if (!found) {
         found = {
           slug: rawId,
@@ -211,6 +164,9 @@ export default function EditTournamentPage() {
         };
       }
 
+      // Extract organizer details accurately
+      const org = extractOrganizerData(found);
+
       setFormData({
         title: found.title || found.name || '',
         slug: found.slug || rawId,
@@ -223,16 +179,16 @@ export default function EditTournamentPage() {
         fee: found.fee || 'Free',
         image: found.image || '/valorant.jpg',
         status: found.status || 'Registering',
-        host: found.host || found.organizer_name || userName || 'Verified Host',
-        organizer_name: found.organizer_name || found.host || userName || 'Verified Host',
-        organizer_email: found.organizer_email || found.contact_email || userEmail || '',
-        organizer_phone: found.organizer_phone || found.contact_phone || '',
-        organizer_college: found.organizer_college || found.college || '',
+        host: org.name || userName || 'Verified Host',
+        organizer_name: org.name || userName || 'Verified Host',
+        organizer_email: org.email || userEmail || '',
+        organizer_phone: org.phone || '',
+        organizer_college: org.college || '',
         description: cleanDescriptionText(found.description),
         rules: found.rules || '',
         schedule: found.schedule || '',
         map_pool: found.map_pool || '',
-        contact_email: found.contact_email || found.organizer_email || userEmail || '',
+        contact_email: found.contact_email || org.email || userEmail || '',
         discord_url: found.discord_url || '',
       });
 
@@ -306,20 +262,31 @@ export default function EditTournamentPage() {
       const p2 = p2Tier?.amount?.trim() || '';
       const p3 = p3Tier?.amount?.trim() || '';
 
+      const targetSlug = formData.slug || rawId;
       const organizerName = (formData.organizer_name.trim() || formData.host.trim() || session?.hostName || session?.name || 'Verified Host').trim();
       const organizerEmail = (formData.organizer_email.trim() || session?.email || '').trim().toLowerCase();
       const organizerPhone = (formData.organizer_phone.trim() || session?.phone || '').trim();
       const organizerCollege = (formData.organizer_college.trim() || session?.college || '').trim();
 
-      const fullDescription = embedPrizeTiersInDescription(formData.description, prizeTiers);
+      const fullDescription = embedTournamentMetadata(formData.description, {
+        prizeTiers,
+        organizer: {
+          name: organizerName,
+          email: organizerEmail,
+          phone: organizerPhone,
+          college: organizerCollege,
+        },
+      });
 
-      const cleanPayload = sanitizeTournamentPayload({
+      const payload = {
         title: formData.title.trim(),
+        name: formData.title.trim(),
+        slug: targetSlug,
         game: formData.game,
         format: formData.format,
         teams: formData.teams.includes('Teams') ? formData.teams : `${formData.teams} Teams`,
         prize: formData.prize.trim(),
-        prize_1st: p1,
+        prize_1st: p1 || formData.prize.trim(),
         prize_2nd: p2,
         prize_3rd: p3,
         date: formData.date.trim(),
@@ -341,58 +308,19 @@ export default function EditTournamentPage() {
         schedule: formData.schedule.trim(),
         map_pool: formData.map_pool.trim(),
         discord_url: formData.discord_url.trim(),
-      });
+      };
 
-      const targetSlug = formData.slug || rawId;
-
-      // 1. Direct Supabase Update or Insert (Upsert)
-      try {
-        const { data: existingRows } = await supabase
-          .from('tournaments')
-          .select('id, slug')
-          .eq('slug', targetSlug);
-
-        if (existingRows && existingRows.length > 0) {
-          const { error: updateError } = await supabase
-            .from('tournaments')
-            .update(cleanPayload)
-            .eq('slug', targetSlug);
-
-          if (updateError) {
-            console.warn('Supabase update notice:', updateError);
-          }
-        } else {
-          const insertPayload = { slug: targetSlug, ...cleanPayload };
-          const { error: insertError } = await supabase
-            .from('tournaments')
-            .insert([insertPayload]);
-
-          if (insertError) {
-            console.warn('Supabase insert notice:', insertError);
-          }
-        }
-      } catch (sbErr) {
-        console.warn('Direct Supabase tournament update notice:', sbErr);
+      // Resilient Save
+      const result = await saveOrUpdateTournament(targetSlug, payload);
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to update tournament.');
       }
 
-      // 2. Backend API Update
-      try {
-        const apiBase = getApiBaseUrl();
-        await fetch(`${apiBase}/tournaments/${encodeURIComponent(targetSlug)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ slug: targetSlug, ...cleanPayload }),
-        });
-      } catch (apiErr) {
-        console.warn('Backend tournament update notice:', apiErr);
-      }
-
-      // 3. Invalidate client-side caches so user side portal immediately fetches fresh data
-      invalidateTournamentsCache();
-
-      alert('Tournament details and rules updated successfully!');
+      alert('Tournament details, prize breakdown, and organizer details updated successfully!');
       router.push(`/organizer/tournament/${targetSlug}`);
     } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Failed to update tournament');
       console.error(err);
       alert(err.message || 'Failed to update tournament');
     } finally {

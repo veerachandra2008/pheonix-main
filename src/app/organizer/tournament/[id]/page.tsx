@@ -26,7 +26,7 @@ import {
 
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
-import { invalidateTournamentsCache } from '@/lib/tournaments-db';
+import { invalidateTournamentsCache, getTournamentBySlug, extractOrganizerData, cleanDescriptionText } from '@/lib/tournaments-db';
 
 export default function TournamentManagePage() {
   const router = useRouter();
@@ -48,62 +48,20 @@ export default function TournamentManagePage() {
 
       // 1. Direct Supabase Query (Fastest, direct PostgreSQL)
       try {
-        const [sbTournRes, sbRegRes] = await Promise.all([
-          supabase.from('tournaments').select('*'),
-          supabase.from('registrations').select('*'),
-        ]);
+        foundTournament = await getTournamentBySlug(rawId);
 
-        if (sbTournRes.data && Array.isArray(sbTournRes.data)) {
-          foundTournament = sbTournRes.data.find((t: any) => {
-            const s = (t.slug || '').toLowerCase().trim();
-            const idStr = String(t.id || '').toLowerCase().trim();
-            const title = (t.title || t.name || '').toLowerCase().trim();
-            return (
-              s === cleanId ||
-              idStr === cleanId ||
-              title === cleanId ||
-              (cleanId && s.includes(cleanId)) ||
-              (s && cleanId.includes(s))
-            );
-          });
-        }
-
-        if (sbRegRes.data && Array.isArray(sbRegRes.data)) {
-          allRegistrations = sbRegRes.data;
+        const { data: regData } = await supabase.from('registrations').select('*');
+        if (regData && Array.isArray(regData)) {
+          allRegistrations = regData;
         }
       } catch (sbErr) {
         console.warn('Supabase tournament rosters fetch notice:', sbErr);
       }
 
-      // 2. Query Backend API
+      // 2. Query Backend API for Registrations fallback
       try {
         const apiBase = getApiBaseUrl();
-        const [tournRes, regRes] = await Promise.all([
-          fetch(`${apiBase}/tournaments/`, { cache: 'no-store' }),
-          fetch(`${apiBase}/registrations`, { cache: 'no-store' }),
-        ]);
-
-        if (tournRes.ok) {
-          const tournData = await tournRes.json();
-          if (tournData.success && Array.isArray(tournData.data)) {
-            const match = tournData.data.find((t: any) => {
-              const s = (t.slug || '').toLowerCase().trim();
-              const idStr = String(t.id || '').toLowerCase().trim();
-              const title = (t.title || t.name || '').toLowerCase().trim();
-              return (
-                s === cleanId ||
-                idStr === cleanId ||
-                title === cleanId ||
-                (cleanId && s.includes(cleanId)) ||
-                (s && cleanId.includes(s))
-              );
-            });
-            if (match) {
-              foundTournament = { ...(foundTournament || {}), ...match };
-            }
-          }
-        }
-
+        const regRes = await fetch(`${apiBase}/registrations`, { cache: 'no-store' });
         if (regRes.ok) {
           const regData = await regRes.json();
           if (regData.success && Array.isArray(regData.data)) {
