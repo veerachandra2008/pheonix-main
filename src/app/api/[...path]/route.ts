@@ -84,7 +84,9 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
         const password = (body.password || '').trim();
         const name = (body.name || '').trim();
         const college = (body.college || '').trim();
-        const role = (body.role || 'PLAYER').trim().toUpperCase();
+        // Enforce security: public registration can NEVER assign privileged roles (ADMIN, ORGANIZER).
+        // All public registrations are strictly assigned the PLAYER role.
+        const role = 'PLAYER';
 
         if (!email || !password || !name) {
           return NextResponse.json({

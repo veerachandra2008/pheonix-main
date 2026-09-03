@@ -33,7 +33,9 @@ def register():
         email = data.get('email', '').strip().lower()
         password = data.get('password', '')
         college = data.get('college', '').strip()
-        role = (data.get('role') or 'PLAYER').upper()
+        # Enforce security: public registration can NEVER assign privileged roles (ADMIN, ORGANIZER).
+        # All public registrations are strictly assigned the PLAYER role.
+        role = 'PLAYER'
 
         if not email or not password or not name:
             return jsonify({'success': False, 'message': 'Name, email, and password are required.'}), 400
@@ -217,6 +219,13 @@ def update_user_role():
 
         if not email:
             return jsonify({'success': False, 'message': 'Email is required.'}), 400
+
+        # Protect against privilege escalation: ADMIN cannot be assigned via public API
+        if role == 'ADMIN':
+            return jsonify({'success': False, 'message': 'Unauthorized: Cannot assign ADMIN role.'}), 403
+
+        if role not in ['ORGANIZER', 'PLAYER']:
+            role = 'PLAYER'
 
         # Update in-memory user
         if email in IN_MEMORY_USERS:

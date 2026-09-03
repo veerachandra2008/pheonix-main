@@ -212,7 +212,8 @@ export const flaskApi = {
         };
       }
 
-      const initialRole = params.role?.toUpperCase() === 'ADMIN' ? 'ADMIN' : 'PLAYER';
+      // Enforce security: public registration can NEVER assign privileged roles (ADMIN, ORGANIZER).
+      const initialRole = 'PLAYER';
       const userPayload = {
         name: params.name,
         email: email,
@@ -239,7 +240,7 @@ export const flaskApi = {
   },
 
   // Update User Role in Supabase
-  async updateUserRole(email: string, role: 'ORGANIZER' | 'PLAYER' | 'ADMIN') {
+  async updateUserRole(email: string, role: 'ORGANIZER' | 'PLAYER') {
     clearAdminCache();
     try {
       const cleanEmail = email.trim().toLowerCase();
@@ -248,8 +249,14 @@ export const flaskApi = {
         return { success: true, message: 'User is ADMIN, role unchanged.' };
       }
 
-      const { error } = await supabase.from('users').update({ role: role }).eq('email', cleanEmail);
-      return { success: !error, message: `Role updated to ${role} in Supabase` };
+      // Disallow privilege escalation to ADMIN
+      if ((role as string)?.toUpperCase() === 'ADMIN') {
+        return { success: false, message: 'Unauthorized: Cannot grant ADMIN role via this API.' };
+      }
+
+      const validRole = role === 'ORGANIZER' ? 'ORGANIZER' : 'PLAYER';
+      const { error } = await supabase.from('users').update({ role: validRole }).eq('email', cleanEmail);
+      return { success: !error, message: `Role updated to ${validRole} in Supabase` };
     } catch (err: any) {
       return { success: false, message: err.message };
     }

@@ -38,7 +38,7 @@ export default function LoginPage() {
     email: '',
     password: '',
     college: '',
-    role: 'competitor',
+    role: 'player',
   });
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -61,7 +61,7 @@ export default function LoginPage() {
             email: cleanEmail,
             password: formData.password,
             college: formData.college.trim() || 'General Campus',
-            role: (formData.role || 'PLAYER').toUpperCase(),
+            role: 'PLAYER',
           }),
         });
 
@@ -184,9 +184,9 @@ export default function LoginPage() {
     }
   };
 
-  const fillDemo = (role: 'competitor' | 'organizer') => {
+  const fillDemo = (role: 'player' | 'organizer') => {
     setFormData({
-      name: role === 'competitor' ? 'Veera Chandra' : 'Veera Chandra (Organizer)',
+      name: role === 'player' ? 'Veera Chandra' : 'Veera Chandra (Organizer)',
       email: 'veerachandra2008@gmail.com',
       password: 'veera2008',
       college: 'Malla Reddy university',
@@ -388,7 +388,7 @@ export default function LoginPage() {
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => fillDemo('competitor')}
+              onClick={() => fillDemo('player')}
               className="flex items-center justify-center gap-1.5 p-2 rounded-xl border border-zinc-800 bg-zinc-900/60 text-[11px] font-bold text-zinc-300 hover:bg-zinc-800 hover:text-white transition"
             >
               <Gamepad2 className="h-3.5 w-3.5 text-emerald-400" /> Gamer Demo
