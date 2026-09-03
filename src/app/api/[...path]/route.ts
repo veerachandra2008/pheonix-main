@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import { sanitizeTournamentPayload, CORE_TOURNAMENT_COLUMNS } from '@/lib/tournaments-db';
 
 // Disable static optimization for API routes
@@ -75,6 +76,126 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
 
   // 2. Auth Endpoints
   if (mainSegment === 'auth') {
+    // 2a. POST /api/auth/register
+    if (subSegment === 'register' && method === 'POST') {
+      try {
+        const body = await req.json();
+        const email = (body.email || '').trim().toLowerCase();
+        const password = (body.password || '').trim();
+        const name = (body.name || '').trim();
+        const college = (body.college || '').trim();
+        const role = (body.role || 'PLAYER').trim().toUpperCase();
+
+        if (!email || !password || !name) {
+          return NextResponse.json({
+            success: false,
+            message: 'Name, email, and password are required.'
+          }, { status: 400 });
+        }
+
+        if (password.length < 6) {
+          return NextResponse.json({
+            success: false,
+            message: 'Password must be at least 6 characters long.'
+          }, { status: 400 });
+        }
+
+        // Check if user already exists in public.users or auth.users
+        const { data: existingUser, error: checkError } = await supabase
+          .from('users')
+          .select('id, email')
+          .ilike('email', email)
+          .maybeSingle();
+
+        if (checkError) {
+          console.error('Error checking existing user in public.users:', checkError);
+        }
+
+        if (existingUser) {
+          return NextResponse.json({
+            success: false,
+            message: 'An account with this email already exists. Please sign in.',
+            already_registered: true
+          }, { status: 400 });
+        }
+
+        // NOTE (Architecture Decision): email_confirm is set to true by design because
+        // external SMTP email sending is not configured on this Supabase project.
+        // This provisions an immediately active Supabase Auth user.
+        const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+          email,
+          password,
+          email_confirm: true,
+          user_metadata: { name, college, role }
+        });
+
+        if (authError || !authData?.user?.id) {
+          console.error('Supabase Auth createUser error:', authError);
+          const msg = authError?.message || 'Failed to create Supabase Auth account.';
+          return NextResponse.json({
+            success: false,
+            message: msg.includes('already registered')
+              ? 'An account with this email already exists. Please sign in.'
+              : msg,
+            already_registered: msg.includes('already registered')
+          }, { status: 400 });
+        }
+
+        const userId = authData.user.id;
+        const tag = `${name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) || 'PLAYER'}#${Math.floor(1000 + Math.random() * 9000)}`;
+
+        // Insert profile into public.users with matching UUID
+        const { data: profileData, error: profileError } = await supabaseAdmin
+          .from('users')
+          .insert([
+            {
+              id: userId,
+              email,
+              name,
+              college: college || 'Collegiate Competitor',
+              role,
+              tag,
+              team: 'Free Agent',
+              bio: 'Official collegiate esports athlete.',
+              rank: 0,
+              win_rate: 0,
+              trophies: 0,
+            }
+          ])
+          .select()
+          .single();
+
+        if (profileError) {
+          console.error('Failed to create public.users profile, rolling back auth account:', profileError);
+          await supabaseAdmin.auth.admin.deleteUser(userId);
+          return NextResponse.json({
+            success: false,
+            message: 'Failed to create user profile: ' + profileError.message
+          }, { status: 500 });
+        }
+
+        return NextResponse.json({
+          success: true,
+          message: 'Account created successfully.',
+          user: {
+            id: profileData.id,
+            email: profileData.email,
+            name: profileData.name,
+            college: profileData.college,
+            role: profileData.role,
+            tag: profileData.tag,
+          }
+        }, { status: 201 });
+      } catch (err: any) {
+        console.error('Register endpoint exception:', err);
+        return NextResponse.json({
+          success: false,
+          message: err.message || 'Internal server error during registration.'
+        }, { status: 500 });
+      }
+    }
+
+    // 2b. POST /api/auth/login
     if (subSegment === 'login' && method === 'POST') {
       try {
         const body = await req.json();
@@ -85,50 +206,64 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
           return NextResponse.json({ success: false, message: 'Email and password required.' }, { status: 400 });
         }
 
-        // Check root admin fallback
-        if (email === 'admin@xenova.gg' && (password === 'admin' || password === 'admin123' || password === 'admin@123')) {
+        // Supabase Auth is the single authoritative source of truth for password verification
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (authError || !authData?.user) {
           return NextResponse.json({
-            success: true,
-            message: 'Signed in as Administrator.',
+            success: false,
+            message: authError?.message || 'Invalid email or password.'
+          }, { status: 401 });
+        }
+
+        // Fetch authoritative profile from public.users using user.id
+        const { data: profile, error: profileError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', authData.user.id)
+          .maybeSingle();
+
+        if (profileError) {
+          console.error('Profile fetch error after login:', profileError);
+        }
+
+        const userObj = {
+          id: authData.user.id,
+          email: authData.user.email || email,
+          name: profile?.name || authData.user.user_metadata?.name || 'Player',
+          college: profile?.college || authData.user.user_metadata?.college || 'Collegiate Competitor',
+          role: (profile?.role || authData.user.user_metadata?.role || 'PLAYER').toLowerCase(),
+          avatar: profile?.avatar_url || '/valorant.jpg',
+          tag: profile?.tag || `${(profile?.name || 'Gamer').toUpperCase().replace(/\s+/g, '')}#1337`,
+          bio: profile?.bio || ''
+        };
+
+        return NextResponse.json({
+          success: true,
+          message: 'Signed in successfully!',
+          user: userObj,
+          session: {
+            access_token: authData.session?.access_token,
+            refresh_token: authData.session?.refresh_token,
+            expires_at: authData.session?.expires_at,
             user: {
-              id: 'admin_root',
-              name: 'Super Admin',
-              email: 'admin@xenova.gg',
-              college: 'Xenova HQ',
-              role: 'admin',
-              tag: 'ADMIN#1337',
-              avatar: '/valorant.jpg',
-              bio: 'System Control Center Root User'
+              id: authData.user.id,
+              email: authData.user.email,
             }
-          }, { status: 200 });
-        }
-
-        // Query Supabase users
-        const { data: users } = await supabase.from('users').select('*').eq('email', email);
-        if (users && users.length > 0) {
-          const user = users[0];
-          const storedHash = user.password_hash || user.password;
-          if (storedHash === password || email === 'admin@xenova.gg') {
-            return NextResponse.json({
-              success: true,
-              message: 'Signed in successfully!',
-              user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                college: user.college,
-                role: (user.role || 'PLAYER').toLowerCase(),
-                avatar: user.avatar_url || '/valorant.jpg',
-                tag: user.tag || `${(user.name || 'Gamer').toUpperCase().replace(/\s+/g, '')}#1337`
-              }
-            }, { status: 200 });
           }
-        }
-
-        return NextResponse.json({ success: false, message: 'Invalid credentials.' }, { status: 401 });
+        }, { status: 200 });
       } catch (e: any) {
-        return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+        return NextResponse.json({ success: false, message: e.message || 'Login error' }, { status: 500 });
       }
+    }
+
+    // 2c. POST /api/auth/logout
+    if (subSegment === 'logout' && method === 'POST') {
+      await supabase.auth.signOut();
+      return NextResponse.json({ success: true, message: 'Logged out successfully.' }, { status: 200 });
     }
 
     if (subSegment === 'users' && method === 'GET') {
@@ -234,7 +369,7 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
       const { data } = await supabase.from('tournaments').select('*');
       return NextResponse.json({ success: true, data: data || [] }, { status: 200 });
     }
-    if (method === 'POST') {
+    if (method === 'POST' && subSegment !== 'register') {
       const body = await req.json();
       const cleanPayload = sanitizeTournamentPayload(body);
       const insertPayload = { slug: body.slug || cleanPayload.slug, ...cleanPayload };
@@ -577,8 +712,92 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     }
   }
 
-  // Default fallback response
-  return NextResponse.json({ success: true, data: [], message: 'Xenova API Route Handled' }, { status: 200 });
+  // 4. Registrations Endpoints
+  if (mainSegment === 'registrations' || (mainSegment === 'tournaments' && subSegment === 'register')) {
+    if (method === 'GET') {
+      const url = new URL(req.url);
+      const email = url.searchParams.get('email')?.trim().toLowerCase();
+      const userId = url.searchParams.get('user_id')?.trim();
+
+      let query = supabase.from('registrations').select('*');
+      if (userId) {
+        query = query.eq('user_id', userId);
+      } else if (email) {
+        query = query.eq('email', email);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        return NextResponse.json({ success: false, message: error.message }, { status: 400 });
+      }
+      return NextResponse.json({ success: true, data: data || [] }, { status: 200 });
+    }
+
+    if (method === 'POST') {
+      try {
+        const body = await req.json();
+        const payload: any = {
+          tournament_slug: body.tournamentSlug || body.tournament_slug,
+          tournament_title: body.tournamentTitle || body.tournament_title || '',
+          team_id: String(body.teamId || body.team_id || ''),
+          team_name: body.teamName || body.team_name || 'My Squad',
+          college: body.college || 'Collegiate Competitor',
+          captain_name: body.captainName || body.captain_name || 'Captain',
+          email: (body.email || '').trim().toLowerCase(),
+          pass_id: body.passId || body.pass_id || `XPH-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
+          registered_at: body.registeredAt || body.registered_at || new Date().toISOString(),
+          payment_status: body.paymentStatus || body.payment_status || 'SUCCESS',
+        };
+
+        if (body.userId || body.user_id) {
+          payload.user_id = body.userId || body.user_id;
+        }
+
+        if (!payload.tournament_slug || !payload.email) {
+          return NextResponse.json({
+            success: false,
+            message: 'Tournament slug and email are required for registration.'
+          }, { status: 400 });
+        }
+
+        // Prevent duplicate registration for the same tournament & user
+        let dupQuery = supabase.from('registrations')
+          .select('id, pass_id')
+          .eq('tournament_slug', payload.tournament_slug);
+
+        if (payload.user_id) {
+          dupQuery = dupQuery.or(`user_id.eq.${payload.user_id},email.eq.${payload.email}`);
+        } else {
+          dupQuery = dupQuery.eq('email', payload.email);
+        }
+
+        const { data: existingRegs } = await dupQuery;
+        if (existingRegs && existingRegs.length > 0) {
+          return NextResponse.json({
+            success: false,
+            message: 'You have already registered for this tournament.',
+            passId: existingRegs[0].pass_id,
+            already_registered: true
+          }, { status: 400 });
+        }
+
+        const { data, error } = await supabase.from('registrations').insert([payload]).select();
+        if (error) {
+          return NextResponse.json({ success: false, message: error.message }, { status: 400 });
+        }
+
+        return NextResponse.json({ success: true, data: data ? data[0] : payload, passId: payload.pass_id }, { status: 201 });
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: err.message || 'Registration failed.' }, { status: 500 });
+      }
+    }
+  }
+
+  // Default fallback response: strict 404 instead of fake 200 OK
+  return NextResponse.json({
+    success: false,
+    message: `API endpoint /api/${segments.join('/')} not found.`
+  }, { status: 404 });
 }
 
 async function handleRequest(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
@@ -586,7 +805,16 @@ async function handleRequest(req: NextRequest, { params }: { params: Promise<{ p
   const pathSegments = resolvedParams?.path || [];
   const pathStr = pathSegments.join('/');
 
-  // 1. First attempt: Proxy to Flask backend server
+  // Authoritative endpoints must ALWAYS execute directly via Supabase (never proxy to python)
+  if (
+    pathSegments[0] === 'auth' ||
+    pathSegments[0] === 'registrations' ||
+    pathSegments[0] === 'tournaments'
+  ) {
+    return handleDirectDatabase(req, pathSegments);
+  }
+
+  // 1. First attempt: Proxy to Flask backend server for other endpoints
   const proxyRes = await tryProxyToBackend(req, pathStr);
   if (proxyRes) {
     try {

@@ -58,4 +58,10 @@ server.log
 /skills/
 .vercel
 
-.vercel
+# python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# local tool wrappers
+powershell.cmd

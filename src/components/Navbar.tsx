@@ -19,6 +19,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
+import { supabase } from '@/lib/supabase';
 
 const navLinks = [
   { href: '/tournaments', label: 'Tournaments' },
@@ -105,6 +106,16 @@ export const Navbar = () => {
       checkTicketsStatus();
     };
 
+    // Single source of truth: Listen directly to Supabase Auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, sbSession) => {
+      if (event === 'SIGNED_OUT' || !sbSession) {
+        localStorage.removeItem('xenova_session');
+        setSession(null);
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        syncSession();
+      }
+    });
+
     window.addEventListener('storage', syncSession);
     window.addEventListener('xenova-auth-change', syncSession);
     window.addEventListener('xenova-contact-ticket-submitted', handleTicketSubmitted);
@@ -123,6 +134,7 @@ export const Navbar = () => {
     document.addEventListener('mousedown', handleClickOutside);
     
     return () => {
+      subscription.unsubscribe();
       window.removeEventListener('storage', syncSession);
       window.removeEventListener('xenova-auth-change', syncSession);
       window.removeEventListener('xenova-contact-ticket-submitted', handleTicketSubmitted);
@@ -141,7 +153,10 @@ export const Navbar = () => {
     router.push('/login');
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
     localStorage.removeItem('xenova_session');
     setSession(null);
     window.dispatchEvent(new Event('xenova-auth-change'));

@@ -46,6 +46,13 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
   const [ticketData, setTicketData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
+  const [origin, setOrigin] = useState('https://xenova.gg');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setOrigin(window.location.origin);
+    }
+  }, []);
 
   useEffect(() => {
     if (paramsPromise) {
@@ -225,9 +232,7 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
   }
 
   const gameImage = GAME_IMAGES[ticketData?.tournamentGame] || GAME_IMAGES.default;
-  const verificationUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}/verify/${ticketData?.passId}`
-    : `https://xenova.gg/verify/${ticketData?.passId}`;
+  const verificationUrl = `${origin}/verify/${ticketData?.passId}`;
 
   return (
     <main className="min-h-screen bg-[#09090b] text-white font-sans">

@@ -19,6 +19,7 @@ export interface TournamentRegistrationRecord {
   email: string;
   passId: string;
   registeredAt: string;
+  userId?: string;
 }
 
 let memoryTournamentsCache: Tournament[] | null = null;
@@ -298,38 +299,6 @@ export function embedPrizeTiersInDescription(rawDesc: string | undefined, tiers:
   return embedTournamentMetadata(rawDesc, { prizeTiers: tiers });
 }
 
-export const VALID_TOURNAMENT_COLUMNS = new Set([
-  'slug',
-  'title',
-  'host',
-  'image',
-  'game',
-  'status',
-  'status_color',
-  'prize',
-  'date',
-  'region',
-  'format',
-  'teams',
-  'filled',
-  'fee',
-  'description',
-  'rules',
-  'schedule',
-  'map_pool',
-  'contact_email',
-  'discord_url',
-  'organizer_email',
-  'organizer_name',
-  'organizer_phone',
-  'organizer_college',
-  'contact_phone',
-  'college',
-  'prize_1st',
-  'prize_2nd',
-  'prize_3rd',
-]);
-
 export function sanitizeTournamentPayload(data: Record<string, any>): Record<string, any> {
   const sanitized: Record<string, any> = {};
   for (const [key, value] of Object.entries(data)) {
@@ -441,7 +410,7 @@ export async function saveOrUpdateTournament(
   // 6. Invalidate memory & dispatch event
   invalidateTournamentsCache();
 
-  return { success: true, data: savedData || fullSanitized };
+  return { success: true, data: savedData || cleanPayload };
 }
 
 /**
@@ -553,27 +522,35 @@ export async function saveRegistration(record: TournamentRegistrationRecord): Pr
     });
     if (res.ok) isSaved = true;
   } catch (err) {
-    console.warn('Backend API registration offline.');
+    // Backend API non-blocking
   }
 
   // 2. Save directly to Supabase client
   try {
-    const { error } = await supabase.from('registrations').insert([
-      {
-        tournament_slug: record.tournamentSlug,
-        tournament_title: record.tournamentTitle,
-        team_id: String(record.teamId),
-        team_name: record.teamName,
-        college: record.college,
-        captain_name: record.captainName,
-        email: record.email,
-        pass_id: record.passId,
-        registered_at: record.registeredAt,
-      },
-    ]);
-    if (!error) isSaved = true;
+    const payload: any = {
+      tournament_slug: record.tournamentSlug,
+      tournament_title: record.tournamentTitle,
+      team_id: String(record.teamId || ''),
+      team_name: record.teamName,
+      college: record.college,
+      captain_name: record.captainName,
+      email: record.email.trim().toLowerCase(),
+      pass_id: record.passId,
+      registered_at: record.registeredAt,
+    };
+
+    if (record.userId) {
+      payload.user_id = record.userId;
+    }
+
+    const { error } = await supabase.from('registrations').insert([payload]);
+    if (!error) {
+      isSaved = true;
+    } else {
+      console.error('Direct Supabase registration error:', error);
+    }
   } catch (err) {
-    console.warn('Direct Supabase registration error:', err);
+    console.warn('Direct Supabase registration exception:', err);
   }
 
   return isSaved;
@@ -584,23 +561,28 @@ const REG_CACHE = new Map<string, { data: TournamentRegistrationRecord[]; expire
 /**
  * Get all registrations stored for the current user strictly from Supabase / Backend with instant client caching
  */
-export async function getUserRegistrations(email?: string): Promise<TournamentRegistrationRecord[]> {
+export async function getUserRegistrations(email?: string, userId?: string): Promise<TournamentRegistrationRecord[]> {
   const records: TournamentRegistrationRecord[] = [];
-  if (!email) return records;
+  if (!email && !userId) return records;
 
-  const cleanEmail = email.trim().toLowerCase();
+  const cleanEmail = email ? email.trim().toLowerCase() : '';
+  const cacheKey = userId || cleanEmail;
 
-  const cached = REG_CACHE.get(cleanEmail);
+  const cached = REG_CACHE.get(cacheKey);
   if (cached && Date.now() < cached.expires) {
     return cached.data;
   }
 
   // 1. Direct Supabase Query First (<50ms)
   try {
-    const { data, error } = await supabase
-      .from('registrations')
-      .select('*')
-      .eq('email', cleanEmail);
+    let query = supabase.from('registrations').select('*');
+    if (userId) {
+      query = query.eq('user_id', userId);
+    } else if (cleanEmail) {
+      query = query.eq('email', cleanEmail);
+    }
+
+    const { data, error } = await query;
 
     if (!error && data && Array.isArray(data) && data.length > 0) {
       for (const item of data) {
@@ -620,9 +602,10 @@ export async function getUserRegistrations(email?: string): Promise<TournamentRe
           email: item.email,
           passId: item.pass_id,
           registeredAt: item.registered_at || new Date().toISOString(),
+          userId: item.user_id,
         });
       }
-      REG_CACHE.set(cleanEmail, { data: records, expires: Date.now() + 60000 });
+      REG_CACHE.set(cacheKey, { data: records, expires: Date.now() + 60000 });
       return records;
     }
   } catch (err) {
@@ -634,7 +617,8 @@ export async function getUserRegistrations(email?: string): Promise<TournamentRe
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 600);
     const apiBase = getApiBaseUrl();
-    const res = await fetch(`${apiBase}/registrations?email=${encodeURIComponent(cleanEmail)}`, {
+    const queryParam = userId ? `user_id=${encodeURIComponent(userId)}` : `email=${encodeURIComponent(cleanEmail)}`;
+    const res = await fetch(`${apiBase}/registrations?${queryParam}`, {
       cache: 'no-store',
       signal: controller.signal,
     });

@@ -49,194 +49,116 @@ export default function LoginPage() {
 
       if (activeTab === 'register') {
         // -------------------------------------------------------------
-        // 1. SUPABASE AUTH SIGN UP
+        // 1. REGISTER VIA SERVER-SIDE SUPABASE ADMIN API
         // -------------------------------------------------------------
-        let userId = 'usr_' + Math.random().toString(36).substring(2, 9);
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password: formData.password,
-        });
-
-        if (authData?.user?.id) {
-          userId = authData.user.id;
-        } else if (authError && !authError.message.includes('already registered')) {
-          console.warn('Supabase Auth SignUp Notice:', authError.message);
-        }
-
-        // -------------------------------------------------------------
-        // 2. INSERT PROFILE INTO PUBLIC USERS TABLE & BACKEND
-        // -------------------------------------------------------------
-        const profilePayload = {
-          id: userId,
-          email: cleanEmail,
-          name: formData.name.trim(),
-          college: formData.college.trim() || 'General Campus',
-          role: 'PLAYER',
-        };
-
-        try {
-          await supabase.from('users').upsert([profilePayload]);
-        } catch (dbErr) {
-          console.warn('Supabase DB Insert Notice:', dbErr);
-        }
-
-        try {
-          const apiBase = getApiBaseUrl();
-          await fetch(`${apiBase}/auth/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: formData.name.trim(),
-              email: cleanEmail,
-              password: formData.password,
-              college: formData.college.trim() || 'General Campus',
-            }),
-          });
-        } catch {}
-
-        // Store in local storage xenova_users for offline fallback
-        try {
-          const rawUsers = localStorage.getItem('xenova_users');
-          let users = rawUsers ? JSON.parse(rawUsers) : [];
-          if (!Array.isArray(users)) users = [];
-          if (!users.some((u: any) => u.email === cleanEmail)) {
-            users.push({
-              id: userId,
-              email: cleanEmail,
-              name: formData.name.trim(),
-              password: formData.password,
-              college: formData.college.trim() || 'General Campus',
-              role: 'player',
-            });
-            localStorage.setItem('xenova_users', JSON.stringify(users));
-          }
-        } catch {}
-
-        // Auto login session setup
-        const userSession = {
-          id: userId,
-          name: formData.name.trim(),
-          email: cleanEmail,
-          college: formData.college.trim() || 'General Campus',
-          role: 'player',
-          avatar: '/valorant.jpg',
-          tag: `${formData.name.trim().toUpperCase().replace(/\s+/g, '')}#1337`,
-        };
-        localStorage.setItem('xenova_session', JSON.stringify(userSession));
-        window.dispatchEvent(new Event('xenova-auth-change'));
-
-        setStatusMsg({
-          type: 'success',
-          text: '✅ Registration successful! Account created. Redirecting...',
-        });
-
-        setTimeout(() => router.push('/dashboard'), 1000);
-
-      } else {
-        // -------------------------------------------------------------
-        // 3. STRICT SIGNIN: VERIFY BOTH EMAIL AND PASSWORD
-        // -------------------------------------------------------------
-        let authenticatedUser: any = null;
-        let userId = '';
-        let authErrorMessage = '';
-
-        // 3a. Attempt Supabase Auth signInWithPassword
-        try {
-          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: formData.name.trim(),
             email: cleanEmail,
             password: formData.password,
-          });
+            college: formData.college.trim() || 'General Campus',
+            role: (formData.role || 'PLAYER').toUpperCase(),
+          }),
+        });
 
-          if (!authError && authData?.user) {
-            userId = authData.user.id;
-            authenticatedUser = authData.user;
-          } else if (authError) {
-            authErrorMessage = authError.message;
-          }
-        } catch (sbAuthErr: any) {
-          console.warn('Supabase Auth verification notice:', sbAuthErr);
-        }
+        const data = await res.json();
 
-        // 3b. Secondary verification: Backend API /auth/login with credentials
-        let userProfile: any = null;
-        if (!authenticatedUser) {
-          try {
-            const apiBase = getApiBaseUrl();
-            const apiRes = await fetch(`${apiBase}/auth/login`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: cleanEmail, password: formData.password }),
-            });
-            const apiJson = await apiRes.json();
-            if (apiRes.ok && apiJson.success && apiJson.user) {
-              userProfile = apiJson.user;
-              authenticatedUser = { email: cleanEmail, id: apiJson.user.id };
-              userId = String(apiJson.user.id);
-            } else if (apiJson.message) {
-              authErrorMessage = apiJson.message;
-            }
-          } catch (apiErr) {
-            console.warn('Backend login verification notice:', apiErr);
-          }
-        }
-
-        // 3c. Fallback verification for offline local storage accounts
-        if (!authenticatedUser) {
-          try {
-            const rawUsers = localStorage.getItem('xenova_users');
-            const localUsers = rawUsers ? JSON.parse(rawUsers) : [];
-            const foundLocal = Array.isArray(localUsers) && localUsers.find(
-              (u: any) => u.email?.toLowerCase() === cleanEmail && u.password === formData.password
-            );
-            if (foundLocal) {
-              authenticatedUser = foundLocal;
-              userId = foundLocal.id || 'usr_' + Date.now();
-              userProfile = foundLocal;
-            }
-          } catch {}
-        }
-
-        // 3d. If password authentication failed across all sources, REJECT LOGIN!
-        if (!authenticatedUser) {
-          const errorText = authErrorMessage || 'Invalid email or password. Please check your credentials.';
+        if (!res.ok || !data.success) {
           setStatusMsg({
             type: 'error',
-            text: `❌ ${errorText}`,
+            text: `❌ ${data.message || 'Registration failed.'}`,
           });
           setLoading(false);
           return;
         }
 
-        // Fetch user profile from public.users table if not already populated
-        if (userId && !userProfile) {
-          const { data: dbData } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', userId)
-            .maybeSingle();
-          userProfile = dbData;
+        // -------------------------------------------------------------
+        // 2. AUTOMATIC LOGIN WITH SUPABASE AUTH
+        // -------------------------------------------------------------
+        const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: formData.password,
+        });
+
+        if (signInError || !authData?.user || !authData?.session) {
+          setStatusMsg({
+            type: 'success',
+            text: '✅ Registration successful! Please switch to Sign In tab to log in.',
+          });
+          setActiveTab('signin');
+          setLoading(false);
+          return;
         }
 
-        if (!userProfile) {
-          const { data: dbData } = await supabase
-            .from('users')
-            .select('*')
-            .eq('email', cleanEmail)
-            .maybeSingle();
-          userProfile = dbData;
-        }
-
-        const resolvedUserId = userId || userProfile?.id || 'usr_' + Date.now();
-        const resolvedName = userProfile?.name || formData.name || cleanEmail.split('@')[0];
+        // -------------------------------------------------------------
+        // 3. FETCH PROFILE AND INITIALIZE UI SESSION MIRROR
+        // -------------------------------------------------------------
+        const { data: profile } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', authData.user.id)
+          .maybeSingle();
 
         const userSession = {
-          id: resolvedUserId,
-          name: resolvedName,
+          id: authData.user.id,
+          name: profile?.name || data.user?.name || formData.name.trim(),
           email: cleanEmail,
-          college: userProfile?.college || 'General Campus',
-          role: (userProfile?.role || 'PLAYER').toLowerCase(),
-          avatar: userProfile?.avatar_url || '/valorant.jpg',
-          tag: `${resolvedName.toUpperCase().replace(/\s+/g, '')}#1337`,
+          college: profile?.college || formData.college.trim() || 'General Campus',
+          role: (profile?.role || 'PLAYER').toLowerCase(),
+          avatar: profile?.avatar_url || '/valorant.jpg',
+          tag: profile?.tag || `${(formData.name.trim() || 'PLAYER').toUpperCase()}#1337`,
+        };
+
+        localStorage.setItem('xenova_session', JSON.stringify(userSession));
+        window.dispatchEvent(new Event('xenova-auth-change'));
+
+        setStatusMsg({
+          type: 'success',
+          text: '✅ Registration successful! Entering arena dashboard...',
+        });
+
+        setTimeout(() => router.push('/dashboard'), 800);
+
+      } else {
+        // -------------------------------------------------------------
+        // 4. STRICT SIGNIN VIA SUPABASE AUTH ONLY
+        // -------------------------------------------------------------
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: formData.password,
+        });
+
+        if (authError || !authData?.user || !authData?.session) {
+          setStatusMsg({
+            type: 'error',
+            text: `❌ ${authError?.message || 'Invalid email or password.'}`,
+          });
+          setLoading(false);
+          return;
+        }
+
+        // Fetch authoritative profile from public.users using user.id
+        const { data: profile, error: profileError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', authData.user.id)
+          .maybeSingle();
+
+        if (profileError) {
+          console.error('Profile fetch warning:', profileError);
+        }
+
+        const userSession = {
+          id: authData.user.id,
+          name: profile?.name || authData.user.user_metadata?.name || cleanEmail.split('@')[0],
+          email: cleanEmail,
+          college: profile?.college || authData.user.user_metadata?.college || 'General Campus',
+          role: (profile?.role || authData.user.user_metadata?.role || 'PLAYER').toLowerCase(),
+          avatar: profile?.avatar_url || '/valorant.jpg',
+          tag: profile?.tag || `${(cleanEmail.split('@')[0]).toUpperCase()}#1337`,
+          bio: profile?.bio || '',
         };
 
         localStorage.setItem('xenova_session', JSON.stringify(userSession));
@@ -262,10 +184,10 @@ export default function LoginPage() {
 
   const fillDemo = (role: 'competitor' | 'organizer') => {
     setFormData({
-      name: role === 'competitor' ? 'Aarav Sharma' : 'College Esports Convener',
-      email: role === 'competitor' ? 'aarav.esports@iitb.ac.in' : 'organizer@bits-pilani.ac.in',
-      password: 'demo-password-123',
-      college: role === 'competitor' ? 'IIT Bombay' : 'BITS Pilani',
+      name: role === 'competitor' ? 'Veera Chandra' : 'Veera Chandra (Organizer)',
+      email: 'veerachandra2008@gmail.com',
+      password: 'veera2008',
+      college: 'Malla Reddy university',
       role,
     });
   };

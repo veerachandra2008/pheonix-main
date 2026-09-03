@@ -174,7 +174,7 @@ export default function DashboardPage() {
         } catch {}
 
         // Load user registrations strictly from Backend / Supabase
-        getUserRegistrations(user.email).then((regs) => {
+        getUserRegistrations(user.email, user.id).then((regs) => {
           if (regs && Array.isArray(regs)) {
             setUserRegistrations(regs);
             try {
@@ -203,7 +203,7 @@ export default function DashboardPage() {
           setSession(initialUser);
           localStorage.setItem('xenova_session', JSON.stringify(initialUser));
 
-          getUserRegistrations(email).then((regs) => {
+          getUserRegistrations(email, authSession.user.id).then((regs) => {
             if (regs && Array.isArray(regs)) setUserRegistrations(regs);
           });
           loadProfileData(email, initialUser);

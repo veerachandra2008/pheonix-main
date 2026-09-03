@@ -17,6 +17,7 @@ import {
 import { saveRegistration } from '@/lib/tournaments-db';
 import { tournaments } from '@/app/tournaments/data';
 import { getApiBaseUrl } from '@/lib/api-config';
+import { supabase } from '@/lib/supabase';
 
 interface PageProps {
   params?: Promise<{ slug: string }>;
@@ -217,6 +218,11 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
       }
 
       try {
+        // Obtain authenticated user from real Supabase session (single source of truth)
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        const authUserId = currentSession?.user?.id;
+        const regEmail = currentSession?.user?.email || email;
+
         await saveRegistration({
           tournamentSlug: selection.tournamentSlug,
           tournamentTitle: selection.tournamentTitle,
@@ -230,9 +236,10 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
           teamName: selection.teamName,
           college: selection.college,
           captainName: selection.captainName,
-          email,
+          email: regEmail,
           passId: createdPassId,
           registeredAt: new Date().toISOString(),
+          userId: authUserId,
         });
       } catch {}
 
