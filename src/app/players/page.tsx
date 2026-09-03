@@ -456,10 +456,11 @@ export default function PlayersPage() {
               {filteredPlayers.map((player, idx) => {
                 const avatarSrc = player.avatar_url || player.avatar || '/valorant.jpg';
                 const isFollowing = followingSet.has((player.email || '').toLowerCase());
+                const playerRole = (player.role || '').toUpperCase();
                 const roleBadgeColor =
-                  player.role === 'admin'
+                  playerRole === 'ADMIN'
                     ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                    : player.role === 'organizer'
+                    : playerRole === 'ORGANIZER'
                       ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
                       : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
 

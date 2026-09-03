@@ -162,11 +162,6 @@ export default function AdminLoginPage() {
               )}
             </button>
           </form>
-
-          <div className="mt-8 text-center text-[10px] leading-5 text-slate-500 uppercase tracking-wider">
-            Seeded for evaluation:<br />
-            Email: <code className="text-rose-400">admin@xenova.gg</code> | Pass: <code className="text-rose-400">admin123</code>
-          </div>
         </div>
       </motion.div>
     </main>

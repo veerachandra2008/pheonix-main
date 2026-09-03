@@ -108,7 +108,7 @@ export default function LoginPage() {
           name: profile?.name || data.user?.name || formData.name.trim(),
           email: cleanEmail,
           college: profile?.college || formData.college.trim() || 'General Campus',
-          role: (profile?.role || 'PLAYER').toLowerCase(),
+          role: (profile?.role || 'PLAYER').trim().toUpperCase(),
           avatar: profile?.avatar_url || '/valorant.jpg',
           tag: profile?.tag || `${(formData.name.trim() || 'PLAYER').toUpperCase()}#1337`,
         };
@@ -157,7 +157,7 @@ export default function LoginPage() {
           name: profile?.name || authData.user.user_metadata?.name || cleanEmail.split('@')[0],
           email: cleanEmail,
           college: profile?.college || authData.user.user_metadata?.college || 'General Campus',
-          role: (profile?.role || authData.user.user_metadata?.role || 'PLAYER').toLowerCase(),
+          role: (profile?.role || authData.user.user_metadata?.role || 'PLAYER').trim().toUpperCase(),
           avatar: profile?.avatar_url || '/valorant.jpg',
           tag: profile?.tag || `${(cleanEmail.split('@')[0]).toUpperCase()}#1337`,
           bio: profile?.bio || '',

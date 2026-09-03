@@ -108,8 +108,8 @@ export default function OrganizerAttendanceHubPage() {
 
         // 3. STRICT ORGANIZER SCOPING:
         // Only show tournaments that this organizer owns / created / hosts (unless platform admin)
-        const userRole = (user.role || '').toLowerCase();
-        const isAdmin = userRole === 'admin' || user.email === 'admin@xenova.gg';
+        const userRole = (user.role || '').toUpperCase();
+        const isAdmin = userRole === 'ADMIN' || user.email === 'admin@xenova.gg';
 
         if (!isAdmin) {
           const cleanEmail = (user.email || '').trim().toLowerCase();

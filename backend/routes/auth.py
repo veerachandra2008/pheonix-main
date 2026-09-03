@@ -189,7 +189,7 @@ def login():
                 'name': name,
                 'email': email,
                 'college': (user_profile.get('college') if user_profile else None) or auth_user.get('user_metadata', {}).get('college') or 'General Campus',
-                'role': role.lower(),
+                'role': role.upper(),
                 'avatar': (user_profile.get('avatar_url') if user_profile else None) or '/valorant.jpg',
                 'tag': (user_profile.get('tag') if user_profile else None) or f"{name.upper().replace(' ', '')}#1337"
             },
@@ -424,7 +424,7 @@ def get_all_users():
                     'name': u.get('name', 'Athlete'),
                     'email': em,
                     'college': u.get('college', 'University Campus'),
-                    'role': (u.get('role') or 'PLAYER').lower(),
+                    'role': (u.get('role') or 'PLAYER').upper(),
                     'bio': u.get('bio', ''),
                     'tag': u.get('tag') or f"{u.get('name', 'Gamer').upper().replace(' ', '')}#1337",
                     'avatar': u.get('avatar_url') or '/valorant.jpg',

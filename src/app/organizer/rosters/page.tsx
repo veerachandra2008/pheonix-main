@@ -61,7 +61,7 @@ export default function OrganizerRostersHubPage() {
       const apiBase = getApiBaseUrl();
       const cleanEmail = (userEmail || '').trim().toLowerCase();
       const cleanName = (userName || '').trim().toLowerCase();
-      const isAdmin = userRole === 'admin' || cleanEmail === 'admin@xenova.gg';
+      const isAdmin = (userRole || '').toUpperCase() === 'ADMIN' || cleanEmail === 'admin@xenova.gg';
 
       // 1. Fetch tournaments from Supabase + Backend API
       let tournsList: any[] = [];
@@ -248,18 +248,18 @@ export default function OrganizerRostersHubPage() {
       try {
         const user = JSON.parse(rawSession);
         const email = (user.email || '').trim().toLowerCase();
-        const role = (user.role || '').toLowerCase();
+        const role = (user.role || '').toUpperCase();
 
-        // 1. Root Platform Admin
-        if (role === 'admin' || email === 'admin@xenova.gg') {
+        // 1. Platform Admin
+        if (role === 'ADMIN' || email === 'admin@xenova.gg') {
           setSession(user);
           setAuthLoading(false);
-          loadData(user.email, 'admin', user.name || user.hostName);
+          loadData(user.email, 'ADMIN', user.name || user.hostName);
           return;
         }
 
         // 2. Check organizer status
-        let isApprovedOrganizer = role === 'organizer' || role === 'host';
+        let isApprovedOrganizer = role === 'ORGANIZER' || role === 'HOST';
         let hostName = user.hostName || user.name || 'Verified Host';
 
         try {

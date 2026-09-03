@@ -18,15 +18,15 @@ export default function HostPage() {
       try {
         const user = JSON.parse(rawSession);
         const email = (user.email || '').trim().toLowerCase();
-        const role = (user.role || '').toLowerCase();
+        const role = (user.role || '').toUpperCase();
 
-        // 1. Root Platform Admin always has full access
-        if (role === 'admin' || email === 'admin@xenova.gg') {
+        // 1. Platform Admin always has full access
+        if (role === 'ADMIN' || email === 'admin@xenova.gg') {
           router.replace('/organizer/dashboard');
           return;
         }
 
-        let isApprovedOrganizer = role === 'organizer' || role === 'host';
+        let isApprovedOrganizer = role === 'ORGANIZER' || role === 'HOST';
         let hostName = user.hostName || user.name || 'Verified Host';
 
         // 2. Real-time Supabase Check on organizer_applications

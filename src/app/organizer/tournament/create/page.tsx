@@ -127,10 +127,10 @@ export default function CreateTournamentPage() {
       try {
         const user = JSON.parse(rawSession);
         const email = (user.email || '').trim().toLowerCase();
-        const role = (user.role || '').toLowerCase();
+        const role = (user.role || '').toUpperCase();
 
         // Admin always has bypass
-        if (role === 'admin' || email === 'admin@xenova.gg') {
+        if (role === 'ADMIN' || email === 'admin@xenova.gg') {
           setSession(user);
           setFormData((prev) => ({
             ...prev,
@@ -140,7 +140,7 @@ export default function CreateTournamentPage() {
           return;
         }
 
-        let isApprovedOrganizer = role === 'organizer' || role === 'host';
+        let isApprovedOrganizer = role === 'ORGANIZER' || role === 'HOST';
         let hostName = user.hostName || user.name || 'Verified Host';
         let organizerCollege = user.college || '';
         let organizerPhone = user.phone || '';

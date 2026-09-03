@@ -119,10 +119,10 @@ export default function EntranceGateVerificationPage() {
         const user = JSON.parse(rawSession);
         setSessionUser(user);
         const email = (user.email || '').trim().toLowerCase();
-        const role = (user.role || '').toLowerCase();
+        const role = (user.role || '').toUpperCase();
 
         // 1. Root admin / organizer / host role in session
-        if (role === 'admin' || role === 'organizer' || role === 'host' || email === 'admin@xenova.gg') {
+        if (role === 'ADMIN' || role === 'ORGANIZER' || role === 'HOST' || email === 'admin@xenova.gg') {
           setOrganizerName(user.hostName || user.name || user.email || 'Gate Marshal');
           setAuthStatus('authorized');
           return;

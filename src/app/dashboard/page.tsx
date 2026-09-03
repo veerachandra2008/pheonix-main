@@ -107,7 +107,7 @@ export default function DashboardPage() {
             team: dbUser.team || 'Free Agent',
             tag: dbUser.tag || `@${(dbUser.name || 'player').toUpperCase().replace(/\s+/g, '')}#1337`,
             bio: dbUser.bio || 'Verified collegiate esports competitor.',
-            role: (dbUser.role || 'PLAYER').toLowerCase(),
+            role: (dbUser.role || 'PLAYER').trim().toUpperCase(),
             rank: dbUser.rank || 1,
             win_rate: dbUser.win_rate || 84.5,
             trophies: dbUser.trophies || 5,

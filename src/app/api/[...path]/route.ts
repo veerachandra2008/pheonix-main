@@ -237,7 +237,7 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
           email: authData.user.email || email,
           name: profile?.name || authData.user.user_metadata?.name || 'Player',
           college: profile?.college || authData.user.user_metadata?.college || 'Collegiate Competitor',
-          role: (profile?.role || authData.user.user_metadata?.role || 'PLAYER').toLowerCase(),
+          role: (profile?.role || authData.user.user_metadata?.role || 'PLAYER').trim().toUpperCase(),
           avatar: profile?.avatar_url || '/valorant.jpg',
           tag: profile?.tag || `${(profile?.name || 'Gamer').toUpperCase().replace(/\s+/g, '')}#1337`,
           bio: profile?.bio || ''

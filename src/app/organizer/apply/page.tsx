@@ -285,9 +285,8 @@ export default function HostEventPage() {
           <img src="/logo.svg" alt="Phoenix" className="h-7 w-7 object-contain" />
           <span className="font-black italic uppercase tracking-tighter text-sm text-white">XENOVA <span className="text-emerald-400">HOST</span></span>
         </div>
-
         <div className="flex items-center gap-3">
-          {session?.role === 'organizer' || session?.role === 'admin' ? (
+          {(session?.role || '').toUpperCase() === 'ORGANIZER' || (session?.role || '').toUpperCase() === 'ADMIN' ? (
             <Link
               href="/organizer/dashboard"
               className="text-xs font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 transition"

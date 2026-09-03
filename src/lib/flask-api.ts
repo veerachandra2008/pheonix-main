@@ -110,93 +110,65 @@ export const flaskApi = {
     }
   },
 
-  // Unified Admin Login with instant fallback and strict credential verification
+  // Strict Admin Login authenticating exclusively through Supabase Auth
   async adminLogin(email: string, password: string) {
     const cleanEmail = (email || '').trim().toLowerCase();
     const cleanPassword = (password || '').trim();
 
     if (!cleanEmail || !cleanPassword) {
-      return { success: false, message: 'Email and password are required.' };
+      return { success: false, message: 'Admin email and security password are required.' };
     }
 
-    // 1. Root Key Instant Bypass
-    if (cleanEmail === 'admin@xenova.gg' && (cleanPassword === 'admin' || cleanPassword === 'admin123' || cleanPassword === 'admin@123')) {
-      return {
-        success: true,
-        message: 'Signed in as Administrator (Root Key).',
-        user: {
-          id: 'admin_root',
-          name: 'Super Admin',
-          email: 'admin@xenova.gg',
-          college: 'Xenova HQ',
-          role: 'admin',
-          tag: 'ADMIN#1337',
-          avatar: '/valorant.jpg',
-          bio: 'System Control Center Root User',
-        },
-      };
-    }
-
-    // 2. Direct Supabase Fast Verification (<50ms)
     try {
-      const { data: usersData } = await supabase
+      // 1. Supabase Auth is the single authority for password verification
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: cleanPassword,
+      });
+
+      if (authError || !authData?.user) {
+        return {
+          success: false,
+          message: authError?.message || 'Invalid admin credentials. Please verify your email and security password.',
+        };
+      }
+
+      // 2. Fetch profile and verify exact database enum role: 'ADMIN'
+      const { data: profile } = await supabase
         .from('users')
         .select('*')
-        .eq('email', cleanEmail)
-        .limit(1);
+        .eq('id', authData.user.id)
+        .maybeSingle();
 
-      if (usersData && usersData.length > 0) {
-        const dbUser = usersData[0];
-        const dbRole = (dbUser.role || '').toLowerCase();
-        const storedHash = dbUser.password_hash || dbUser.password;
-
-        if (storedHash === cleanPassword || cleanEmail === 'admin@xenova.gg') {
-          if (dbRole === 'admin' || cleanEmail === 'admin@xenova.gg') {
-            return {
-              success: true,
-              message: 'Signed in as Administrator.',
-              user: {
-                id: dbUser.id || 'admin_root',
-                name: dbUser.name || 'Super Admin',
-                email: cleanEmail,
-                college: dbUser.college || 'Xenova HQ',
-                role: 'admin',
-                tag: dbUser.tag || 'ADMIN#1337',
-                avatar: dbUser.avatar_url || '/valorant.jpg',
-                bio: dbUser.bio || 'System Control Center Root User',
-              },
-            };
-          }
-        }
+      const role = (profile?.role || authData.user.user_metadata?.role || '').trim().toUpperCase();
+      if (role !== 'ADMIN') {
+        await supabase.auth.signOut();
+        return {
+          success: false,
+          message: 'Access denied: Administrator privileges required.',
+        };
       }
-    } catch {}
 
-    // 3. Try Backend /api/auth/login
-    try {
-      const apiBase = getApiBaseUrl();
-      const res = await fetchWithTimeout(`${apiBase}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password: cleanPassword }),
-      }, 2000);
-
-      const json = await res.json();
-      if (res.ok && json.success && json.user) {
-        const userRole = (json.user.role || '').toLowerCase();
-        if (userRole === 'admin' || cleanEmail === 'admin@xenova.gg') {
-          return {
-            success: true,
-            message: 'Signed in as Administrator.',
-            user: { ...json.user, role: 'admin' },
-          };
-        }
-      }
-    } catch {}
-
-    return {
-      success: false,
-      message: 'Invalid admin credentials. Please verify your email and security password.',
-    };
+      return {
+        success: true,
+        message: 'Signed in as Administrator.',
+        user: {
+          id: authData.user.id,
+          name: profile?.name || 'Super Admin',
+          email: cleanEmail,
+          college: profile?.college || 'Xenova HQ',
+          role: 'ADMIN',
+          tag: profile?.tag || 'ADMIN#1337',
+          avatar: profile?.avatar_url || '/valorant.jpg',
+          bio: profile?.bio || 'System Control Center Root User',
+        },
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Authentication error. Please verify database connection and credentials.',
+      };
+    }
   },
 
   // Register user (fast Supabase query first)
@@ -245,7 +217,7 @@ export const flaskApi = {
     try {
       const cleanEmail = email.trim().toLowerCase();
       const { data: existing } = await supabase.from('users').select('*').eq('email', cleanEmail);
-      if (existing && existing.length > 0 && (existing[0].role === 'ADMIN' || existing[0].role === 'admin')) {
+      if (existing && existing.length > 0 && (existing[0].role || '').toUpperCase() === 'ADMIN') {
         return { success: true, message: 'User is ADMIN, role unchanged.' };
       }
 

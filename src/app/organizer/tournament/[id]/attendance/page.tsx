@@ -176,8 +176,8 @@ export default function TournamentAttendancePage() {
         setTournament(foundTournament);
 
         // Check if user is authorized to manage THIS tournament desk
-        const userRole = (user.role || '').toLowerCase();
-        const isAdmin = userRole === 'admin' || user.email === 'admin@xenova.gg';
+        const userRole = (user.role || '').toUpperCase();
+        const isAdmin = userRole === 'ADMIN' || user.email === 'admin@xenova.gg';
 
         if (!isAdmin) {
           const cleanEmail = (user.email || '').trim().toLowerCase();

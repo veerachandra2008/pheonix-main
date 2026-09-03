@@ -47,10 +47,10 @@ export default function AdminLayout({
         }
 
         const parsed = JSON.parse(raw);
-        const role = (parsed?.role || '').toLowerCase();
+        const role = (parsed?.role || '').toUpperCase();
         const email = (parsed?.email || '').toLowerCase();
 
-        if (role === 'admin' || email === 'admin@xenova.gg') {
+        if (role === 'ADMIN' || email === 'admin@xenova.gg') {
           setIsAdmin(true);
           flaskApi.preloadAdminData();
         } else {
