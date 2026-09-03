@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowRight,
@@ -26,6 +26,8 @@ import { getApiBaseUrl } from '@/lib/api-config';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTarget = searchParams.get('redirect') || '/dashboard';
   const [activeTab, setActiveTab] = useState<'signin' | 'register'>('signin');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -119,7 +121,7 @@ export default function LoginPage() {
           text: '✅ Registration successful! Entering arena dashboard...',
         });
 
-        setTimeout(() => router.push('/dashboard'), 800);
+        setTimeout(() => router.push(redirectTarget), 800);
 
       } else {
         // -------------------------------------------------------------
@@ -169,7 +171,7 @@ export default function LoginPage() {
           text: '✅ Signed in successfully! Redirecting to arena dashboard...',
         });
 
-        setTimeout(() => router.push('/dashboard'), 800);
+        setTimeout(() => router.push(redirectTarget), 800);
       }
     } catch (err: any) {
       console.error('Unhandled Auth Error:', err);

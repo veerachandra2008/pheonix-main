@@ -33,6 +33,7 @@ async function checkRoutes() {
     '/colleges',
     '/leaderboards',
     '/settings',
+    '/contact',
   ];
 
   console.log('====================================================');

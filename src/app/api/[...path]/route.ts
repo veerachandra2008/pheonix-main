@@ -635,32 +635,81 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
   if (mainSegment === 'contact' || mainSegment === 'contact_messages') {
     if (method === 'POST') {
       try {
+        // 1. Authenticate via Bearer token
+        const authHeader = req.headers.get('authorization') || '';
+        const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+        if (!token) {
+          return NextResponse.json({
+            success: false,
+            message: 'Authentication required'
+          }, { status: 401 });
+        }
+
+        const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+        if (authError || !user) {
+          return NextResponse.json({
+            success: false,
+            message: 'Authentication required'
+          }, { status: 401 });
+        }
+
+        // 2. Validate input fields
         const body = await req.json();
+        const subject = (body.subject || '').trim();
+        const message = (body.message || '').trim();
+
+        if (!subject || !message) {
+          return NextResponse.json({
+            success: false,
+            message: 'Subject and message are required fields.'
+          }, { status: 400 });
+        }
+
+        if (message.length > 5000) {
+          return NextResponse.json({
+            success: false,
+            message: 'Message exceeds maximum allowed length of 5000 characters.'
+          }, { status: 400 });
+        }
+
+        // 3. Enforce authentic user identity (never trust client-supplied user_id or impersonated email)
+        const authenticatedUserId = user.id;
+        const authenticatedEmail = user.email || (body.email || '').trim().toLowerCase();
+        const authenticatedName = user.user_metadata?.name || (body.name || '').trim() || 'Player';
+
         const payload = {
-          name: (body.name || '').trim(),
-          email: (body.email || '').trim().toLowerCase(),
+          user_id: authenticatedUserId,
+          name: authenticatedName,
+          email: authenticatedEmail,
           phone: (body.phone || '').trim(),
-          college: (body.college || '').trim(),
+          college: user.user_metadata?.college || (body.college || '').trim() || 'General Campus',
           category: body.category || 'General Inquiry',
-          subject: (body.subject || '').trim(),
-          message: (body.message || '').trim(),
+          subject,
+          message,
           status: 'unread',
           created_at: new Date().toISOString(),
         };
 
-        const { data, error } = await supabase.from('contact_messages').insert([payload]).select();
+        const { data, error } = await supabaseAdmin
+          .from('contact_messages')
+          .insert([payload])
+          .select();
+
         if (error) {
-          console.warn('Supabase contact insert warning:', error);
-          return NextResponse.json({ success: true, message: 'Message received.' }, { status: 200 });
+          return NextResponse.json({
+            success: false,
+            message: error.message || 'Failed to save support ticket to database.'
+          }, { status: 400 });
         }
 
         return NextResponse.json({ 
           success: true, 
           message: 'Support ticket submitted successfully.', 
           data: data?.[0] 
-        }, { status: 200 });
+        }, { status: 201 });
       } catch (err: any) {
-        return NextResponse.json({ success: false, message: err.message }, { status: 400 });
+        return NextResponse.json({ success: false, message: err.message || 'Invalid request body.' }, { status: 400 });
       }
     }
 
@@ -809,7 +858,9 @@ async function handleRequest(req: NextRequest, { params }: { params: Promise<{ p
   if (
     pathSegments[0] === 'auth' ||
     pathSegments[0] === 'registrations' ||
-    pathSegments[0] === 'tournaments'
+    pathSegments[0] === 'tournaments' ||
+    pathSegments[0] === 'contact' ||
+    pathSegments[0] === 'contact_messages'
   ) {
     return handleDirectDatabase(req, pathSegments);
   }

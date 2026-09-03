@@ -68,8 +68,8 @@ const nextConfig: NextConfig = {
       const targetUrl = cleanUrl.endsWith('/api') ? cleanUrl : `${cleanUrl.replace(/\/$/, '')}/api`;
       return [
         {
-          // Ensure /api/auth/*, /api/registrations/*, and /api/tournaments/* are always handled locally by Next.js & Supabase
-          source: '/api/((?!auth|registrations|tournaments).*)',
+          // Ensure /api/auth/*, /api/registrations/*, /api/tournaments/*, and /api/contact* are always handled locally by Next.js & Supabase
+          source: '/api/((?!auth|registrations|tournaments|contact|contact_messages).*)',
           destination: `${targetUrl}/$1`,
         },
       ];
