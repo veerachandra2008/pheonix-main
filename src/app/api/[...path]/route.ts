@@ -28,7 +28,8 @@ async function tryProxyToBackend(req: NextRequest, pathStr: string): Promise<Res
   try {
     const headers: Record<string, string> = {};
     req.headers.forEach((val, key) => {
-      if (key.toLowerCase() !== 'host' && key.toLowerCase() !== 'content-length') {
+      const lower = key.toLowerCase();
+      if (lower !== 'host' && lower !== 'content-length') {
         headers[key] = val;
       }
     });
@@ -36,7 +37,10 @@ async function tryProxyToBackend(req: NextRequest, pathStr: string): Promise<Res
     let body: any = null;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       try {
-        body = await req.text();
+        const arrayBuf = await req.arrayBuffer();
+        if (arrayBuf.byteLength > 0) {
+          body = Buffer.from(arrayBuf);
+        }
       } catch {}
     }
 
@@ -51,8 +55,9 @@ async function tryProxyToBackend(req: NextRequest, pathStr: string): Promise<Res
     });
 
     return response;
-  } catch {
-    return null; // Fallback to direct database execution
+  } catch (err: any) {
+    console.error(`[API Proxy Error] Failed forwarding /api/${pathStr} to Render:`, err?.message || err);
+    return null;
   } finally {
     clearTimeout(timeoutId);
   }
@@ -851,23 +856,48 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
   }, { status: 404 });
 }
 
+function isNextJsNativeRoute(segments: string[]): boolean {
+  const main = segments[0] || '';
+  const sub = segments[1] || '';
+
+  if (main === 'health') return true;
+
+  if (main === 'auth') {
+    // Only register, login, logout, users, organizers, analytics are Next.js native.
+    // profile, user, follow, following, update-role, users/role are Flask-backed!
+    return sub === 'register' || sub === 'login' || sub === 'logout' ||
+           sub === 'users' || sub === 'organizers' || sub === 'analytics';
+  }
+
+  if (main === 'contact' || main === 'contact_messages') return true;
+
+  if (main === 'tournaments') {
+    // tournaments/register is Flask-backed
+    return sub !== 'register';
+  }
+
+  if (main === 'registrations') {
+    // registrations/create, registrations/attendance, registrations/verify are Flask-backed
+    if (sub === 'create' || sub === 'attendance' || sub === 'verify') {
+      return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
 async function handleRequest(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const resolvedParams = await params;
   const pathSegments = resolvedParams?.path || [];
   const pathStr = pathSegments.join('/');
 
-  // Authoritative endpoints must ALWAYS execute directly via Supabase (never proxy to python)
-  if (
-    pathSegments[0] === 'auth' ||
-    pathSegments[0] === 'registrations' ||
-    pathSegments[0] === 'tournaments' ||
-    pathSegments[0] === 'contact' ||
-    pathSegments[0] === 'contact_messages'
-  ) {
+  // 1. Next.js-native endpoints execute directly via Supabase
+  if (isNextJsNativeRoute(pathSegments)) {
     return handleDirectDatabase(req, pathSegments);
   }
 
-  // 1. First attempt: Proxy to Flask backend server for other endpoints
+  // 2. All Flask-backed endpoints are proxied to Render Flask backend
   const proxyRes = await tryProxyToBackend(req, pathStr);
   if (proxyRes) {
     try {
@@ -882,11 +912,17 @@ async function handleRequest(req: NextRequest, { params }: { params: Promise<{ p
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         },
       });
-    } catch {}
+    } catch (err) {
+      console.error(`[API Proxy] Error parsing response from /api/${pathStr}:`, err);
+    }
   }
 
-  // 2. Second attempt: Direct Database / Supabase execution
-  return handleDirectDatabase(req, pathSegments);
+  // 3. If Render is offline or unreachable for a Flask-backed route, return 502 Bad Gateway
+  // Never silently fall back to an inconsistent implementation.
+  return NextResponse.json({
+    success: false,
+    message: 'Backend service unavailable. Please try again shortly.'
+  }, { status: 502 });
 }
 
 export async function GET(req: NextRequest, context: { params: Promise<{ path: string[] }> }) {

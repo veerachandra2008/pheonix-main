@@ -516,21 +516,99 @@ def get_all_users():
 
 
 @auth_bp.route('/profile', methods=['GET', 'OPTIONS'])
-@auth_bp.route('/user/<path:email>', methods=['GET', 'OPTIONS'])
-def get_user_profile(email=None):
+def get_user_profile():
     """
-    Fetch single user profile directly from Supabase users table with sub-millisecond caching.
-    Supports email, name slug, or tag lookups.
+    Fetch authenticated user's profile.
+    STRICT SECURITY: Authentication is MANDATORY. Only the authenticated Supabase user's profile is returned.
+    Query parameters (email, id, user_id) are NEVER allowed to override or supply identity.
     """
     if request.method == 'OPTIONS':
         return jsonify({'success': True}), 200
 
     try:
-        raw_identifier = (email or request.args.get('email') or request.args.get('id') or '').strip().lower()
-        if not raw_identifier:
-            return jsonify({'success': False, 'message': 'Email or identifier is required.'}), 400
+        user_auth = get_authenticated_user()
+        if not user_auth or not user_auth.get('email'):
+            return jsonify({'success': False, 'message': 'Unauthorized: Valid authentication required.'}), 401
 
-        cache_key = f"profile:{raw_identifier}"
+        auth_email = user_auth['email'].strip().lower()
+        auth_uid = user_auth.get('id')
+
+        cache_key = f"profile:{auth_email}"
+        cached = api_cache.get(cache_key)
+        if cached is not None:
+            return jsonify({'success': True, 'data': cached, 'cached': True}), 200
+
+        user = None
+        try:
+            supabase = get_supabase_client()
+            if auth_uid:
+                res = supabase.table('users').select('*').eq('id', auth_uid).execute()
+                if res.data and len(res.data) > 0:
+                    user = res.data[0]
+            if not user and auth_email:
+                res = supabase.table('users').select('*').eq('email', auth_email).execute()
+                if res.data and len(res.data) > 0:
+                    user = res.data[0]
+        except Exception as sb_err:
+            print(f"Supabase profile fetch notice: {sb_err}")
+
+        if not user and auth_email in IN_MEMORY_USERS:
+            user = IN_MEMORY_USERS[auth_email]
+
+        if not user:
+            user = {
+                'id': auth_uid,
+                'name': user_auth.get('name') or auth_email.split('@')[0].capitalize(),
+                'email': auth_email,
+                'college': 'General Campus',
+                'team': 'Free Agent',
+                'bio': 'Verified collegiate esports competitor.',
+                'role': user_auth.get('role', 'PLAYER'),
+                'avatar_url': '/valorant.jpg',
+                'tag': f"{auth_email.split('@')[0].upper()}#1337"
+            }
+
+        profile_data = {
+            'id': user.get('id') or auth_uid,
+            'name': user.get('name') or user_auth.get('name') or auth_email.split('@')[0].capitalize(),
+            'email': auth_email,
+            'college': user.get('college') or 'General Campus',
+            'team': user.get('team') or 'Free Agent',
+            'tag': user.get('tag') or f"{(user.get('name') or 'Gamer').upper().replace(' ', '')}#1337",
+            'bio': user.get('bio') or 'Verified collegiate esports competitor.',
+            'role': (user.get('role') or user_auth.get('role') or 'PLAYER').lower(),
+            'avatar': user.get('avatar_url') or user.get('avatar') or '/valorant.jpg',
+            'avatar_url': user.get('avatar_url') or user.get('avatar') or '/valorant.jpg',
+            'rank': user.get('rank', 1),
+            'win_rate': user.get('win_rate', 84.5),
+            'trophies': user.get('trophies', 5)
+        }
+
+        api_cache.set(cache_key, profile_data, ttl_seconds=20)
+        return jsonify({'success': True, 'data': profile_data}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@auth_bp.route('/user/<path:email>', methods=['GET', 'OPTIONS'])
+def get_public_user_profile(email):
+    """
+    Fetch player profile for another athlete by email/handle.
+    STRICT PRIVACY: Authentication is required to prevent unauthenticated scraping.
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({'success': True}), 200
+
+    try:
+        user_auth = get_authenticated_user()
+        if not user_auth:
+            return jsonify({'success': False, 'message': 'Unauthorized: Valid authentication required.'}), 401
+
+        raw_identifier = (email or '').strip().lower()
+        if not raw_identifier:
+            return jsonify({'success': False, 'message': 'Identifier required.'}), 400
+
+        cache_key = f"public_profile:{raw_identifier}"
         cached = api_cache.get(cache_key)
         if cached is not None:
             return jsonify({'success': True, 'data': cached, 'cached': True}), 200
@@ -541,37 +619,19 @@ def get_user_profile(email=None):
             if '@' in raw_identifier:
                 res = supabase.table('users').select('*').eq('email', raw_identifier).execute()
             else:
-                # Search by exact email, ILIKE name, or ILIKE email
                 res = supabase.table('users').select('*').or_(f"email.ilike.%{raw_identifier}%,name.ilike.%{raw_identifier}%").limit(1).execute()
-
             if res.data and len(res.data) > 0:
                 user = res.data[0]
         except Exception as sb_err:
-            print(f"Supabase profile fetch notice: {sb_err}")
+            print(f"Supabase public profile fetch notice: {sb_err}")
 
         if not user and raw_identifier in IN_MEMORY_USERS:
             user = IN_MEMORY_USERS[raw_identifier]
 
-        # Check in-memory by name/tag if not found
         if not user:
-            for mem_email, mem_data in IN_MEMORY_USERS.items():
-                if mem_email.lower() == raw_identifier or mem_data.get('name', '').lower() == raw_identifier:
-                    user = mem_data
-                    break
+            return jsonify({'success': False, 'message': 'User not found.'}), 404
 
-        if not user:
-            user = {
-                'name': raw_identifier.split('@')[0].capitalize(),
-                'email': raw_identifier if '@' in raw_identifier else f"{raw_identifier}@campus.edu",
-                'college': 'General Campus',
-                'team': 'Free Agent',
-                'bio': 'Verified collegiate esports competitor.',
-                'role': 'PLAYER',
-                'avatar_url': '/valorant.jpg',
-                'tag': f"{raw_identifier.split('@')[0].upper()}#1337"
-            }
-
-        profile_data = {
+        public_data = {
             'id': user.get('id'),
             'name': user.get('name') or raw_identifier.split('@')[0].capitalize(),
             'email': user.get('email') or raw_identifier,
@@ -586,9 +646,8 @@ def get_user_profile(email=None):
             'win_rate': user.get('win_rate', 84.5),
             'trophies': user.get('trophies', 5)
         }
-
-        api_cache.set(cache_key, profile_data, ttl_seconds=20)
-        return jsonify({'success': True, 'data': profile_data}), 200
+        api_cache.set(cache_key, public_data, ttl_seconds=20)
+        return jsonify({'success': True, 'data': public_data}), 200
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -597,16 +656,19 @@ def get_user_profile(email=None):
 def update_user_profile():
     """
     Update user profile, team, bio, & avatar directly in Supabase users table.
+    STRICT SECURITY: Requires authentication. Only the authenticated user's profile is updated.
     """
     if request.method == 'OPTIONS':
         return jsonify({'success': True}), 200
 
     try:
-        data = request.get_json() or {}
-        email = (data.get('email') or '').strip().lower()
-        if not email:
-            return jsonify({'success': False, 'message': 'Email is required.'}), 400
+        user_auth = get_authenticated_user()
+        if not user_auth or not user_auth.get('email'):
+            return jsonify({'success': False, 'message': 'Unauthorized: Valid authentication required.'}), 401
 
+        auth_email = user_auth['email'].strip().lower()
+
+        data = request.get_json() or {}
         name = (data.get('name') or '').strip()
         tag = (data.get('tag') or '').strip()
         college = (data.get('college') or '').strip()
@@ -622,69 +684,41 @@ def update_user_profile():
         if bio: update_fields['bio'] = bio
         if avatar: update_fields['avatar_url'] = avatar
 
-        # Update in Supabase users table with safe column handling
+        # Update in Supabase users table with safe column handling strictly for auth_email
         try:
             supabase = get_supabase_client()
-            existing = supabase.table('users').select('id').eq('email', email).execute()
+            existing = supabase.table('users').select('id').eq('email', auth_email).execute()
             if existing.data and len(existing.data) > 0:
                 try:
-                    supabase.table('users').update(update_fields).eq('email', email).execute()
+                    supabase.table('users').update(update_fields).eq('email', auth_email).execute()
                 except Exception:
-                    # Fallback to standard columns if team/tag column not in table
                     VALID_COLS = {'name', 'college', 'bio', 'avatar_url', 'rank', 'win_rate', 'trophies', 'role'}
                     clean_payload = {k: v for k, v in update_fields.items() if k in VALID_COLS}
-                    supabase.table('users').update(clean_payload).eq('email', email).execute()
+                    supabase.table('users').update(clean_payload).eq('email', auth_email).execute()
             else:
                 new_payload = {
-                    'email': email,
-                    'name': name or email.split('@')[0].capitalize(),
+                    'id': user_auth.get('id'),
+                    'email': auth_email,
+                    'name': name or user_auth.get('name') or auth_email.split('@')[0].capitalize(),
                     'college': college or 'General Campus',
-                    'role': (data.get('role') or 'PLAYER').upper(),
+                    'role': (user_auth.get('role') or 'PLAYER').upper(),
                     'avatar_url': avatar or '/valorant.jpg',
                     **update_fields
                 }
                 try:
                     supabase.table('users').insert(new_payload).execute()
                 except Exception:
-                    VALID_COLS = {'email', 'name', 'college', 'bio', 'avatar_url', 'rank', 'win_rate', 'trophies', 'role'}
+                    VALID_COLS = {'id', 'email', 'name', 'college', 'bio', 'avatar_url', 'rank', 'win_rate', 'trophies', 'role'}
                     clean_new = {k: v for k, v in new_payload.items() if k in VALID_COLS}
                     supabase.table('users').insert(clean_new).execute()
         except Exception as sb_err:
-            print(f"Supabase update profile error: {sb_err}")
+            print(f"Supabase update profile notice: {sb_err}")
 
-        # Invalidate caches
-        api_cache.delete(f"profile:{email}")
-        api_cache.clear_prefix("profile:")
-        api_cache.delete('users:all')
-
-        # Update memory store
-        if email not in IN_MEMORY_USERS:
-            IN_MEMORY_USERS[email] = {'email': email}
-        IN_MEMORY_USERS[email].update({
-            'name': name or IN_MEMORY_USERS[email].get('name', ''),
-            'tag': tag or IN_MEMORY_USERS[email].get('tag', ''),
-            'college': college or IN_MEMORY_USERS[email].get('college', ''),
-            'team': team or IN_MEMORY_USERS[email].get('team', 'Free Agent'),
-            'bio': bio or IN_MEMORY_USERS[email].get('bio', ''),
-            'avatar_url': avatar or IN_MEMORY_USERS[email].get('avatar_url', '/valorant.jpg'),
-            'avatar': avatar or IN_MEMORY_USERS[email].get('avatar', '/valorant.jpg')
-        })
-
-        return jsonify({
-            'success': True,
-            'message': 'Profile updated successfully in database!',
-            'data': {
-                'name': name,
-                'email': email,
-                'college': college,
-                'team': team,
-                'tag': tag,
-                'bio': bio,
-                'avatar': avatar or '/valorant.jpg',
-                'avatar_url': avatar or '/valorant.jpg'
-            }
-        }), 200
+        # Invalidate cache
+        api_cache.delete(f"profile:{auth_email}")
+        return jsonify({'success': True, 'message': 'Profile updated successfully.'}), 200
     except Exception as e:
+        print(f"Error updating profile: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 

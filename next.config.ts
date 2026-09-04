@@ -71,9 +71,96 @@ const nextConfig: NextConfig = {
         destination: `${targetUrl}/payments/:path*`,
       },
       {
-        // Ensure /api/auth/*, /api/registrations/*, /api/tournaments/*, and /api/contact* are always handled locally by Next.js & Supabase
-        source: '/api/((?!auth|registrations|tournaments|contact|contact_messages).*)',
-        destination: `${targetUrl}/$1`,
+        source: '/api/auth/profile',
+        destination: `${targetUrl}/auth/profile`,
+      },
+      {
+        source: '/api/auth/user/:path*',
+        destination: `${targetUrl}/auth/user/:path*`,
+      },
+      {
+        source: '/api/auth/follow',
+        destination: `${targetUrl}/auth/follow`,
+      },
+      {
+        source: '/api/auth/following/:path*',
+        destination: `${targetUrl}/auth/following/:path*`,
+      },
+      {
+        source: '/api/auth/following',
+        destination: `${targetUrl}/auth/following`,
+      },
+      {
+        source: '/api/auth/update-role',
+        destination: `${targetUrl}/auth/update-role`,
+      },
+      {
+        source: '/api/auth/users/role',
+        destination: `${targetUrl}/auth/users/role`,
+      },
+      {
+        source: '/api/attendance/:path*',
+        destination: `${targetUrl}/attendance/:path*`,
+      },
+      {
+        source: '/api/attendance',
+        destination: `${targetUrl}/attendance`,
+      },
+      {
+        source: '/api/rosters/:path*',
+        destination: `${targetUrl}/rosters/:path*`,
+      },
+      {
+        source: '/api/rosters',
+        destination: `${targetUrl}/rosters`,
+      },
+      {
+        source: '/api/notifications/:path*',
+        destination: `${targetUrl}/notifications/:path*`,
+      },
+      {
+        source: '/api/notifications',
+        destination: `${targetUrl}/notifications`,
+      },
+      {
+        source: '/api/applications/:path*',
+        destination: `${targetUrl}/applications/:path*`,
+      },
+      {
+        source: '/api/applications',
+        destination: `${targetUrl}/applications`,
+      },
+      {
+        source: '/api/teams/:path*',
+        destination: `${targetUrl}/teams/:path*`,
+      },
+      {
+        source: '/api/teams',
+        destination: `${targetUrl}/teams`,
+      },
+      {
+        source: '/api/colleges/:path*',
+        destination: `${targetUrl}/colleges/:path*`,
+      },
+      {
+        source: '/api/colleges',
+        destination: `${targetUrl}/colleges`,
+      },
+      {
+        source: '/api/tournaments/register',
+        destination: `${targetUrl}/tournaments/register`,
+      },
+      {
+        source: '/api/registrations/create',
+        destination: `${targetUrl}/registrations/create`,
+      },
+      {
+        source: '/api/registrations/attendance/:path*',
+        destination: `${targetUrl}/registrations/attendance/:path*`,
+      },
+      {
+        source: '/api/registrations/verify/:path*',
+        destination: `${targetUrl}/registrations/verify/:path*`,
       },
     ];
   },

@@ -4,6 +4,98 @@
     {
       "source": "/api/payments/:path*",
       "destination": "https://pheonix-main.onrender.com/api/payments/:path*"
+    },
+    {
+      "source": "/api/auth/profile",
+      "destination": "https://pheonix-main.onrender.com/api/auth/profile"
+    },
+    {
+      "source": "/api/auth/user/:path*",
+      "destination": "https://pheonix-main.onrender.com/api/auth/user/:path*"
+    },
+    {
+      "source": "/api/auth/follow",
+      "destination": "https://pheonix-main.onrender.com/api/auth/follow"
+    },
+    {
+      "source": "/api/auth/following/:path*",
+      "destination": "https://pheonix-main.onrender.com/api/auth/following/:path*"
+    },
+    {
+      "source": "/api/auth/following",
+      "destination": "https://pheonix-main.onrender.com/api/auth/following"
+    },
+    {
+      "source": "/api/auth/update-role",
+      "destination": "https://pheonix-main.onrender.com/api/auth/update-role"
+    },
+    {
+      "source": "/api/auth/users/role",
+      "destination": "https://pheonix-main.onrender.com/api/auth/users/role"
+    },
+    {
+      "source": "/api/attendance/:path*",
+      "destination": "https://pheonix-main.onrender.com/api/attendance/:path*"
+    },
+    {
+      "source": "/api/attendance",
+      "destination": "https://pheonix-main.onrender.com/api/attendance"
+    },
+    {
+      "source": "/api/rosters/:path*",
+      "destination": "https://pheonix-main.onrender.com/api/rosters/:path*"
+    },
+    {
+      "source": "/api/rosters",
+      "destination": "https://pheonix-main.onrender.com/api/rosters"
+    },
+    {
+      "source": "/api/notifications/:path*",
+      "destination": "https://pheonix-main.onrender.com/api/notifications/:path*"
+    },
+    {
+      "source": "/api/notifications",
+      "destination": "https://pheonix-main.onrender.com/api/notifications"
+    },
+    {
+      "source": "/api/applications/:path*",
+      "destination": "https://pheonix-main.onrender.com/api/applications/:path*"
+    },
+    {
+      "source": "/api/applications",
+      "destination": "https://pheonix-main.onrender.com/api/applications"
+    },
+    {
+      "source": "/api/teams/:path*",
+      "destination": "https://pheonix-main.onrender.com/api/teams/:path*"
+    },
+    {
+      "source": "/api/teams",
+      "destination": "https://pheonix-main.onrender.com/api/teams"
+    },
+    {
+      "source": "/api/colleges/:path*",
+      "destination": "https://pheonix-main.onrender.com/api/colleges/:path*"
+    },
+    {
+      "source": "/api/colleges",
+      "destination": "https://pheonix-main.onrender.com/api/colleges"
+    },
+    {
+      "source": "/api/tournaments/register",
+      "destination": "https://pheonix-main.onrender.com/api/tournaments/register"
+    },
+    {
+      "source": "/api/registrations/create",
+      "destination": "https://pheonix-main.onrender.com/api/registrations/create"
+    },
+    {
+      "source": "/api/registrations/attendance/:path*",
+      "destination": "https://pheonix-main.onrender.com/api/registrations/attendance/:path*"
+    },
+    {
+      "source": "/api/registrations/verify/:path*",
+      "destination": "https://pheonix-main.onrender.com/api/registrations/verify/:path*"
     }
   ]
 }
