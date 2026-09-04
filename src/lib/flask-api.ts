@@ -586,26 +586,6 @@ export const flaskApi = {
       }
     } catch {}
 
-    // 3. LocalStorage Browser Cache
-    if (typeof window !== 'undefined') {
-      try {
-        const storedKeys = ['xenova_tournament_passes', 'xenova_registrations', 'user_registrations'];
-        for (const k of storedKeys) {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            const list = Array.isArray(parsed) ? parsed : [parsed];
-            for (const item of list) {
-              const pId = item.pass_id || item.passId || item.id;
-              if (pId && !recordsMap[pId]) {
-                recordsMap[pId] = item;
-              }
-            }
-          }
-        }
-      } catch {}
-    }
-
     const allRecords = Object.values(recordsMap).map((r: any) => {
       const pId = r.payment_id || r.paymentId || null;
       const oId = r.order_id || r.orderId || null;
@@ -868,39 +848,6 @@ export const flaskApi = {
       ]);
     } catch (sbErr) {
       console.warn('Supabase attendance update notice:', sbErr);
-    }
-
-    // 3. Sync to Client LocalStorage records
-    if (typeof window !== 'undefined') {
-      try {
-        const storedKeys = ['xenova_registrations', 'xenova_tournament_passes', 'user_registrations', 'xenova_user_registrations'];
-        for (const k of storedKeys) {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              let updated = false;
-              for (const item of list) {
-                const pId = (item.pass_id || item.passId || item.id || '').toString().trim().toLowerCase();
-                if (pId === cleanId.toLowerCase()) {
-                  item.attendance_status = attendanceStatus;
-                  item.attendanceStatus = attendanceStatus;
-                  item.attended_at = attendanceStatus === 'NOT_MARKED' ? null : nowIso;
-                  item.attendedAt = attendanceStatus === 'NOT_MARKED' ? null : nowIso;
-                  item.attended_by = attendanceStatus === 'NOT_MARKED' ? null : organizerName;
-                  item.attendedBy = attendanceStatus === 'NOT_MARKED' ? null : organizerName;
-                  updated = true;
-                }
-              }
-              if (updated) {
-                localStorage.setItem(k, JSON.stringify(list));
-              }
-            }
-          }
-        }
-      } catch (lsErr) {
-        console.warn('LocalStorage attendance sync notice:', lsErr);
-      }
     }
 
     return { success: true, message: `Updated attendance to ${attendanceStatus}`, status: attendanceStatus };
@@ -1180,99 +1127,11 @@ export const flaskApi = {
       console.warn('Supabase verify lookup fallback notice:', sbErr);
     }
 
-    // 3. Client LocalStorage Fallback (Offline passes)
-    if (typeof window !== 'undefined') {
-      try {
-        const storedKeys = ['xenova_tournament_passes', 'xenova_registrations', 'user_registrations', 'xenova_user_registrations'];
-        for (const k of storedKeys) {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const list = JSON.parse(raw);
-            if (Array.isArray(list)) {
-              const matched = list.find(
-                (item: any) => (item.pass_id || item.passId || item.id || '').toString().trim().toLowerCase() === cleanId.toLowerCase()
-              );
-              if (matched) {
-                const pId = matched.pass_id || matched.passId || cleanId;
-                const currentAttStatus = (matched.attendance_status || matched.attendanceStatus || 'NOT_MARKED').toUpperCase();
-                const tournDate = matched.tournament_date || matched.date || '';
-                const tournStatus = matched.tournament_status || matched.status || '';
-
-                const expiry = checkExpiry(tournDate, undefined, tournStatus);
-                if (expiry.isExpired) {
-                  return {
-                    valid: false,
-                    status: 'EXPIRED',
-                    is_expired: true,
-                    passId: pId,
-                    message: `This ticket pass has expired. Tournament concluded on ${expiry.formattedDate}.`,
-                    data: {
-                      ...matched,
-                      passId: pId,
-                      pass_id: pId,
-                      tournamentDate: expiry.formattedDate,
-                      isExpired: true,
-                    },
-                  };
-                }
-
-                if (currentAttStatus === 'PRESENT') {
-                  return {
-                    valid: true,
-                    status: 'ALREADY_CHECKED_IN',
-                    already_checked_in: true,
-                    passId: pId,
-                    message: 'Participant is already checked in.',
-                    data: {
-                      ...matched,
-                      passId: pId,
-                      pass_id: pId,
-                      attendanceStatus: 'PRESENT',
-                      attendance_status: 'PRESENT',
-                    },
-                  };
-                }
-
-                if (autoCheckIn) {
-                  matched.attendance_status = 'PRESENT';
-                  matched.attendanceStatus = 'PRESENT';
-                  matched.attended_at = nowIso;
-                  matched.attendedAt = nowIso;
-                  matched.attended_by = attendedBy;
-                  matched.attendedBy = attendedBy;
-                  localStorage.setItem(k, JSON.stringify(list));
-                }
-
-                return {
-                  valid: true,
-                  status: 'VERIFIED',
-                  already_checked_in: false,
-                  passId: pId,
-                  message: autoCheckIn ? 'Participant verified and marked PRESENT.' : 'Valid entry pass.',
-                  data: {
-                    ...matched,
-                    passId: pId,
-                    pass_id: pId,
-                    attendanceStatus: autoCheckIn ? 'PRESENT' : currentAttStatus,
-                    attendance_status: autoCheckIn ? 'PRESENT' : currentAttStatus,
-                    attendedAt: autoCheckIn ? nowIso : (matched.attended_at || matched.attendedAt),
-                    attendedBy: autoCheckIn ? attendedBy : (matched.attended_by || matched.attendedBy),
-                  },
-                };
-              }
-            }
-          }
-        }
-      } catch (lsErr) {
-        console.warn('LocalStorage verify lookup notice:', lsErr);
-      }
-    }
-
     return {
       valid: false,
-      status: 'INVALID',
+      status: 'NOT_FOUND',
       passId: cleanId,
-      message: `Pass ID "${cleanId}" not recognized or expired.`,
+      message: 'Ticket pass not recognized. Please check your Pass ID or re-scan.',
     };
   },
 

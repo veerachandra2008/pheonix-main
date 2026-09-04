@@ -23,21 +23,9 @@ function TournamentsContent() {
   const [selectedStatus, setSelectedStatus] = useState<'All' | 'Live' | 'Registering' | 'Upcoming'>('All');
   const [selectedGame, setSelectedGame] = useState('All');
 
-  // Instant 0.0ms Synchronous State Hydration
+  // Database-driven Tournaments State
   const [tournamentsList, setTournamentsList] = useState<any[]>(() => {
     if (cachedTournamentsMemory && cachedTournamentsMemory.length > 0) return cachedTournamentsMemory;
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('xenova_tournaments_cache');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            cachedTournamentsMemory = parsed;
-            return parsed;
-          }
-        }
-      } catch {}
-    }
     return defaultTournaments;
   });
 
@@ -85,9 +73,6 @@ function TournamentsContent() {
         if (Array.isArray(allTournaments) && allTournaments.length > 0) {
           setTournamentsList(allTournaments);
           cachedTournamentsMemory = allTournaments;
-          try {
-            localStorage.setItem('xenova_tournaments_cache', JSON.stringify(allTournaments));
-          } catch {}
         }
 
         if (Array.isArray(regs)) {

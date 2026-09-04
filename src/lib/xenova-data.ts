@@ -189,69 +189,28 @@ export const defaultTeams: XenovaTeam[] = [
 export const slugify = (value?: string) =>
   (value || '').toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
 
-const parseStored = <T>(key: string): T[] => {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
+export const getCustomColleges = (): XenovaCollege[] => [];
+
+export const saveCustomColleges = (_colleges: XenovaCollege[]) => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('xenova-colleges-change'));
   }
 };
 
-export const getCustomColleges = () =>
-  parseStored<XenovaCollege>('xenova_colleges').map((college) => ({
-    ...college,
-    slug: college.slug || slugify(college.name || 'college'),
-    teams: college.teams ?? college.teamsCount ?? 0,
-    teamsCount: college.teamsCount ?? college.teams ?? 0,
-    verified: college.verificationStatus === 'approved' || college.verified === true,
-    verificationStatus: college.verificationStatus || (college.verified ? 'approved' : 'pending'),
-    isCustom: true,
-  }));
-
-export const saveCustomColleges = (colleges: XenovaCollege[]) => {
-  localStorage.setItem('xenova_colleges', JSON.stringify(colleges));
-  window.dispatchEvent(new Event('xenova-colleges-change'));
-};
-
 export const getAllColleges = ({ includePending = false } = {}) => {
-  const custom = getCustomColleges();
-  const combined = [...custom, ...defaultColleges];
-  const seen = new Set<string>();
-  const deduplicated = combined.filter((college) => {
-    const key = (college.slug || slugify(college.name)).toLowerCase().trim();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  return includePending ? deduplicated : deduplicated.filter((college) => college.verificationStatus === 'approved');
+  return includePending ? defaultColleges : defaultColleges.filter((college) => college.verificationStatus === 'approved');
 };
 
 export const getVerifiedCollegeNames = () => getAllColleges().map((college) => college.name);
 
-export const getCustomTeams = () =>
-  parseStored<XenovaTeam>('xenova_teams').map((team) => ({
-    ...team,
-    slug: team.slug || slugify(team.name || 'team'),
-    verified: team.verificationStatus === 'approved' || team.verified === true,
-    verificationStatus: team.verificationStatus || (team.verified ? 'approved' : 'pending'),
-    isCustom: true,
-  }));
+export const getCustomTeams = (): XenovaTeam[] => [];
 
-export const saveCustomTeams = (teams: XenovaTeam[]) => {
-  localStorage.setItem('xenova_teams', JSON.stringify(teams));
-  window.dispatchEvent(new Event('xenova-teams-change'));
+export const saveCustomTeams = (_teams: XenovaTeam[]) => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('xenova-teams-change'));
+  }
 };
 
 export const getAllTeams = ({ includePending = false } = {}) => {
-  const custom = getCustomTeams();
-  const combined = [...custom, ...defaultTeams.map((team) => ({ ...team, isCustom: false }))];
-  const seen = new Set<string>();
-  const deduplicated = combined.filter((team) => {
-    const key = (team.slug || slugify(team.name)).toLowerCase().trim();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  return includePending ? deduplicated : deduplicated.filter((team) => team.verificationStatus === 'approved');
+  return includePending ? defaultTeams : defaultTeams.filter((team) => team.verificationStatus === 'approved');
 };

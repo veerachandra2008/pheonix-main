@@ -86,16 +86,12 @@
       "destination": "https://pheonix-main.onrender.com/api/tournaments/register"
     },
     {
-      "source": "/api/registrations/create",
-      "destination": "https://pheonix-main.onrender.com/api/registrations/create"
+      "source": "/api/registrations/:path*",
+      "destination": "https://pheonix-main.onrender.com/api/registrations/:path*"
     },
     {
-      "source": "/api/registrations/attendance/:path*",
-      "destination": "https://pheonix-main.onrender.com/api/registrations/attendance/:path*"
-    },
-    {
-      "source": "/api/registrations/verify/:path*",
-      "destination": "https://pheonix-main.onrender.com/api/registrations/verify/:path*"
+      "source": "/api/registrations",
+      "destination": "https://pheonix-main.onrender.com/api/registrations"
     }
   ]
 }

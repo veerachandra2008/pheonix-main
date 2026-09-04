@@ -120,13 +120,15 @@ export default function TeamManagePage({ params }: Props) {
   const [fullTeamData, setFullTeamData] = useState<any>(null);
   const [invites, setInvites] = useState<any[]>([]);
 
-  const loadTeamAndInvites = () => {
+  const loadTeamAndInvites = async () => {
     try {
-      const rawCustom = localStorage.getItem('xenova_teams');
-      const custom = rawCustom ? JSON.parse(rawCustom) : [];
-      const combined = [...custom, ...defaultTeams];
+      const { data: dbTeam } = await supabase
+        .from('teams')
+        .select('*')
+        .or(`slug.eq.${id},name.ilike.${id}`)
+        .maybeSingle();
 
-      const foundTeam = combined.find(
+      const foundTeam = dbTeam || defaultTeams.find(
         (t: any) => t.slug === id || t.name.toLowerCase().replace(/\s+/g, '-') === id
       );
 
@@ -139,11 +141,6 @@ export default function TeamManagePage({ params }: Props) {
         router.replace('/teams');
         return;
       }
-
-      // Load invites
-      const rawInvites = localStorage.getItem('xenova_team_invites');
-      const allInvites = rawInvites ? JSON.parse(rawInvites) : [];
-      setInvites(allInvites.filter((inv: any) => inv.teamSlug === id || inv.teamSlug === foundTeam.slug));
     } catch (e) {
       console.error(e);
     }
@@ -175,9 +172,6 @@ export default function TeamManagePage({ params }: Props) {
     }
 
     try {
-      const rawAllInvites = localStorage.getItem('xenova_team_invites');
-      const allInvites = rawAllInvites ? JSON.parse(rawAllInvites) : [];
-      
       const newInvite = {
         id: Math.random().toString(36).substring(7),
         teamSlug: fullTeamData?.slug || id,
@@ -187,8 +181,6 @@ export default function TeamManagePage({ params }: Props) {
         sentAt: new Date().toLocaleDateString()
       };
 
-      const updatedAllInvites = [newInvite, ...allInvites];
-      localStorage.setItem('xenova_team_invites', JSON.stringify(updatedAllInvites));
       setInvites([newInvite, ...invites]);
       
       // Insert official team invitation notification into Supabase database
@@ -218,15 +210,7 @@ export default function TeamManagePage({ params }: Props) {
 
   const handleCancelInvite = (inviteId: string) => {
     if (!confirm('Cancel this invitation?')) return;
-    try {
-      const rawAllInvites = localStorage.getItem('xenova_team_invites');
-      let allInvites = rawAllInvites ? JSON.parse(rawAllInvites) : [];
-      allInvites = allInvites.filter((inv: any) => inv.id !== inviteId);
-      localStorage.setItem('xenova_team_invites', JSON.stringify(allInvites));
-      setInvites(invites.filter((inv) => inv.id !== inviteId));
-    } catch (e) {
-      console.error(e);
-    }
+    setInvites(invites.filter((inv) => inv.id !== inviteId));
   };
 
   const handleKickPlayer = (player: string) => {
@@ -236,54 +220,32 @@ export default function TeamManagePage({ params }: Props) {
     }
     const updatedRoster = roster.filter((p) => p !== player);
     setRoster(updatedRoster);
-
-    // Save automatically
-    try {
-      const rawCustom = localStorage.getItem('xenova_teams');
-      let custom = rawCustom ? JSON.parse(rawCustom) : [];
-      if (!Array.isArray(custom)) custom = [];
-
-      const filteredCustom = custom.filter((t: any) => t.slug !== fullTeamData.slug);
-
-      const updatedTeam = {
-        ...fullTeamData,
-        roster: updatedRoster,
-        members: updatedRoster.length,
-      };
-
-      localStorage.setItem('xenova_teams', JSON.stringify([...filteredCustom, updatedTeam]));
-      window.dispatchEvent(new Event('xenova-teams-change'));
-      alert(`${player} removed from the roster.`);
-    } catch (e) {
-      console.error(e);
-    }
+    alert(`${player} removed from the roster.`);
   };
 
-  const handleSaveChanges = () => {
+  const handleSaveChanges = async () => {
     if (!teamName.trim()) {
       alert('Team Name is required.');
       return;
     }
 
     try {
-      const rawCustom = localStorage.getItem('xenova_teams');
-      let custom = rawCustom ? JSON.parse(rawCustom) : [];
-      if (!Array.isArray(custom)) custom = [];
+      const targetSlug = fullTeamData?.slug || id;
+      const { error } = await supabase
+        .from('teams')
+        .update({
+          name: teamName,
+          game: activeGame,
+        })
+        .eq('slug', targetSlug);
 
-      const filteredCustom = custom.filter((t: any) => t.slug !== fullTeamData.slug);
+      if (error) {
+        console.warn('Supabase team update error:', error);
+      }
 
-      const updatedTeam = {
-        ...fullTeamData,
-        name: teamName,
-        game: activeGame,
-        roster: roster,
-        members: roster.length,
-      };
-
-      localStorage.setItem('xenova_teams', JSON.stringify([...filteredCustom, updatedTeam]));
       alert('Team details saved successfully!');
       window.dispatchEvent(new Event('xenova-teams-change'));
-      router.push(`/teams/${fullTeamData.slug || id}`);
+      router.push(`/teams/${targetSlug}`);
     } catch (e) {
       console.error(e);
       alert('Failed to save team roster changes.');

@@ -63,21 +63,9 @@ export default function CollegesPage() {
   const [selectedSort, setSelectedSort] = useState('National Ranking');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   
-  // Instant 0.0ms Synchronous State Hydration
+  // Database-driven Colleges State
   const [customColleges, setCustomColleges] = useState<XenovaCollege[]>(() => {
     if (cachedCollegesMemory && cachedCollegesMemory.length > 0) return cachedCollegesMemory;
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('xenova_colleges_cache');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            cachedCollegesMemory = parsed;
-            return parsed;
-          }
-        }
-      } catch {}
-    }
     return [];
   });
 
@@ -114,9 +102,6 @@ export default function CollegesPage() {
             verificationStatus: c.verification_status || c.verificationStatus || (c.verified ? 'approved' : 'pending'),
           }));
           cachedCollegesMemory = loadedList;
-          try {
-            localStorage.setItem('xenova_colleges_cache', JSON.stringify(loadedList));
-          } catch {}
           setCustomColleges(loadedList);
         }
       } catch (err) {

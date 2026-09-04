@@ -101,10 +101,6 @@ export default function OrganizerAttendanceHubPage() {
           }
         } catch {}
 
-        // Fallback default mock tournaments if none loaded
-        if (allTournaments.length === 0) {
-          allTournaments = defaultTournaments;
-        }
 
         // 3. STRICT ORGANIZER SCOPING:
         // Only show tournaments that this organizer owns / created / hosts (unless platform admin)

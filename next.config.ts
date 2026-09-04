@@ -151,16 +151,12 @@ const nextConfig: NextConfig = {
         destination: `${targetUrl}/tournaments/register`,
       },
       {
-        source: '/api/registrations/create',
-        destination: `${targetUrl}/registrations/create`,
+        source: '/api/registrations/:path*',
+        destination: `${targetUrl}/registrations/:path*`,
       },
       {
-        source: '/api/registrations/attendance/:path*',
-        destination: `${targetUrl}/registrations/attendance/:path*`,
-      },
-      {
-        source: '/api/registrations/verify/:path*',
-        destination: `${targetUrl}/registrations/verify/:path*`,
+        source: '/api/registrations',
+        destination: `${targetUrl}/registrations`,
       },
     ];
   },

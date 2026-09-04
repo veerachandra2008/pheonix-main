@@ -48,21 +48,9 @@ export default function PlayersPage() {
   const router = useRouter();
   const [session, setSession] = useState<any>(null);
   
-  // Instant 0ms Synchronous State Hydration
+  // Database-driven Players State
   const [players, setPlayers] = useState<Player[]>(() => {
     if (cachedPlayersMemory && cachedPlayersMemory.length > 0) return cachedPlayersMemory;
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('xenova_players_cache');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            cachedPlayersMemory = parsed;
-            return parsed;
-          }
-        }
-      } catch {}
-    }
     return [];
   });
 
@@ -183,10 +171,6 @@ export default function PlayersPage() {
         setPlayers(finalPlayers);
         cachedPlayersMemory = finalPlayers;
         setLoading(false);
-
-        if (finalPlayers.length > 0) {
-          localStorage.setItem('xenova_players_cache', JSON.stringify(finalPlayers));
-        }
       } catch (err) {
         setLoading(false);
       }

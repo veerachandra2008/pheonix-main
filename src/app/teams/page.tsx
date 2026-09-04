@@ -182,21 +182,9 @@ export default function TeamsPage() {
   const [selectedSort, setSelectedSort] = useState('Top Ranked');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
 
-  // Instant 0.0ms Synchronous State Hydration
+  // Database-driven Teams State
   const [customTeams, setCustomTeams] = useState<XenovaTeam[]>(() => {
     if (cachedTeamsMemory && cachedTeamsMemory.length > 0) return cachedTeamsMemory;
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('xenova_teams_cache');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            cachedTeamsMemory = parsed;
-            return parsed;
-          }
-        }
-      } catch {}
-    }
     return defaultTeamsList;
   });
 
@@ -231,9 +219,6 @@ export default function TeamsPage() {
             verificationStatus: t.verification_status || t.verificationStatus || (t.verified ? 'approved' : 'pending'),
           }));
           cachedTeamsMemory = loadedList;
-          try {
-            localStorage.setItem('xenova_teams_cache', JSON.stringify(loadedList));
-          } catch {}
           setCustomTeams(loadedList);
         }
       } catch (err) {

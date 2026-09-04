@@ -638,6 +638,59 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     }
   }
 
+  // 8b. Registrations Endpoints (Direct DB Fallback)
+  if (mainSegment === 'registrations') {
+    if (method === 'GET') {
+      const url = new URL(req.url);
+      const email = url.searchParams.get('email')?.trim().toLowerCase();
+      const passId = (idOrSlug && idOrSlug !== 'registrations') ? idOrSlug : (url.searchParams.get('pass_id') || url.searchParams.get('passId') || '');
+      
+      let query = supabaseAdmin.from('registrations').select('*');
+      if (passId) {
+        query = query.eq('pass_id', passId);
+      } else if (email) {
+        query = query.ilike('email', email);
+      }
+      const { data, error } = await query;
+      if (error || !data) {
+        return NextResponse.json({ success: false, data: [] }, { status: 200 });
+      }
+
+      if (passId && data.length > 0) {
+        const item = data[0];
+        const { data: rosterRows } = await supabaseAdmin
+          .from('tournament_rosters')
+          .select('*')
+          .eq('pass_id', passId)
+          .order('slot');
+        
+        const players = (rosterRows || []).map(p => ({
+          slot: p.slot,
+          name: p.player_name,
+          inGameTag: p.in_game_tag,
+          email: p.email,
+          phone: p.phone || '',
+          isCaptain: p.is_captain ?? (p.slot === 1)
+        }));
+
+        const resultRecord = {
+          ...item,
+          passId: item.pass_id,
+          pass_id: item.pass_id,
+          players,
+          player_emails: players.map(p => p.email)
+        };
+        return NextResponse.json({ success: true, data: resultRecord }, { status: 200 });
+      }
+
+      return NextResponse.json({ success: true, data }, { status: 200 });
+    }
+    if (method === 'DELETE') {
+      const { error } = await supabaseAdmin.from('registrations').delete().eq('pass_id', idOrSlug);
+      return NextResponse.json({ success: !error, message: 'Registration deleted.' }, { status: 200 });
+    }
+  }
+
   // 9. Contact & Support Tickets Endpoints
   if (mainSegment === 'contact' || mainSegment === 'contact_messages') {
     if (method === 'POST') {
@@ -877,11 +930,8 @@ function isNextJsNativeRoute(segments: string[]): boolean {
   }
 
   if (main === 'registrations') {
-    // registrations/create, registrations/attendance, registrations/verify are Flask-backed
-    if (sub === 'create' || sub === 'attendance' || sub === 'verify') {
-      return false;
-    }
-    return true;
+    // All registration endpoints should be proxied to Flask backend
+    return false;
   }
 
   return false;

@@ -13,27 +13,23 @@ export default function SignupPage() {
 
     if (!cleanName || !cleanTag) return alert("Name and Tag are required!");
 
-    // Get existing users or empty array
-    let existingUsers: any[] = [];
+    // Sign up directly with Supabase
     try {
-      const raw = localStorage.getItem('xenova_users');
-      existingUsers = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(existingUsers)) existingUsers = [];
-    } catch (err) {
-      existingUsers = [];
+      const { supabase } = await import('@/lib/supabase');
+      const { error } = await supabase.from('users').insert([{
+        name: cleanName,
+        tag: cleanTag,
+        bio: formData.bio || '',
+        role: 'PLAYER'
+      }]);
+      if (error) {
+        return alert(error.message || "Failed to create user");
+      }
+      alert("Sign up successful! Now please login.");
+      router.push('/login');
+    } catch (err: any) {
+      alert(err.message || "Sign up error");
     }
-    
-    // Check if tag is taken
-    if (existingUsers.some((u: any) => u.tag.toLowerCase() === cleanTag.toLowerCase())) {
-      return alert("This Gamer Tag is already registered!");
-    }
-
-    const newUser = { ...formData, name: cleanName, tag: cleanTag };
-    existingUsers.push(newUser);
-    localStorage.setItem('xenova_users', JSON.stringify(existingUsers));
-    
-    alert("Sign up successful! Now please login.");
-    router.push('/login');
   };
 
   return (

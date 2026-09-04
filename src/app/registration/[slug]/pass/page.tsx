@@ -100,25 +100,6 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
 
                   if (match) {
                     resolvedPassId = match.pass_id || match.passId;
-                    setTicketData({
-                      passId: match.pass_id || match.passId,
-                      pass_id: match.pass_id || match.passId,
-                      tournamentSlug: match.tournament_slug || match.tournamentSlug || slug,
-                      tournamentTitle: match.tournament_title || match.tournamentTitle || 'Tournament Pass',
-                      teamName: match.team_name || match.teamName || 'Squad Entry',
-                      college: match.college || 'Varsity Club',
-                      captainName: match.captain_name || match.captainName || 'Team Captain',
-                      email: match.email || user.email,
-                      paymentStatus: match.payment_status || match.paymentStatus || 'SUCCESS',
-                      tournamentGame: match.tournament_game || match.tournamentGame || 'Esports',
-                      tournamentDate: match.tournament_date || match.tournamentDate || 'Scheduled',
-                      tournamentFormat: match.tournament_format || match.tournamentFormat || 'Tournament',
-                      tournamentRegion: match.tournament_region || match.tournamentRegion || 'Pan India',
-                      tournamentFee: match.tournament_fee || match.tournamentFee || 'Verified',
-                      registeredAt: match.registered_at || match.registeredAt || new Date().toISOString()
-                    });
-                    setLoading(false);
-                    return;
                   }
                 }
               }
@@ -167,6 +148,22 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
               if (uData?.bio) userBio = uData.bio;
             } catch {}
           }
+
+          const { data: rosterRows } = await supabase
+            .from('tournament_rosters')
+            .select('*')
+            .eq('pass_id', resolvedPassId)
+            .order('slot');
+
+          const players = (rosterRows || []).map((p: any) => ({
+            slot: p.slot,
+            name: p.player_name,
+            inGameTag: p.in_game_tag,
+            email: p.email,
+            phone: p.phone || '',
+            isCaptain: p.is_captain ?? (p.slot === 1)
+          }));
+
           setTicketData({
             passId: item.pass_id,
             pass_id: item.pass_id,
@@ -178,7 +175,8 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             email: item.email,
             bio: userBio || 'Compete with honor, dominate with strategy. Verified Collegiate Athlete.',
             paymentStatus: item.payment_status || 'SUCCESS',
-            registeredAt: item.registered_at || new Date().toISOString()
+            registeredAt: item.registered_at || new Date().toISOString(),
+            players
           });
           setLoading(false);
           return;
@@ -360,36 +358,40 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
-                  Verified 4-Player Squad Roster
+                  Verified Squad Roster
                 </p>
-                <span className="text-[10px] font-mono text-emerald-400 font-bold">4 / 4 Registered</span>
+                <span className="text-[10px] font-mono text-emerald-400 font-bold">
+                  {ticketData?.players?.length ? `${ticketData.players.length} Players Registered` : 'Roster Confirmed'}
+                </span>
               </div>
 
               <div className="space-y-2">
-                {(ticketData?.players && ticketData.players.length > 0 ? ticketData.players : [
-                  { slot: 1, name: ticketData?.captainName || 'Captain', inGameTag: 'CAPTAIN#001', email: ticketData?.email || 'captain@university.edu', isCaptain: true },
-                  { slot: 2, name: 'Teammate 2', inGameTag: 'PLAYER_2', email: 'player2@university.edu', isCaptain: false },
-                  { slot: 3, name: 'Teammate 3', inGameTag: 'PLAYER_3', email: 'player3@university.edu', isCaptain: false },
-                  { slot: 4, name: 'Teammate 4', inGameTag: 'PLAYER_4', email: 'player4@university.edu', isCaptain: false },
-                ]).map((p: any) => (
-                  <div
-                    key={p.slot}
-                    className="p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center justify-between text-xs gap-2"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
-                        p.isCaptain || p.slot === 1
-                          ? 'bg-emerald-500 text-black'
-                          : 'bg-white/10 text-zinc-400'
-                      }`}>
-                        {p.isCaptain || p.slot === 1 ? '👑 Captain' : `P${p.slot}`}
-                      </span>
-                      <span className="font-bold text-white truncate">{p.name}</span>
-                      <span className="font-mono text-emerald-400 text-[11px]">({p.inGameTag || 'IGN'})</span>
+                {ticketData?.players && ticketData.players.length > 0 ? (
+                  ticketData.players.map((p: any) => (
+                    <div
+                      key={p.slot || p.email}
+                      className="p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center justify-between text-xs gap-2"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
+                          p.isCaptain || p.slot === 1
+                            ? 'bg-emerald-500 text-black'
+                            : 'bg-white/10 text-zinc-400'
+                        }`}>
+                          {p.isCaptain || p.slot === 1 ? '👑 Captain' : `P${p.slot}`}
+                        </span>
+                        <span className="font-bold text-white truncate">{p.name}</span>
+                        <span className="font-mono text-emerald-400 text-[11px]">({p.inGameTag || 'IGN'})</span>
+                      </div>
+                      <span className="font-mono text-zinc-400 text-[11px] truncate max-w-[170px] text-right">{p.email}</span>
                     </div>
-                    <span className="font-mono text-zinc-400 text-[11px] truncate max-w-[170px] text-right">{p.email}</span>
+                  ))
+                ) : (
+                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center justify-between text-xs">
+                    <span className="text-zinc-300 font-medium">Captain: {ticketData?.captainName || ticketData?.captain_name || ticketData?.name || 'Registered'}</span>
+                    <span className="font-mono text-zinc-500 text-[11px]">{ticketData?.email || ''}</span>
                   </div>
-                ))}
+                )}
               </div>
             </div>
 

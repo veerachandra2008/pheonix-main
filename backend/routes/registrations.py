@@ -276,7 +276,8 @@ def get_all_registrations():
                 supabase = get_supabase_client()
                 r_query = supabase.table('tournament_rosters').select('*')
                 if len(matched_pids) <= 20:
-                    r_query = r_query.in_('pass_id', matched_pids)
+                    or_clause = ','.join([f"pass_id.eq.{p}" for p in matched_pids])
+                    r_query = r_query.or_(or_clause)
                 elif clean_slug:
                     r_query = r_query.eq('tournament_slug', clean_slug)
                 

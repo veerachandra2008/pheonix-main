@@ -397,17 +397,7 @@ export async function saveOrUpdateTournament(
     console.warn('API tournament update notice:', apiErr);
   }
 
-  // 5. Update Local Storage Cache
-  if (typeof window !== 'undefined') {
-    try {
-      const localCustom = JSON.parse(localStorage.getItem('xenova_custom_tournaments') || '{}');
-      localCustom[slug] = { slug, ...cleanPayload, ...(savedData || {}) };
-      localStorage.setItem('xenova_custom_tournaments', JSON.stringify(localCustom));
-      invalidateTournamentsCache();
-    } catch {}
-  }
-
-  // 6. Invalidate memory & dispatch event
+  // 5. Invalidate memory & dispatch event
   invalidateTournamentsCache();
 
   return { success: true, data: savedData || cleanPayload };
@@ -428,20 +418,7 @@ export async function getTournamentBySlug(targetSlug: string): Promise<any | nul
     }
   } catch {}
 
-  // 2. Local Custom Tournaments Cache
-  if (typeof window !== 'undefined') {
-    try {
-      const localCustom = JSON.parse(localStorage.getItem('xenova_custom_tournaments') || '{}');
-      if (localCustom[cleanSlug]) {
-        return localCustom[cleanSlug];
-      }
-      for (const val of Object.values(localCustom) as any[]) {
-        if ((val.slug || '').toLowerCase() === cleanSlug) return val;
-      }
-    } catch {}
-  }
-
-  // 3. Backend API
+  // 2. Backend API
   try {
     const apiBase = getApiBaseUrl();
     const res = await fetch(`${apiBase}/tournaments/`, { cache: 'no-store' });

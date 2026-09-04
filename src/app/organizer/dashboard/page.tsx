@@ -93,23 +93,6 @@ export default function OrganizerDashboard() {
         console.warn('Dashboard API fetch notice:', apiErr);
       }
 
-      // 3. Local Custom Tournaments Cache (Instant Load)
-      if (typeof window !== 'undefined') {
-        try {
-          const localCustom = JSON.parse(localStorage.getItem('xenova_custom_tournaments') || '{}');
-          for (const t of Object.values(localCustom) as any[]) {
-            if (t && t.slug) {
-              const idx = allTournaments.findIndex((x) => x.slug === t.slug);
-              if (idx >= 0) {
-                allTournaments[idx] = { ...allTournaments[idx], ...t };
-              } else {
-                allTournaments.unshift(t);
-              }
-            }
-          }
-        } catch {}
-      }
-
       setRegistrations(allRegistrations);
 
       // Filter: Show only tournaments hosted / created by this organizer
