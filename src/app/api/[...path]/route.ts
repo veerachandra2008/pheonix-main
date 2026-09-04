@@ -23,7 +23,7 @@ async function tryProxyToBackend(req: NextRequest, pathStr: string): Promise<Res
   const targetUrl = `${backendBase}/api/${pathStr}${url.search}`;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 800);
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
     const headers: Record<string, string> = {};

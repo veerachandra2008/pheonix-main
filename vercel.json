@@ -2,8 +2,8 @@
   "framework": "nextjs",
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/index.py"
+      "source": "/api/payments/:path*",
+      "destination": "https://pheonix-main.onrender.com/api/payments/:path*"
     }
   ]
 }

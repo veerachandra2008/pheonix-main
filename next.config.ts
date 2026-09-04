@@ -61,21 +61,21 @@ const nextConfig: NextConfig = {
     ];
   },
   async rewrites() {
-    const backendUrl = process.env.NEXT_PUBLIC_FLASK_API_URL;
+    const rawUrl = process.env.NEXT_PUBLIC_FLASK_API_URL || process.env.FLASK_API_URL || 'https://pheonix-main.onrender.com';
+    const cleanUrl = rawUrl.trim();
+    const targetUrl = cleanUrl.endsWith('/api') ? cleanUrl : `${cleanUrl.replace(/\/$/, '')}/api`;
 
-    if (backendUrl && backendUrl.trim()) {
-      const cleanUrl = backendUrl.trim();
-      const targetUrl = cleanUrl.endsWith('/api') ? cleanUrl : `${cleanUrl.replace(/\/$/, '')}/api`;
-      return [
-        {
-          // Ensure /api/auth/*, /api/registrations/*, /api/tournaments/*, and /api/contact* are always handled locally by Next.js & Supabase
-          source: '/api/((?!auth|registrations|tournaments|contact|contact_messages).*)',
-          destination: `${targetUrl}/$1`,
-        },
-      ];
-    }
-
-    return [];
+    return [
+      {
+        source: '/api/payments/:path*',
+        destination: `${targetUrl}/payments/:path*`,
+      },
+      {
+        // Ensure /api/auth/*, /api/registrations/*, /api/tournaments/*, and /api/contact* are always handled locally by Next.js & Supabase
+        source: '/api/((?!auth|registrations|tournaments|contact|contact_messages).*)',
+        destination: `${targetUrl}/$1`,
+      },
+    ];
   },
 };
 
