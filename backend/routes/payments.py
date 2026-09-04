@@ -303,6 +303,13 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
         IN_MEMORY_PAYMENT_ORDERS[order_id]['status'] = 'PAID'
         IN_MEMORY_PAYMENT_ORDERS[order_id]['payment_id'] = payment_id
 
+    # ─── DISPATCH DIGITAL ENTRY TICKET VIA BREVO TO CAPTAIN ───
+    try:
+        from email_service import send_ticket_email_async
+        send_ticket_email_async(record)
+    except Exception as em_err:
+        print(f"[WARN] Failed to trigger Brevo ticket email: {em_err}")
+
     return {
         'success': True,
         'passId': pass_id,

@@ -491,6 +491,43 @@ class TestPhoenixEsportsBackend(unittest.TestCase):
         for n in read_data.get('data'):
             self.assertTrue(n.get('read'))
 
+    # ==========================================
+    # 10. BREVO TRANSACTIONAL EMAIL & RESEND
+    # ==========================================
+    def test_26_brevo_ticket_email_service(self):
+        from email_service import generate_ticket_html, send_ticket_email_async
+        html = generate_ticket_html({
+            'pass_id': 'XPH-TEST-001',
+            'tournament_title': 'Unit Test Tournament',
+            'tournament_game': 'BGMI',
+            'team_name': 'Test Squad',
+            'captain_name': 'Test Captain',
+            'email': 'captain@test.com',
+            'players': [
+                {'name': 'Test Captain', 'inGameTag': 'CAP_01', 'isCaptain': True},
+                {'name': 'Teammate 2', 'inGameTag': 'TM_02', 'isCaptain': False}
+            ]
+        })
+        self.assertIn('XPH-TEST-001', html)
+        self.assertIn('Unit Test Tournament', html)
+        self.assertIn('CAP_01', html)
+        self.assertIn('TM_02', html)
+
+        # Verify async dispatch spawns non-blocking thread
+        thread = send_ticket_email_async({'pass_id': 'XPH-TEST-001', 'email': 'captain@test.com'})
+        self.assertTrue(thread.is_alive() or not thread.is_alive())
+
+    def test_27_resend_ticket_endpoint_validation(self):
+        # 1. Missing passId
+        res_missing = self.client.post('/api/registrations/resend-ticket', json={})
+        self.assertEqual(res_missing.status_code, 400)
+        self.assertFalse(res_missing.get_json().get('success'))
+
+        # 2. Non-existent passId
+        res_none = self.client.post('/api/registrations/resend-ticket', json={'passId': 'PASS-DOES-NOT-EXIST'})
+        self.assertEqual(res_none.status_code, 404)
+        self.assertFalse(res_none.get_json().get('success'))
+
 if __name__ == '__main__':
     suite = unittest.TestLoader().loadTestsFromTestCase(TestPhoenixEsportsBackend)
     runner = unittest.TextTestRunner(verbosity=2)

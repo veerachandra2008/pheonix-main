@@ -13,6 +13,8 @@ import {
   Zap,
   Download,
   ExternalLink,
+  Mail,
+  Loader2,
 } from 'lucide-react';
 import { QRCodeComponent } from '@/components/QRCodeComponent';
 import { getApiBaseUrl } from '@/lib/api-config';
@@ -47,6 +49,34 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [origin, setOrigin] = useState('https://xenova.gg');
+  const [emailStatus, setEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [emailStatusMsg, setEmailStatusMsg] = useState('');
+
+  const handleResendEmail = async () => {
+    const targetPassId = ticketData?.passId || ticketData?.pass_id || ticketPassId;
+    if (!targetPassId || emailStatus === 'sending') return;
+    setEmailStatus('sending');
+    setEmailStatusMsg('');
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetch(`${apiBase}/registrations/resend-ticket`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passId: targetPassId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setEmailStatus('sent');
+        setEmailStatusMsg(data.message || `Ticket pass emailed to ${ticketData?.email}!`);
+      } else {
+        setEmailStatus('error');
+        setEmailStatusMsg(data.message || 'Failed to dispatch email.');
+      }
+    } catch (e: any) {
+      setEmailStatus('error');
+      setEmailStatusMsg(e?.message || 'Network error sending ticket email.');
+    }
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -284,6 +314,47 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
           </div>
         </div>
 
+        {/* ─── EMAIL CONFIRMATION & RESEND BANNER ─── */}
+        <div className="rounded-2xl bg-white/[0.03] border border-white/10 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs no-print shadow-lg">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0">
+              <Mail className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-white font-bold truncate">
+                Entry Pass Sent to Captain
+              </p>
+              <p className="text-zinc-400 font-mono truncate text-[11px]">
+                {ticketData?.email || 'Captain email on file'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {emailStatusMsg && (
+              <span className={`text-[11px] font-medium ${emailStatus === 'error' ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {emailStatusMsg}
+              </span>
+            )}
+            <button
+              onClick={handleResendEmail}
+              disabled={emailStatus === 'sending'}
+              className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-bold transition flex items-center gap-1.5 disabled:opacity-50 text-xs"
+            >
+              {emailStatus === 'sending' ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Sending...
+                </>
+              ) : emailStatus === 'sent' ? (
+                'Ticket Sent ✓'
+              ) : (
+                <>
+                  <Mail className="w-3.5 h-3.5" /> Resend to Email
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
         {/* ══ ENTRY PASS TICKET CARD (REF FOR HTML2CANVAS) ══ */}
         <div
           ref={ticketRef}
@@ -433,13 +504,31 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             Print / Save Pass (PDF)
           </button>
 
+          <button
+            onClick={handleResendEmail}
+            disabled={emailStatus === 'sending'}
+            className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 font-bold text-sm uppercase tracking-wider hover:bg-emerald-500/20 transition disabled:opacity-50"
+          >
+            {emailStatus === 'sending' ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Sending...
+              </>
+            ) : (
+              <>
+                <Mail className="h-4 w-4" />
+                {emailStatus === 'sent' ? 'Sent to Captain ✓' : 'Email Pass'}
+              </>
+            )}
+          </button>
+
           <Link
             href={`/verify/${ticketData?.passId}`}
             target="_blank"
             className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-white/[0.04] border border-white/10 text-white font-bold text-sm uppercase tracking-wider hover:bg-white/[0.08] transition"
           >
             <ExternalLink className="h-4 w-4" />
-            Verify Ticket URL
+            Verify Ticket
           </Link>
         </div>
 

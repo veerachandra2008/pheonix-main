@@ -172,6 +172,13 @@ def create_registration():
         except Exception as sb_err:
             print(f"Supabase free registration insert warning: {sb_err}")
 
+        # ─── DISPATCH DIGITAL ENTRY TICKET VIA BREVO TO CAPTAIN ───
+        try:
+            from email_service import send_ticket_email_async
+            send_ticket_email_async(record)
+        except Exception as em_err:
+            print(f"[WARN] Failed to trigger free registration Brevo ticket email: {em_err}")
+
         return jsonify({
             'success': True,
             'message': 'Registration created successfully!',
@@ -181,6 +188,73 @@ def create_registration():
 
     except Exception as e:
         print(f"Error creating registration: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@registrations_bp.route('/resend-ticket', methods=['POST'])
+def resend_ticket_email():
+    """
+    Resends the tournament entry ticket email for an existing registration pass.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        pass_id = (data.get('passId') or data.get('pass_id') or '').strip()
+        if not pass_id:
+            return jsonify({'success': False, 'message': 'passId is required to resend ticket.'}), 400
+
+        supabase = get_supabase_client()
+        reg_res = supabase.table('registrations').select('*').eq('pass_id', pass_id).execute()
+        if not reg_res.data or len(reg_res.data) == 0:
+            return jsonify({'success': False, 'message': f"No registration found for pass {pass_id}."}), 404
+
+        reg = reg_res.data[0]
+
+        # Fetch roster players
+        players = []
+        try:
+            ros_res = supabase.table('tournament_rosters').select('*').eq('pass_id', pass_id).order('slot').execute()
+            if ros_res.data:
+                players = [
+                    {
+                        'name': r.get('player_name'),
+                        'inGameTag': r.get('in_game_tag'),
+                        'isCaptain': r.get('is_captain'),
+                        'slot': r.get('slot')
+                    }
+                    for r in ros_res.data
+                ]
+        except Exception:
+            pass
+
+        email_payload = {
+            'pass_id': pass_id,
+            'tournament_slug': reg.get('tournament_slug'),
+            'tournament_title': reg.get('tournament_title'),
+            'team_name': reg.get('team_name'),
+            'college': reg.get('college'),
+            'captain_name': reg.get('captain_name'),
+            'email': reg.get('email'),
+            'payment_status': reg.get('payment_status', 'CONFIRMED'),
+            'order_id': reg.get('order_id', 'N/A'),
+            'payment_id': reg.get('payment_id', 'N/A'),
+            'players': players
+        }
+
+        from email_service import send_ticket_email
+        res = send_ticket_email(email_payload)
+        if res.get('success'):
+            return jsonify({
+                'success': True,
+                'message': f"Tournament pass successfully dispatched to {reg.get('email')}!",
+                'messageId': res.get('messageId')
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'message': f"Failed to send email: {res.get('error', 'Service error')}"
+            }), 500
+
+    except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
