@@ -23,6 +23,10 @@ def save_tournament_rosters_to_db(supabase, pass_id, tournament_slug, team_name,
     clean_tournament_slug = tournament_slug.strip().lower()
 
     for idx, p in enumerate(players[:4]):
+        if isinstance(p, str):
+            p = {'name': p, 'slot': idx + 1}
+        elif not isinstance(p, dict):
+            p = {'name': str(p), 'slot': idx + 1}
         slot = int(p.get('slot') or (idx + 1))
         player_name = (p.get('name') or p.get('playerName') or f"Player {slot}").strip()
         in_game_tag = (p.get('inGameTag') or p.get('in_game_tag') or p.get('ign') or f"TAG_{slot}").strip()

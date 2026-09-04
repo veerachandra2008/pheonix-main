@@ -59,11 +59,11 @@ class Config:
 
     @property
     def RAZORPAY_KEY_ID(self):
-        return os.getenv('RAZORPAY_KEY_ID', 'rzp_test_TSI4jkwPuDkSCK').strip().strip('"\'')
+        return os.getenv('RAZORPAY_KEY_ID', '').strip().strip('"\'')
 
     @property
     def RAZORPAY_KEY_SECRET(self):
-        return os.getenv('RAZORPAY_KEY_SECRET', 'O4pTVTBdzERb40uPz7AWdWY4').strip().strip('"\'')
+        return os.getenv('RAZORPAY_KEY_SECRET', '').strip().strip('"\'')
 
     @property
     def RAZORPAY_WEBHOOK_SECRET(self):
@@ -283,11 +283,25 @@ class _RazorpayNativeOrder:
             raise Exception(f"Razorpay API Error ({resp.status_code}): {err_msg}")
         return res_json
 
+class _RazorpayNativePayment:
+    def __init__(self, auth):
+        self.auth = auth
+
+    def fetch(self, payment_id):
+        url = f"https://api.razorpay.com/v1/payments/{payment_id}"
+        resp = requests.get(url, auth=self.auth, timeout=15)
+        res_json = resp.json()
+        if not resp.ok or 'error' in res_json:
+            err_msg = res_json.get('error', {}).get('description') or res_json.get('message') or resp.text
+            raise Exception(f"Razorpay API Error ({resp.status_code}): {err_msg}")
+        return res_json
+
 class RazorpayNativeClient:
     """Lightweight zero-dependency Razorpay Client supporting Python 3.12+ / 3.14+"""
     def __init__(self, auth):
         self.auth = auth
         self.order = _RazorpayNativeOrder(auth)
+        self.payment = _RazorpayNativePayment(auth)
 
 # Initialize Razorpay client helper safely
 def get_razorpay_client():

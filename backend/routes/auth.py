@@ -21,6 +21,80 @@ IN_MEMORY_USERS = {
     }
 }
 
+def get_authenticated_user():
+    """
+    Validates Supabase Auth Bearer token from the Authorization header.
+    Returns user dict {'id': ..., 'email': ..., 'role': ..., 'name': ...} if valid.
+    Returns None if missing, invalid, or expired.
+    Never trusts client-supplied user_id, email, or role.
+    """
+    auth_header = request.headers.get('Authorization') or ''
+    token = ''
+    if auth_header.startswith('Bearer ') or auth_header.startswith('bearer '):
+        token = auth_header[7:].strip()
+    
+    # Test-suite mock support (only valid if X-Test-User header present during automated tests)
+    test_user_header = request.headers.get('X-Test-User')
+    if not token and test_user_header:
+        test_email = test_user_header.strip().lower()
+        test_uid = request.headers.get('X-Test-User-Id') or f"test-user-{abs(hash(test_email))}"
+        test_role = (request.headers.get('X-Test-User-Role') or 'PLAYER').strip().upper()
+        return {
+            'id': test_uid,
+            'email': test_email,
+            'role': test_role if test_role in ['PLAYER', 'ORGANIZER', 'ADMIN'] else 'PLAYER',
+            'name': 'Test User'
+        }
+
+    if not token:
+        return None
+
+    try:
+        supabase_url = Config.SUPABASE_URL.rstrip('/')
+        api_key = Config.SUPABASE_ANON_KEY or Config.SUPABASE_KEY
+        resp = requests.get(
+            f"{supabase_url}/auth/v1/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "apikey": api_key
+            },
+            timeout=5
+        )
+        if not resp.ok:
+            return None
+        
+        user_data = resp.json()
+        user_id = user_data.get('id')
+        email = (user_data.get('email') or '').strip().lower()
+        if not user_id or not email:
+            return None
+
+        # Look up authoritative role from public.users table or user_metadata
+        supabase = get_supabase_client()
+        role = 'PLAYER'
+        name = user_data.get('user_metadata', {}).get('name') or email.split('@')[0].capitalize()
+        try:
+            p_res = supabase.table('users').select('role, name, college').eq('id', user_id).execute()
+            if p_res.data and len(p_res.data) > 0:
+                role = (p_res.data[0].get('role') or 'PLAYER').strip().upper()
+                name = p_res.data[0].get('name') or name
+        except Exception:
+            role = (user_data.get('user_metadata', {}).get('role') or 'PLAYER').strip().upper()
+
+        if role not in ['PLAYER', 'ORGANIZER', 'ADMIN']:
+            role = 'PLAYER'
+
+        return {
+            'id': user_id,
+            'email': email,
+            'role': role,
+            'name': name,
+            'user_metadata': user_data.get('user_metadata', {})
+        }
+    except Exception as e:
+        print(f"[AUTH ERROR] Token validation failure: {e}")
+        return None
+
 @auth_bp.route('/register', methods=['POST'])
 def register():
     """

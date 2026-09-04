@@ -2,7 +2,8 @@ import uuid
 import time
 from flask import Blueprint, request, jsonify
 from config import get_supabase_client
-from routes.payments import IN_MEMORY_REGISTRATIONS, generate_pass_id
+from routes.payments import IN_MEMORY_REGISTRATIONS, generate_pass_id, parse_tournament_fee
+from routes.auth import get_authenticated_user
 from cache import api_cache
 
 registrations_bp = Blueprint('registrations', __name__)
@@ -11,36 +12,77 @@ registrations_bp = Blueprint('registrations', __name__)
 def create_registration():
     """
     Create a registration for Free Tournaments or Direct Entries.
-    Generates a unique pass_id, sets attendance_status='NOT_MARKED', and saves to DB.
+    Enforces authentication and server-authoritative DB fee check.
+    Rejects paid tournaments with 403 Forbidden.
     """
     try:
-        data = request.get_json() or {}
+        user = get_authenticated_user()
+        if not user:
+            return jsonify({'success': False, 'message': 'Authentication required to register for a tournament.'}), 401
+
+        data = request.get_json(silent=True) or {}
         tournament_slug = data.get('tournamentSlug', '')
         tournament_title = data.get('tournamentTitle', tournament_slug)
         team_name = data.get('teamName', 'Team')
-        college = data.get('college', 'University')
-        captain_name = data.get('captainName') or data.get('name', 'Captain')
-        email = data.get('email', '')
+        college = data.get('college') or user.get('college') or 'University'
+        captain_name = data.get('captainName') or data.get('name') or user.get('name') or 'Captain'
+        email = (user.get('email') or data.get('email') or '').strip().lower()
+        user_id = user.get('id')
         tournament_game = data.get('tournamentGame', 'Esports')
         tournament_date = data.get('tournamentDate', 'TBD')
         tournament_format = data.get('tournamentFormat', 'Tournament')
         tournament_region = data.get('tournamentRegion', 'Pan India')
-        tournament_fee = data.get('tournamentFee', 'Free')
         team_id = data.get('teamId') or data.get('team_id') or f"team-{int(time.time())}"
 
         if not tournament_slug or not team_name or not email:
             return jsonify({'success': False, 'message': 'tournamentSlug, teamName, and email are required.'}), 400
 
-        pass_id = generate_pass_id()
+        supabase = get_supabase_client()
 
+        # Fetch tournament authoritatively from DB
+        t_res = supabase.table('tournaments').select('*').eq('slug', tournament_slug).execute()
+        if not t_res.data or len(t_res.data) == 0:
+            try:
+                t_res = supabase.table('tournaments').select('*').eq('id', int(tournament_slug)).execute()
+            except Exception:
+                pass
+
+        if not t_res.data or len(t_res.data) == 0:
+            return jsonify({'success': False, 'message': f"Tournament '{tournament_slug}' not found."}), 404
+
+        tournament = t_res.data[0]
+        actual_slug = tournament.get('slug') or tournament_slug
+
+        # Server-authoritative check: If tournament is PAID, direct registration is forbidden
+        is_paid, amount_rupees, amount_in_paise = parse_tournament_fee(tournament.get('fee'))
+        if is_paid:
+            return jsonify({
+                'success': False,
+                'message': 'This is a paid tournament. Direct registration is not allowed; payment checkout is required.'
+            }), 403
+
+        # Check for existing registration (idempotency)
+        try:
+            existing = supabase.table('registrations').select('*').eq('tournament_slug', actual_slug).eq('email', email).execute()
+            if existing.data and len(existing.data) > 0:
+                return jsonify({
+                    'success': True,
+                    'message': 'Already registered for this tournament.',
+                    'passId': existing.data[0].get('pass_id'),
+                    'already_registered': True
+                }), 200
+        except Exception:
+            pass
+
+        pass_id = generate_pass_id()
         players = data.get('players', [])
         player_emails = data.get('playerEmails', [email])
 
         record = {
             'pass_id': pass_id,
             'passId': pass_id,
-            'tournament_slug': tournament_slug,
-            'tournamentSlug': tournament_slug,
+            'tournament_slug': actual_slug,
+            'tournamentSlug': actual_slug,
             'tournament_title': tournament_title,
             'tournamentTitle': tournament_title,
             'tournament_game': tournament_game,
@@ -51,8 +93,8 @@ def create_registration():
             'tournamentFormat': tournament_format,
             'tournament_region': tournament_region,
             'tournamentRegion': tournament_region,
-            'tournament_fee': tournament_fee,
-            'tournamentFee': tournament_fee,
+            'tournament_fee': 'Free',
+            'tournamentFee': 'Free',
             'team_id': team_id,
             'teamId': team_id,
             'team_name': team_name,
@@ -74,7 +116,8 @@ def create_registration():
             'attended_by': None,
             'attendedBy': None,
             'registered_at': str(int(time.time())),
-            'registeredAt': str(int(time.time()))
+            'registeredAt': str(int(time.time())),
+            'user_id': user_id
         }
 
         # Save to memory fallback
@@ -82,10 +125,9 @@ def create_registration():
 
         # Save to Supabase
         try:
-            supabase = get_supabase_client()
             reg_payload = {
                 'pass_id': pass_id,
-                'tournament_slug': tournament_slug,
+                'tournament_slug': actual_slug,
                 'tournament_title': tournament_title,
                 'team_id': team_id,
                 'team_name': team_name,
@@ -93,7 +135,15 @@ def create_registration():
                 'captain_name': captain_name,
                 'email': email,
                 'payment_status': 'FREE ENTRY',
+                'order_id': 'FREE',
+                'payment_id': 'FREE',
             }
+            if user_id:
+                try:
+                    uuid.UUID(str(user_id))
+                    reg_payload['user_id'] = str(user_id)
+                except Exception:
+                    pass
             try:
                 supabase.table('registrations').insert({**reg_payload, 'attendance_status': 'NOT_MARKED'}).execute()
             except Exception:
@@ -102,7 +152,7 @@ def create_registration():
             # Insert initial event_attendance row
             att_payload = {
                 'pass_id': pass_id,
-                'tournament_slug': tournament_slug,
+                'tournament_slug': actual_slug,
                 'team_name': team_name,
                 'captain_name': captain_name,
                 'college': college,
@@ -115,9 +165,9 @@ def create_registration():
             else:
                 supabase.table('event_attendance').insert(att_payload).execute()
 
-            # Save 4 players to tournament_rosters table
+            # Save players to tournament_rosters table
             from routes.rosters import save_tournament_rosters_to_db
-            save_tournament_rosters_to_db(supabase, pass_id, tournament_slug, team_name, college, players)
+            save_tournament_rosters_to_db(supabase, pass_id, actual_slug, team_name, college, players)
 
         except Exception as sb_err:
             print(f"Supabase free registration insert warning: {sb_err}")
@@ -159,10 +209,14 @@ def get_all_registrations():
             if clean_slug:
                 q = q.eq('tournament_slug', clean_slug)
             
-            res = q.order('created_at', desc=True).execute() if hasattr(q, 'order') else q.execute()
+            res = q.order('registered_at', desc=True).execute() if hasattr(q, 'order') else q.execute()
             supabase_records = res.data or []
         except Exception as sb_err:
-            print(f"Supabase registrations query warning: {sb_err}")
+            try:
+                res = q.execute()
+                supabase_records = res.data or []
+            except Exception as sb_err2:
+                print(f"Supabase registrations query warning: {sb_err2}")
             
         memory_records = list(IN_MEMORY_REGISTRATIONS.values())
         

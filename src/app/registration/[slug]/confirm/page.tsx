@@ -174,8 +174,21 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
     }
 
     setErrorMessage('');
-    const numericAmount = parseFeeAmount(selection.tournamentFee);
     const apiBase = getApiBaseUrl();
+
+    // Authenticate user via Supabase session
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session || !session.access_token) {
+      router.push(`/login?redirect=/registration/${slug}/confirm`);
+      return;
+    }
+    const token = session.access_token;
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    };
+
+    const numericAmount = parseFeeAmount(selection.tournamentFee);
 
     // ─── CASE A: FREE TOURNAMENT (Amount = 0) ───
     if (numericAmount === 0) {
@@ -185,7 +198,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
       try {
         const res = await fetch(`${apiBase}/registrations/create`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders,
           body: JSON.stringify({
             tournamentSlug: selection.tournamentSlug,
             tournamentTitle: selection.tournamentTitle,
@@ -203,45 +216,27 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
           }),
         });
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.passId) {
-            createdPassId = data.passId;
-          }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setErrorMessage(data.message || 'Registration failed.');
+          setPaymentStep('idle');
+          return;
+        }
+
+        if (data.success && data.passId) {
+          createdPassId = data.passId;
         }
       } catch (err: any) {
-        console.warn('Backend pass generation notice:', err);
+        setErrorMessage(err.message || 'Network error connecting to registration server.');
+        setPaymentStep('idle');
+        return;
       }
 
       if (!createdPassId) {
-        createdPassId = `XPH-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+        setErrorMessage('Failed to generate registration pass.');
+        setPaymentStep('idle');
+        return;
       }
-
-      try {
-        // Obtain authenticated user from real Supabase session (single source of truth)
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
-        const authUserId = currentSession?.user?.id;
-        const regEmail = currentSession?.user?.email || email;
-
-        await saveRegistration({
-          tournamentSlug: selection.tournamentSlug,
-          tournamentTitle: selection.tournamentTitle,
-          tournamentGame: selection.tournamentGame,
-          tournamentPrize: selection.tournamentPrize || 'Verified Entry',
-          tournamentDate: selection.tournamentDate || 'Soon',
-          tournamentFormat: selection.tournamentFormat || 'Tournament',
-          tournamentRegion: selection.tournamentRegion || 'Pan India',
-          tournamentFee: selection.tournamentFee || 'Free',
-          teamId: selection.teamSlug || 'team-1',
-          teamName: selection.teamName,
-          college: selection.college,
-          captainName: selection.captainName,
-          email: regEmail,
-          passId: createdPassId,
-          registeredAt: new Date().toISOString(),
-          userId: authUserId,
-        });
-      } catch {}
 
       try {
         sessionStorage.setItem(
@@ -260,21 +255,21 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
 
     // ─── CASE B: PAID TOURNAMENT (Amount > 0) ───
     try {
-      // Step 1: Request real Razorpay order from backend
+      // Step 1: Request real Razorpay order from backend (server-authoritative amount)
       setPaymentStep('creating_order');
       let orderRes: Response;
 
       try {
         orderRes = await fetch(`${apiBase}/payments/create-order`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders,
           body: JSON.stringify({
-            amount: numericAmount,
             name: selection.captainName,
             email,
             teamName: selection.teamName,
             tournamentSlug: selection.tournamentSlug,
             college: selection.college,
+            players: selection.players || [],
           }),
         });
       } catch (fetchErr: any) {
@@ -330,13 +325,13 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
             return;
           }
 
-          // Step 4: Backend HMAC-SHA256 Payment Verification
+          // Step 4: Backend HMAC-SHA256 Payment Verification & Server-Authoritative Registration
           setPaymentStep('verifying_payment');
 
           try {
             const verifyRes = await fetch(`${apiBase}/payments/verify-payment`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: authHeaders,
               body: JSON.stringify({
                 razorpay_order_id: response.razorpay_order_id || orderData.order_id,
                 razorpay_payment_id: response.razorpay_payment_id,
@@ -354,7 +349,6 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
                 email,
                 players: selection.players || [],
                 playerEmails: selection.playerEmails || [email],
-                amount: numericAmount,
               }),
             });
 
@@ -377,30 +371,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
 
             const verifiedPassId = verifyData.passId;
 
-            // Step 5: Save verified registration ONLY AFTER backend verification succeeds
             setPaymentStep('generating_pass');
-            try {
-              await saveRegistration({
-                tournamentSlug: selection.tournamentSlug,
-                tournamentTitle: selection.tournamentTitle,
-                tournamentGame: selection.tournamentGame || 'Esports',
-                tournamentPrize: selection.tournamentPrize || 'Verified Entry',
-                tournamentDate: selection.tournamentDate || 'Soon',
-                tournamentFormat: selection.tournamentFormat || 'Tournament',
-                tournamentRegion: selection.tournamentRegion || 'Pan India',
-                tournamentFee: selection.tournamentFee || 'Paid',
-                teamId: selection.teamSlug || 'team-1',
-                teamName: selection.teamName,
-                college: selection.college,
-                captainName: selection.captainName,
-                email,
-                passId: verifiedPassId,
-                registeredAt: new Date().toISOString(),
-              });
-            } catch (saveErr) {
-              console.warn('Local registration cache update notice:', saveErr);
-            }
-
             try {
               sessionStorage.setItem(
                 'reg_selection',
