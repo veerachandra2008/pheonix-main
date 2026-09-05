@@ -397,34 +397,47 @@ export const flaskApi = {
     const organizersMap: Record<string, any> = {};
 
     try {
-      // 1. Parallel ultra-fast query on organizer_applications and users with targeted lightweight projections
+      // 1. Parallel ultra-fast query on organizer_applications and users with verified schema columns
       const [appsRes, usersRes] = await Promise.all([
         supabase
           .from('organizer_applications')
-          .select('id, email, host_name, name, applicant_name, college, status, application_status, tag')
-          .order('applied_at', { ascending: false }),
+          .select('id, email, host_name, college, preferred_game, experience, details, status, applied_at'),
         supabase
           .from('users')
-          .select('id, email, name, host_name, college, role, tag')
-          .in('role', ['ORGANIZER', 'ADMIN', 'organizer', 'admin']),
+          .select('id, email, name, college, role, tag, team, created_at')
+          .in('role', ['ORGANIZER', 'ADMIN']),
       ]);
 
       const appsData = appsRes.data || [];
-      const usersData = usersRes.data || [];
+      let usersData = usersRes.data || [];
 
-      // 2. Map strictly approved organizers
+      // Fallback if Postgres enum error occurred
+      if (!usersData.length && usersRes.error) {
+        try {
+          const fallbackUsers = await supabase
+            .from('users')
+            .select('id, email, name, college, role, tag, team, created_at');
+          usersData = (fallbackUsers.data || []).filter((u: any) => {
+            const r = (u.role || '').toUpperCase();
+            return r === 'ORGANIZER' || r === 'ADMIN';
+          });
+        } catch {}
+      }
+
+      // 2. Map strictly approved organizers from applications
       for (const a of appsData) {
-        const status = (a.status || a.application_status || '').toLowerCase().trim();
+        const status = (a.status || '').toLowerCase().trim();
         const email = (a.email || '').toLowerCase().trim();
         if (email && (status === 'approved' || status === 'verified')) {
           organizersMap[email] = {
             ...a,
             id: a.id,
             email: a.email,
-            name: a.host_name || a.name || a.applicant_name || email.split('@')[0],
+            name: a.host_name || email.split('@')[0],
+            host_name: a.host_name || email.split('@')[0],
             college: a.college || 'Campus Esports',
             role: 'ORGANIZER',
-            tag: a.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+            tag: `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
             status: 'APPROVED',
           };
         }
@@ -439,7 +452,8 @@ export const flaskApi = {
             organizersMap[email] = {
               id: u.id,
               email: u.email,
-              name: u.name || u.host_name || email.split('@')[0],
+              name: u.name || email.split('@')[0],
+              host_name: u.name || email.split('@')[0],
               college: u.college || 'Campus Esports',
               role: role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
               tag: u.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
