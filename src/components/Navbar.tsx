@@ -197,6 +197,11 @@ export const Navbar = () => {
               key={link.href}
               href={link.href}
               prefetch={true}
+              onMouseEnter={() => {
+                if (link.href === '/players') {
+                  import('@/app/players/page').then((m) => m.preloadPlayers?.()).catch(() => {});
+                }
+              }}
               className={`nav-menu-link relative px-4 py-2 text-[11px] sm:text-xs font-black uppercase tracking-[0.16em] transition-all duration-300 rounded-full flex items-center gap-1.5 ${
                 isActive
                   ? 'text-zinc-950 bg-emerald-400 shadow-[0_0_20px_rgba(52,211,153,0.5)] font-bold'
