@@ -74,7 +74,7 @@ export default function AdminApplicationsMasterPage() {
   const loadAllApplications = async (isManual: any = false) => {
     if (isManual === true) setLoading(true);
     try {
-      const res = await flaskApi.getApplications();
+      const res = await flaskApi.getApplications(true);
       if (res.success && res.data) {
         setApplicationsData(res.data);
       }
@@ -138,7 +138,7 @@ export default function AdminApplicationsMasterPage() {
             }
           }
         } catch {}
-        await loadAllApplications();
+        await loadAllApplications(true);
       } else {
         alert(res.message || 'Action failed.');
       }
@@ -156,7 +156,7 @@ export default function AdminApplicationsMasterPage() {
     try {
       const res = await flaskApi.handleTeamAction({ slug: team.slug, name: team.name }, action);
       if (res.success) {
-        await loadAllApplications();
+        await loadAllApplications(true);
       } else {
         alert(res.message || 'Action failed.');
       }
@@ -174,7 +174,7 @@ export default function AdminApplicationsMasterPage() {
     try {
       const res = await flaskApi.handleCollegeAction({ slug: college.slug, name: college.name }, action);
       if (res.success) {
-        await loadAllApplications();
+        await loadAllApplications(true);
       } else {
         alert(res.message || 'Action failed.');
       }
@@ -191,7 +191,7 @@ export default function AdminApplicationsMasterPage() {
     try {
       const res = await flaskApi.handleTournamentAction(tournament.slug, action);
       if (res.success) {
-        await loadAllApplications();
+        await loadAllApplications(true);
       } else {
         alert(res.message || 'Action failed.');
       }
@@ -203,23 +203,37 @@ export default function AdminApplicationsMasterPage() {
     }
   };
 
+  // Helper to extract clean normalized status ('pending' | 'approved' | 'rejected') across schemas and cases
+  const getItemStatus = (item: any, category: string): 'pending' | 'approved' | 'rejected' => {
+    if (!item) return 'approved';
+    if (category === 'organizers') {
+      const raw = (item.status || item.verification_status || item.verificationStatus || 'pending').toString().toLowerCase().trim();
+      if (raw === 'approved' || raw === 'verified') return 'approved';
+      if (raw === 'rejected') return 'rejected';
+      return 'pending';
+    } else if (category === 'teams' || category === 'colleges') {
+      const raw = (item.verification_status || item.verificationStatus || (item.verified ? 'approved' : (item.status || 'pending'))).toString().toLowerCase().trim();
+      if (raw === 'approved' || raw === 'verified') return 'approved';
+      if (raw === 'rejected') return 'rejected';
+      return 'pending';
+    } else if (category === 'tournaments') {
+      const raw = (item.status || item.verification_status || 'pending').toString().toLowerCase().trim();
+      if (raw === 'pending') return 'pending';
+      if (raw === 'rejected') return 'rejected';
+      return 'approved';
+    }
+    return 'approved';
+  };
+
   // Filter Items based on active category, status, and search
   const getCurrentItems = () => {
     const list = applicationsData[activeCategory] || [];
     return list.filter((item: any) => {
-      let status = 'approved';
-      if (activeCategory === 'organizers') {
-        status = item.status || 'pending';
-      } else if (activeCategory === 'teams' || activeCategory === 'colleges') {
-        status = item.verification_status || item.verificationStatus || (item.verified ? 'approved' : 'pending');
-      } else if (activeCategory === 'tournaments') {
-        status = (item.status || '').toLowerCase() === 'pending' ? 'pending' : (item.status || '').toLowerCase() === 'rejected' ? 'rejected' : 'approved';
-      }
-
+      const status = getItemStatus(item, activeCategory);
       const matchesStatus = statusFilter === 'all' || status === statusFilter;
       
       const searchContent = JSON.stringify(item).toLowerCase();
-      const matchesSearch = !searchQuery || searchContent.includes(searchQuery.toLowerCase());
+      const matchesSearch = !searchQuery || searchContent.includes(searchQuery.toLowerCase().trim());
 
       return matchesStatus && matchesSearch;
     });
@@ -341,19 +355,31 @@ export default function AdminApplicationsMasterPage() {
           />
         </div>
         <div className="flex bg-white/5 border border-white/10 p-1 rounded-xl">
-          {(['pending', 'approved', 'rejected', 'all'] as const).map((status) => (
-            <button
-              key={status}
-              onClick={() => setStatusFilter(status)}
-              className={`flex-1 py-2 px-3 text-[10px] font-black uppercase tracking-widest transition rounded-lg cursor-pointer ${
-                statusFilter === status
-                  ? 'bg-rose-500 text-white shadow'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {status}
-            </button>
-          ))}
+          {(['pending', 'approved', 'rejected', 'all'] as const).map((status) => {
+            const currentCatList = applicationsData[activeCategory] || [];
+            const count = status === 'all' 
+              ? currentCatList.length 
+              : currentCatList.filter((it: any) => getItemStatus(it, activeCategory) === status).length;
+
+            return (
+              <button
+                key={status}
+                onClick={() => setStatusFilter(status)}
+                className={`flex-1 py-2 px-3 text-[10px] font-black uppercase tracking-widest transition rounded-lg cursor-pointer flex items-center justify-center gap-1.5 ${
+                  statusFilter === status
+                    ? 'bg-rose-500 text-white shadow'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>{status}</span>
+                <span className={`px-1.5 py-0.5 text-[9px] font-mono rounded-full ${
+                  statusFilter === status ? 'bg-black/30 text-white' : 'bg-white/10 text-slate-400'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </section>
 
@@ -373,16 +399,8 @@ export default function AdminApplicationsMasterPage() {
         ) : (
           <AnimatePresence mode="popLayout">
             {items.map((item: any, idx: number) => {
-              // Extract status for item
-              let status = 'approved';
-              if (activeCategory === 'organizers') {
-                status = item.status || 'pending';
-              } else if (activeCategory === 'teams' || activeCategory === 'colleges') {
-                status = item.verification_status || item.verificationStatus || (item.verified ? 'approved' : 'pending');
-              } else if (activeCategory === 'tournaments') {
-                status = (item.status || '').toLowerCase() === 'pending' ? 'pending' : (item.status || '').toLowerCase() === 'rejected' ? 'rejected' : 'approved';
-              }
-
+              // Extract normalized status for item
+              const status = getItemStatus(item, activeCategory);
               const isPending = status === 'pending';
               const identifier = item.email || item.slug || item.id || `item_${idx}`;
               const isActioning = actionLoading === identifier;

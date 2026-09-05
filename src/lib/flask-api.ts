@@ -285,15 +285,37 @@ export const flaskApi = {
         supabase.from('tournaments').select('*'),
       ]);
 
-      const orgs = orgsRes.data || [];
-      const teams = teamsRes.data || [];
-      const colleges = collegesRes.data || [];
-      const tourns = tournsRes.data || [];
+      let orgs = orgsRes.data || [];
+      let teams = teamsRes.data || [];
+      let colleges = collegesRes.data || [];
+      let tourns = tournsRes.data || [];
 
-      const pendingOrgs = orgs.filter((o) => (o.status || 'pending').toLowerCase() === 'pending').length;
-      const pendingTeams = teams.filter((t) => (t.verification_status || t.verificationStatus || (t.verified ? 'approved' : 'pending')) === 'pending').length;
-      const pendingColleges = colleges.filter((c) => (c.verification_status || c.verificationStatus || (c.verified ? 'approved' : 'pending')) === 'pending').length;
-      const pendingTourns = tourns.filter((t) => (t.status || '').toLowerCase() === 'pending').length;
+      // Resilient fallback: If client query was blocked by RLS or empty, fetch from Next.js server endpoint
+      if ((!orgs.length || !teams.length || !colleges.length || !tourns.length) && typeof window !== 'undefined') {
+        try {
+          const apiRes = await fetchWithTimeout('/api/applications', {}, 2500);
+          if (apiRes.ok) {
+            const apiJson = await apiRes.json();
+            if (apiJson.data) {
+              if (!orgs.length && apiJson.data.organizers?.length) orgs = apiJson.data.organizers;
+              if (!teams.length && apiJson.data.teams?.length) teams = apiJson.data.teams;
+              if (!colleges.length && apiJson.data.colleges?.length) colleges = apiJson.data.colleges;
+              if (!tourns.length && apiJson.data.tournaments?.length) tourns = apiJson.data.tournaments;
+            }
+          }
+        } catch {}
+      }
+
+      const pendingOrgs = orgs.filter((o) => (o.status || 'pending').toString().toLowerCase().trim() === 'pending').length;
+      const pendingTeams = teams.filter((t) => {
+        const s = (t.verification_status || t.verificationStatus || (t.verified ? 'approved' : (t.status || 'pending'))).toString().toLowerCase().trim();
+        return s === 'pending';
+      }).length;
+      const pendingColleges = colleges.filter((c) => {
+        const s = (c.verification_status || c.verificationStatus || (c.verified ? 'approved' : (c.status || 'pending'))).toString().toLowerCase().trim();
+        return s === 'pending';
+      }).length;
+      const pendingTourns = tourns.filter((t) => (t.status || 'pending').toString().toLowerCase().trim() === 'pending').length;
 
       const payload = {
         organizers: orgs,

@@ -6,7 +6,7 @@ export default function SignupPage() {
   const [formData, setFormData] = useState({ name: '', tag: '', bio: '' });
   const router = useRouter();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = formData.name.trim();
     const cleanTag = formData.tag.trim();
