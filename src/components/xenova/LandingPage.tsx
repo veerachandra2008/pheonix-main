@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Image from 'next/image';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, useScroll, useSpring } from 'framer-motion';
 import {
@@ -102,6 +101,24 @@ export default function LandingPage() {
   const router = useRouter();
   const [selectedGameFilter, setSelectedGameFilter] = useState('ALL');
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const heroVideoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = heroVideoRef.current;
+    if (!video) return;
+    video.play().catch(() => {});
+    const handlePause = () => {
+      video.play().catch(() => {});
+    };
+    video.addEventListener('pause', handlePause);
+    video.addEventListener('stalled', handlePause);
+    video.addEventListener('waiting', handlePause);
+    return () => {
+      video.removeEventListener('pause', handlePause);
+      video.removeEventListener('stalled', handlePause);
+      video.removeEventListener('waiting', handlePause);
+    };
+  }, []);
 
   // Top Scroll Progress Line
   const { scrollYProgress } = useScroll();
@@ -152,41 +169,25 @@ export default function LandingPage() {
         
         {/* ═══════════════ 1. SPACIOUS CINEMATIC HERO ═══════════════ */}
         <section className="relative min-h-screen flex items-center justify-start overflow-hidden py-28 md:py-36 pl-6 sm:pl-16 lg:pl-24 pr-6">
-          {/* Background Image Layer - Themed Esports Vignette & Atmosphere Overlays */}
+          {/* Background Video Layer - Black Vignette Overlay */}
           <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-            <Image
-              src="/image.png"
-              alt="XENOVA Collegiate Esports Arena"
-              fill
-              priority
-              quality={95}
-              sizes="100vw"
-              className="w-full h-full object-cover object-[center_35%] scale-[1.02] filter brightness-[0.80] contrast-[1.15] saturate-[1.25] transform-gpu will-change-transform"
-            />
-            {/* Left Vignette for High-Contrast Text Legibility */}
-            <div className="absolute inset-0 bg-gradient-to-r from-black via-black/85 via-45% to-black/20 md:to-transparent" />
-            
-            {/* Top Vignette blending into navbar */}
-            <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-black/90" />
-            
-            {/* Ambient Cyberpunk Emerald & Cyan Tournament Arena Lighting over Battle Scene */}
-            <div
-              className="absolute inset-0 opacity-70 mix-blend-screen"
-              style={{
-                background: 'radial-gradient(circle at 72% 48%, rgba(16, 185, 129, 0.25) 0%, rgba(6, 182, 212, 0.12) 30%, transparent 65%)'
-              }}
-            />
-
-            {/* Subtle Combat Muzzle Flare Warmth Accent */}
-            <div
-              className="absolute inset-0 opacity-40 mix-blend-screen"
-              style={{
-                background: 'radial-gradient(circle at 62% 46%, rgba(245, 158, 11, 0.18) 0%, transparent 40%)'
-              }}
-            />
-
-            {/* Tactical Grid Overlay for Cyberpunk Varsity Aesthetic */}
-            <div className="absolute inset-0 bg-[linear-gradient(to_right,#10b9810a_1px,transparent_1px),linear-gradient(to_bottom,#10b9810a_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_50%,#000_60%,transparent_100%)] opacity-35" />
+            <video
+              ref={heroVideoRef}
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="auto"
+              disablePictureInPicture
+              disableRemotePlayback
+              poster="/image.png"
+              className="w-full h-full object-cover opacity-95 md:opacity-100 transform-gpu will-change-transform"
+            >
+              <source src="/video.mp4" type="video/mp4" />
+            </video>
+            {/* Pure High-Clarity Backdrop Vignette Overlays */}
+            <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/25 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/70" />
           </div>
 
           {/* Left-Aligned Hero Content - Larger Scale & Spacing */}
