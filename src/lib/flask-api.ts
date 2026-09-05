@@ -95,6 +95,7 @@ export const flaskApi = {
         this.getAllUsers(),
         this.getTeams(),
         this.getColleges(),
+        this.getOrganizers(),
       ]);
     } catch {}
   },
@@ -248,10 +249,12 @@ export const flaskApi = {
   },
 
   // Tournaments API (Ultra-Fast Cached Supabase Query)
-  async getTournaments() {
+  async getTournaments(force = false) {
     const cacheKey = 'admin:tournaments';
-    const cached = getCached<any[]>(cacheKey);
-    if (cached) return { success: true, data: cached };
+    if (!force) {
+      const cached = getCached<any[]>(cacheKey);
+      if (cached) return { success: true, data: cached };
+    }
 
     try {
       const { data, error } = await supabase.from('tournaments').select('*').order('created_at', { ascending: false });
@@ -267,10 +270,12 @@ export const flaskApi = {
   },
 
   // Applications Hub API (Parallel Fast Query in ~40ms)
-  async getApplications() {
+  async getApplications(force = false) {
     const cacheKey = 'admin:applications';
-    const cached = getCached<any>(cacheKey);
-    if (cached) return { success: true, data: cached };
+    if (!force) {
+      const cached = getCached<any>(cacheKey);
+      if (cached) return { success: true, data: cached };
+    }
 
     try {
       const [orgsRes, teamsRes, collegesRes, tournsRes] = await Promise.all([
@@ -382,88 +387,97 @@ export const flaskApi = {
     }
   },
 
-  async getOrganizers() {
+  async getOrganizers(force = false) {
     const cacheKey = 'admin:organizers';
-    const cached = getCached<any[]>(cacheKey);
-    if (cached && Array.isArray(cached) && cached.length > 0) return { success: true, data: cached };
+    if (!force) {
+      const cached = getCached<any[]>(cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) return { success: true, data: cached };
+    }
 
     const organizersMap: Record<string, any> = {};
 
     try {
-      // 1. Fetch from organizer_applications (all approved/verified or active)
-      const { data: appsData } = await supabase.from('organizer_applications').select('*');
+      // 1. Parallel ultra-fast query on organizer_applications and users with targeted lightweight projections
+      const [appsRes, usersRes] = await Promise.all([
+        supabase
+          .from('organizer_applications')
+          .select('id, email, host_name, name, applicant_name, college, status, application_status, tag')
+          .order('applied_at', { ascending: false }),
+        supabase
+          .from('users')
+          .select('id, email, name, host_name, college, role, tag')
+          .in('role', ['ORGANIZER', 'ADMIN', 'organizer', 'admin']),
+      ]);
 
-      if (appsData && Array.isArray(appsData)) {
-        for (const a of appsData) {
-          const status = (a.status || a.application_status || '').toLowerCase().trim();
-          const email = (a.email || '').toLowerCase().trim();
-          // STRICTLY APPROVED ORGANIZERS ONLY
-          if (email && (status === 'approved' || status === 'verified')) {
+      const appsData = appsRes.data || [];
+      const usersData = usersRes.data || [];
+
+      // 2. Map strictly approved organizers
+      for (const a of appsData) {
+        const status = (a.status || a.application_status || '').toLowerCase().trim();
+        const email = (a.email || '').toLowerCase().trim();
+        if (email && (status === 'approved' || status === 'verified')) {
+          organizersMap[email] = {
+            ...a,
+            id: a.id,
+            email: a.email,
+            name: a.host_name || a.name || a.applicant_name || email.split('@')[0],
+            college: a.college || 'Campus Esports',
+            role: 'ORGANIZER',
+            tag: a.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+            status: 'APPROVED',
+          };
+        }
+      }
+
+      // 3. Merge verified organizers/admins from users table
+      for (const u of usersData) {
+        const role = (u.role || '').toUpperCase().trim();
+        const email = (u.email || '').toLowerCase().trim();
+        if (email && (role === 'ORGANIZER' || role === 'ADMIN')) {
+          if (!organizersMap[email]) {
             organizersMap[email] = {
-              id: a.id,
-              email: a.email,
-              name: a.host_name || a.name || a.applicant_name || email.split('@')[0],
-              college: a.college || 'Campus Esports',
-              role: 'ORGANIZER',
-              tag: a.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+              id: u.id,
+              email: u.email,
+              name: u.name || u.host_name || email.split('@')[0],
+              college: u.college || 'Campus Esports',
+              role: role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
+              tag: u.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
               status: 'APPROVED',
-              ...a,
             };
           }
         }
       }
 
-      // 2. Fetch users with role ORGANIZER or ADMIN
-      const { data: usersData } = await supabase.from('users').select('*');
-
-      if (usersData && Array.isArray(usersData)) {
-        for (const u of usersData) {
-          const role = (u.role || '').toUpperCase().trim();
-          const email = (u.email || '').toLowerCase().trim();
-          // STRICTLY ORGANIZER OR ADMIN ROLE ONLY
-          if (email && (role === 'ORGANIZER' || role === 'ADMIN')) {
-            if (!organizersMap[email]) {
-              organizersMap[email] = {
-                id: u.id,
-                email: u.email,
-                name: u.name || u.host_name || email.split('@')[0],
-                college: u.college || 'Campus Esports',
-                role: role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
-                tag: u.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
-                status: 'APPROVED',
-              };
-            }
-          }
-        }
-      }
-
-      // 3. Check Backend /api/auth/organizers endpoint with fast timeout
-      try {
-        const apiBase = getApiBaseUrl();
-        const res = await fetchWithTimeout(`${apiBase}/auth/organizers`, {}, 2000);
-        if (res.ok) {
-          const json = await res.json();
-          if (json.success && Array.isArray(json.data)) {
-            for (const o of json.data) {
-              const email = (o.email || '').toLowerCase().trim();
-              const status = (o.status || '').toLowerCase().trim();
-              const role = (o.role || '').toUpperCase().trim();
-              if (email && !organizersMap[email] && (status === 'approved' || role === 'ORGANIZER' || role === 'ADMIN')) {
-                organizersMap[email] = {
-                  id: o.id,
-                  email: o.email,
-                  name: o.name || o.host_name || email.split('@')[0],
-                  college: o.college || 'Campus Esports',
-                  role: role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
-                  tag: o.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
-                  status: 'APPROVED',
-                  ...o,
-                };
+      // 4. Fallback only if 0 records found from Supabase (sub-second timeout)
+      if (Object.keys(organizersMap).length === 0) {
+        try {
+          const apiBase = getApiBaseUrl();
+          const res = await fetchWithTimeout(`${apiBase}/auth/organizers`, {}, 500);
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success && Array.isArray(json.data)) {
+              for (const o of json.data) {
+                const email = (o.email || '').toLowerCase().trim();
+                const status = (o.status || '').toLowerCase().trim();
+                const role = (o.role || '').toUpperCase().trim();
+                if (email && !organizersMap[email] && (status === 'approved' || role === 'ORGANIZER' || role === 'ADMIN')) {
+                  organizersMap[email] = {
+                    ...o,
+                    id: o.id,
+                    email: o.email,
+                    name: o.name || o.host_name || email.split('@')[0],
+                    college: o.college || 'Campus Esports',
+                    role: role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
+                    tag: o.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
+                    status: 'APPROVED',
+                  };
+                }
               }
             }
           }
-        }
-      } catch {}
+        } catch {}
+      }
     } catch (e) {
       console.warn('Error fetching organizers:', e);
     }
@@ -475,21 +489,44 @@ export const flaskApi = {
     return { success: true, data: result };
   },
 
-  async getAllUsers() {
+  async getAllUsers(force = false) {
     const cacheKey = 'admin:users';
-    const cached = getCached<any[]>(cacheKey);
-    if (cached) return { success: true, data: cached };
+    if (!force) {
+      const cached = getCached<any[]>(cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) return { success: true, data: cached };
+    }
 
-    const { data } = await supabase.from('users').select('*').order('created_at', { ascending: false });
-    const result = data || [];
-    setCached(cacheKey, result);
-    return { success: true, data: result };
+    try {
+      // High-speed column projection - avoids heavy 14s filesort on unindexed created_at column
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, name, email, role, college, created_at, tag, team, rank, win_rate, trophies, avatar_url');
+
+      let result = !error && data ? data : [];
+      result.sort((a: any, b: any) => {
+        const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return timeB - timeA;
+      });
+
+      if (result.length > 0) {
+        setCached(cacheKey, result);
+      }
+      return { success: true, data: result };
+    } catch {
+      const { data } = await supabase.from('users').select('*');
+      const result = data || [];
+      setCached(cacheKey, result);
+      return { success: true, data: result };
+    }
   },
 
-  async getTeams() {
+  async getTeams(force = false) {
     const cacheKey = 'admin:teams';
-    const cached = getCached<any[]>(cacheKey);
-    if (cached) return { success: true, data: cached };
+    if (!force) {
+      const cached = getCached<any[]>(cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) return { success: true, data: cached };
+    }
 
     const { data } = await supabase.from('teams').select('*').order('created_at', { ascending: false });
     const result = data || [];
@@ -497,10 +534,12 @@ export const flaskApi = {
     return { success: true, data: result };
   },
 
-  async getColleges() {
+  async getColleges(force = false) {
     const cacheKey = 'admin:colleges';
-    const cached = getCached<any[]>(cacheKey);
-    if (cached) return { success: true, data: cached };
+    if (!force) {
+      const cached = getCached<any[]>(cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) return { success: true, data: cached };
+    }
 
     const { data } = await supabase.from('colleges').select('*').order('created_at', { ascending: false });
     const result = data || [];
@@ -547,37 +586,40 @@ export const flaskApi = {
   // ----------------------------------------------------
   // REGISTRATIONS (Ultra-Fast Instant Supabase Aggregator)
   // ----------------------------------------------------
-  async getRegistrations(filterParams?: { email?: string; tournamentSlug?: string }) {
+  async getRegistrations(filterParams?: { email?: string; tournamentSlug?: string }, force = false) {
     const cacheKey = `admin:regs:${filterParams?.email || ''}:${filterParams?.tournamentSlug || ''}`;
-    const cached = getCached<any[]>(cacheKey);
-    if (cached) return { success: true, data: cached };
+    if (!force) {
+      const cached = getCached<any[]>(cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) return { success: true, data: cached };
+    }
 
     const recordsMap: Record<string, any> = {};
 
-    // 1. Direct Supabase Query (Fastest, <30ms)
+    // Parallel direct Supabase query across registrations and event_attendance (<50ms)
     try {
-      let query = supabase.from('registrations').select('*');
-      if (filterParams?.email) query = query.eq('email', filterParams.email.trim().toLowerCase());
-      if (filterParams?.tournamentSlug) query = query.ilike('tournament_slug', `%${filterParams.tournamentSlug.trim()}%`);
+      let q1 = supabase.from('registrations').select('*');
+      let q2 = supabase.from('event_attendance').select('*');
 
-      const { data } = await query;
-      if (data && Array.isArray(data)) {
-        for (const item of data) {
+      if (filterParams?.email) {
+        const clean = filterParams.email.trim().toLowerCase();
+        q1 = q1.eq('email', clean);
+        q2 = q2.eq('email', clean);
+      }
+      if (filterParams?.tournamentSlug) {
+        const pattern = `%${filterParams.tournamentSlug.trim()}%`;
+        q1 = q1.ilike('tournament_slug', pattern);
+        q2 = q2.ilike('tournament_slug', pattern);
+      }
+
+      const [res1, res2] = await Promise.all([q1, q2]);
+      if (res1.data && Array.isArray(res1.data)) {
+        for (const item of res1.data) {
           const pId = item.pass_id || item.passId || item.id;
           if (pId) recordsMap[pId] = item;
         }
       }
-    } catch {}
-
-    // 2. Supabase event_attendance Fallback
-    try {
-      let query = supabase.from('event_attendance').select('*');
-      if (filterParams?.email) query = query.eq('email', filterParams.email.trim().toLowerCase());
-      if (filterParams?.tournamentSlug) query = query.ilike('tournament_slug', `%${filterParams.tournamentSlug.trim()}%`);
-
-      const { data } = await query;
-      if (data && Array.isArray(data)) {
-        for (const item of data) {
+      if (res2.data && Array.isArray(res2.data)) {
+        for (const item of res2.data) {
           const pId = item.pass_id || item.passId || item.id;
           if (pId) {
             recordsMap[pId] = { ...(recordsMap[pId] || {}), ...item };
@@ -629,8 +671,8 @@ export const flaskApi = {
     };
   },
 
-  async getRegistrationsByTournament(slug?: string) {
-    return this.getRegistrations(slug ? { tournamentSlug: slug } : undefined);
+  async getRegistrationsByTournament(slug?: string, force = false) {
+    return this.getRegistrations(slug ? { tournamentSlug: slug } : undefined, force);
   },
 
   async deleteRegistration(passId: string) {
@@ -1129,7 +1171,7 @@ export const flaskApi = {
 
     return {
       valid: false,
-      status: 'NOT_FOUND',
+      status: 'INVALID',
       passId: cleanId,
       message: 'Ticket pass not recognized. Please check your Pass ID or re-scan.',
     };

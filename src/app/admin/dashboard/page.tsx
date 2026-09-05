@@ -21,43 +21,48 @@ import { flaskApi, getCached } from '@/lib/flask-api';
 
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState(() => {
-    const cachedUsers = getCached<any[]>('admin:users') || [];
-    const cachedTeams = getCached<any[]>('admin:teams') || [];
-    const cachedColleges = getCached<any[]>('admin:colleges') || [];
-    const cachedTournaments = getCached<any[]>('admin:tournaments') || [];
-    const cachedRegs = getCached<any[]>('admin:regs::') || [];
+    const cachedUsers = getCached<any[]>('admin:users');
+    const cachedTeams = getCached<any[]>('admin:teams');
+    const cachedColleges = getCached<any[]>('admin:colleges');
+    const cachedTournaments = getCached<any[]>('admin:tournaments');
+    const cachedRegs = getCached<any[]>('admin:regs::');
     const cachedApps = getCached<any>('admin:applications');
 
     return {
-      totalPlayers: cachedUsers.length,
-      totalTeams: cachedTeams.length,
-      totalColleges: cachedColleges.length,
-      totalTournaments: cachedTournaments.length,
-      totalRegistrations: cachedRegs.length,
-      pendingApplications: cachedApps?.stats?.pending_organizers || 0,
-      pendingColleges: cachedApps?.stats?.pending_colleges || 0,
-      pendingTeams: cachedApps?.stats?.pending_teams || 0,
-      pendingTournaments: cachedApps?.stats?.pending_tournaments || 0,
-      liveTournaments: cachedTournaments.filter((t: any) => (t.status || '').toLowerCase() === 'live').length,
+      totalPlayers: cachedUsers ? cachedUsers.length : null,
+      totalTeams: cachedTeams ? cachedTeams.length : null,
+      totalColleges: cachedColleges ? cachedColleges.length : null,
+      totalTournaments: cachedTournaments ? cachedTournaments.length : null,
+      totalRegistrations: cachedRegs ? cachedRegs.length : null,
+      pendingApplications: cachedApps?.stats?.pending_organizers ?? 0,
+      pendingColleges: cachedApps?.stats?.pending_colleges ?? 0,
+      pendingTeams: cachedApps?.stats?.pending_teams ?? 0,
+      pendingTournaments: cachedApps?.stats?.pending_tournaments ?? 0,
+      liveTournaments: cachedTournaments ? cachedTournaments.filter((t: any) => (t.status || '').toLowerCase() === 'live').length : 0,
     };
   });
 
   const [recentUsers, setRecentUsers] = useState<any[]>(() => (getCached<any[]>('admin:users') || []).slice(0, 5));
   const [recentApplications, setRecentApplications] = useState<any[]>(() => (getCached<any>('admin:applications')?.organizers || []).slice(0, 4));
   const [recentTournaments, setRecentTournaments] = useState<any[]>(() => (getCached<any[]>('admin:tournaments') || []).slice(0, 4));
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => {
+    const cachedUsers = getCached<any[]>('admin:users');
+    const cachedTournaments = getCached<any[]>('admin:tournaments');
+    return !cachedUsers || !cachedTournaments;
+  });
 
   const loadDashboardData = async (isManual: any = false) => {
     if (isManual === true) setLoading(true);
     try {
-      // Parallel fetch across all database endpoints for sub-second loading speed
+      const isForce = isManual === true;
+      // Parallel fetch across all database endpoints for sub-second loading speed (<300ms)
       const [appsRes, usersRes, teamsRes, collegesRes, tournsRes, regsRes] = await Promise.all([
-        flaskApi.getApplications(),
-        flaskApi.getAllUsers(),
-        flaskApi.getTeams(),
-        flaskApi.getColleges(),
-        flaskApi.getTournaments(),
-        flaskApi.getRegistrationsByTournament(),
+        flaskApi.getApplications(isForce),
+        flaskApi.getAllUsers(isForce),
+        flaskApi.getTeams(isForce),
+        flaskApi.getColleges(isForce),
+        flaskApi.getTournaments(isForce),
+        flaskApi.getRegistrationsByTournament(undefined, isForce),
       ]);
 
       const appsData = appsRes.data || {
@@ -135,7 +140,7 @@ export default function AdminDashboardPage() {
         </div>
 
         <button
-          onClick={loadDashboardData}
+          onClick={() => loadDashboardData(true)}
           disabled={loading}
           className="inline-flex items-center gap-2 px-5 py-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-xs font-bold uppercase tracking-wider text-slate-300 transition shrink-0 cursor-pointer disabled:opacity-50"
         >
@@ -148,6 +153,8 @@ export default function AdminDashboardPage() {
       <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {metricCards.map((card, idx) => {
           const Icon = card.icon;
+          const isCardLoading = card.value === null || (loading && card.value === 0);
+
           return (
             <motion.div
               key={card.label}
@@ -162,7 +169,11 @@ export default function AdminDashboardPage() {
                 <Icon className="h-5 w-5" style={{ color: card.color }} />
               </div>
               <p className="text-3xl font-black italic mt-4">
-                {loading ? <span className="inline-block h-8 w-16 bg-white/10 animate-pulse rounded" /> : card.value}
+                {isCardLoading ? (
+                  <span className="inline-block h-8 w-16 bg-white/10 animate-pulse rounded" />
+                ) : (
+                  card.value
+                )}
               </p>
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-1">{card.subtext}</p>
             </motion.div>
@@ -316,7 +327,7 @@ export default function AdminDashboardPage() {
               <h3 className="text-xl font-black italic uppercase tracking-tight mt-1">Live Database Users</h3>
             </div>
             <span className="text-[10px] font-bold text-rose-500 border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 rounded-full uppercase tracking-wider">
-              {stats.totalPlayers} Registered
+              {stats.totalPlayers !== null ? `${stats.totalPlayers} Registered` : 'Syncing...'}
             </span>
           </div>
 

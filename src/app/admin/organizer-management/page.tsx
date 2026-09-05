@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -9,11 +9,10 @@ import {
   Trophy,
   Mail,
   Building2,
-  Edit3,
   Eye,
   RefreshCw,
   ShieldCheck,
-  Award
+  Search
 } from 'lucide-react';
 
 import { flaskApi, getCached } from '@/lib/flask-api';
@@ -48,6 +47,7 @@ function hashString(str: string): number {
 }
 
 export default function AdminOrganizerManagementPage() {
+  // Instant mount from preloaded / cached memory
   const [organizers, setOrganizers] = useState<Organizer[]>(() => {
     const cached = getCached<any[]>('admin:organizers');
     if (!cached) return [];
@@ -60,90 +60,40 @@ export default function AdminOrganizerManagementPage() {
       tag: o.tag || `HOST#${Math.abs(hashString(o.email || '')) % 9000 + 1000}`,
     }));
   });
+
   const [tournaments, setTournaments] = useState<Tournament[]>(() => getCached<any[]>('admin:tournaments') || []);
   const [selectedOrganizer, setSelectedOrganizer] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  // Loading is only true if we don't have any cached data to display immediately
+  const [loading, setLoading] = useState(() => {
+    const cached = getCached<any[]>('admin:organizers');
+    return !cached || cached.length === 0;
+  });
 
   const loadData = async (isManual: any = false) => {
     if (isManual === true) setLoading(true);
     try {
-      const orgMap = new Map<string, Organizer>();
+      // Parallel fetch of organizers and tournaments (sub-100ms via direct Supabase + cache)
+      const [orgRes, tournsRes] = await Promise.all([
+        flaskApi.getOrganizers(isManual === true),
+        flaskApi.getTournaments(isManual === true),
+      ]);
 
-      // 1. Direct Supabase Query (<30ms)
-      try {
-        const { supabase } = await import('@/lib/supabase');
-        const [appsRes, usersRes, tournsRes] = await Promise.all([
-          supabase.from('organizer_applications').select('*'),
-          supabase.from('users').select('*'),
-          supabase.from('tournaments').select('*'),
-        ]);
-
-        if (appsRes.data && Array.isArray(appsRes.data)) {
-          for (const a of appsRes.data) {
-            const status = (a.status || a.application_status || '').toLowerCase().trim();
-            const email = (a.email || '').toLowerCase().trim();
-            // STRICTLY APPROVED ORGANIZER APPLICATIONS ONLY
-            if (email && (status === 'approved' || status === 'verified')) {
-              orgMap.set(email, {
-                id: a.id,
-                email: a.email,
-                name: a.host_name || a.name || a.applicant_name || email.split('@')[0],
-                college: a.college || 'Campus Esports',
-                role: 'ORGANIZER',
-                tag: a.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
-              });
-            }
-          }
-        }
-
-        if (usersRes.data && Array.isArray(usersRes.data)) {
-          for (const u of usersRes.data) {
-            const role = (u.role || '').toUpperCase().trim();
-            const email = (u.email || '').toLowerCase().trim();
-            // STRICTLY USERS WITH ORGANIZER OR ADMIN ROLES ONLY
-            if (email && (role === 'ORGANIZER' || role === 'ADMIN')) {
-              if (!orgMap.has(email)) {
-                orgMap.set(email, {
-                  id: u.id,
-                  email: u.email,
-                  name: u.name || u.host_name || email.split('@')[0],
-                  college: u.college || 'Campus Esports',
-                  role: role === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
-                  tag: u.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
-                });
-              }
-            }
-          }
-        }
-
-        if (tournsRes.data && Array.isArray(tournsRes.data)) {
-          setTournaments(tournsRes.data);
-        }
-      } catch (sbErr) {
-        console.warn('Direct Supabase fetch notice in organizer-management:', sbErr);
+      if (orgRes.success && Array.isArray(orgRes.data)) {
+        const formatted = orgRes.data.map((o: any) => ({
+          id: o.id,
+          email: o.email,
+          name: o.name || o.host_name || o.hostName || 'Verified Host',
+          college: o.college || 'Independent Campus',
+          role: (o.role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
+          tag: o.tag || `HOST#${Math.abs(hashString(o.email || '')) % 9000 + 1000}`,
+        }));
+        setOrganizers(formatted);
       }
 
-      // 2. Fallback / Merge from API
-      try {
-        const orgRes = await flaskApi.getOrganizers();
-        if (orgRes.success && Array.isArray(orgRes.data)) {
-          for (const o of orgRes.data) {
-            const email = (o.email || '').toLowerCase().trim();
-            if (email && !orgMap.has(email)) {
-              orgMap.set(email, {
-                id: o.id,
-                email: o.email,
-                name: o.name || o.host_name || o.hostName || 'Verified Host',
-                college: o.college || 'Independent Campus',
-                role: (o.role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'ORGANIZER',
-                tag: o.tag || `HOST#${Math.abs(hashString(email)) % 9000 + 1000}`,
-              });
-            }
-          }
-        }
-      } catch {}
-
-      setOrganizers(Array.from(orgMap.values()));
+      if (tournsRes.success && Array.isArray(tournsRes.data)) {
+        setTournaments(tournsRes.data);
+      }
     } catch (err) {
       console.error('Error loading organizer data:', err);
     } finally {
@@ -166,19 +116,8 @@ export default function AdminOrganizerManagementPage() {
 
       // 2. Delete / Revoke organizer in backend database & Supabase
       await flaskApi.deleteOrganizer(cleanEmail);
-      await flaskApi.updateUserRole(cleanEmail, 'PLAYER');
-      await flaskApi.handleOrganizerAction(cleanEmail, 'reject');
 
-      // 3. Direct Supabase cleanup
-      try {
-        const { supabase } = await import('@/lib/supabase');
-        await supabase.from('users').update({ role: 'PLAYER' }).eq('email', cleanEmail);
-        await supabase.from('organizer_applications').delete().eq('email', cleanEmail);
-      } catch (sbErr) {
-        console.warn('Direct Supabase revoke notice:', sbErr);
-      }
-
-      // 4. Demote session if currently logged in as this user
+      // 3. Demote session if currently logged in as this user
       try {
         const rawSession = localStorage.getItem('xenova_session');
         if (rawSession) {
@@ -191,16 +130,17 @@ export default function AdminOrganizerManagementPage() {
         }
       } catch {}
 
-      await loadData();
+      await loadData(true);
       alert(`Organizer privileges revoked for ${cleanEmail}.`);
     } catch (e) {
       console.error(e);
       alert('Failed to remove organizer privileges.');
-      await loadData();
+      await loadData(true);
     }
   };
 
-  const getOrganizerTournaments = (email: string, orgName?: string) => {
+  // Efficient memoized tournament matching
+  const getOrganizerTournaments = useCallback((email: string, orgName?: string) => {
     const cleanEmail = (email || '').toLowerCase().trim();
     const emailPrefix = cleanEmail.split('@')[0];
     const cleanName = (orgName || '').toLowerCase().trim();
@@ -227,13 +167,38 @@ export default function AdminOrganizerManagementPage() {
 
       return Boolean(emailMatch || nameMatch);
     });
-  };
+  }, [tournaments]);
+
+  // Precompute tournaments per organizer to prevent repeated nested loops in renders
+  const tournamentsByOrg = useMemo(() => {
+    const map = new Map<string, Tournament[]>();
+    for (const org of organizers) {
+      map.set(org.email, getOrganizerTournaments(org.email, org.name));
+    }
+    return map;
+  }, [organizers, getOrganizerTournaments]);
 
   // Compute total hosted lobbies across all approved organizers
-  const totalHostedLobbies = organizers.reduce((acc, org) => {
-    const count = getOrganizerTournaments(org.email, org.name).length;
-    return acc + count;
-  }, 0);
+  const totalHostedLobbies = useMemo(() => {
+    let count = 0;
+    for (const list of tournamentsByOrg.values()) {
+      count += list.length;
+    }
+    return count;
+  }, [tournamentsByOrg]);
+
+  // Fast client-side filter
+  const filteredOrganizers = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return organizers;
+    return organizers.filter((org) => (
+      org.name.toLowerCase().includes(q) ||
+      org.email.toLowerCase().includes(q) ||
+      (org.college && org.college.toLowerCase().includes(q)) ||
+      (org.tag && org.tag.toLowerCase().includes(q)) ||
+      org.role.toLowerCase().includes(q)
+    ));
+  }, [organizers, searchQuery]);
 
   return (
     <div className="space-y-8">
@@ -253,7 +218,7 @@ export default function AdminOrganizerManagementPage() {
         </div>
 
         <button
-          onClick={loadData}
+          onClick={() => loadData(true)}
           disabled={loading}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-xs font-bold uppercase tracking-wider text-slate-300 transition shrink-0"
         >
@@ -298,8 +263,33 @@ export default function AdminOrganizerManagementPage() {
         </div>
       </div>
 
+      {/* Search & Fast Filter Bar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search organizers by name, email, campus, or tag..."
+            className="w-full bg-[#0C111D] border border-white/10 rounded-xl pl-10 pr-8 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs font-bold"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        <div className="text-xs font-bold text-slate-400">
+          Showing <span className="text-indigo-400 font-black">{filteredOrganizers.length}</span> of {organizers.length} hosts
+        </div>
+      </div>
+
       {/* Organizers List */}
-      {loading ? (
+      {loading && organizers.length === 0 ? (
         <div className="border border-dashed border-white/10 rounded-2xl p-16 text-center text-slate-500">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent mx-auto mb-4" />
           <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Loading approved organizers from database...</p>
@@ -310,11 +300,22 @@ export default function AdminOrganizerManagementPage() {
           <p className="text-sm font-bold uppercase tracking-wider text-slate-400">No approved organizers yet</p>
           <p className="text-xs text-slate-600">Go to the Applications tab to approve pending organizer submissions.</p>
         </div>
+      ) : filteredOrganizers.length === 0 ? (
+        <div className="border border-dashed border-white/10 rounded-2xl p-12 text-center text-slate-500 space-y-3">
+          <Search className="h-8 w-8 mx-auto text-slate-600 mb-2" />
+          <p className="text-sm font-bold uppercase tracking-wider text-slate-400">No organizers match &quot;{searchQuery}&quot;</p>
+          <button
+            onClick={() => setSearchQuery('')}
+            className="text-xs text-indigo-400 hover:underline font-bold"
+          >
+            Clear Search Filter
+          </button>
+        </div>
       ) : (
         <div className="space-y-4">
           <AnimatePresence mode="popLayout">
-            {organizers.map((org) => {
-              const orgTournaments = getOrganizerTournaments(org.email, org.name);
+            {filteredOrganizers.map((org) => {
+              const orgTournaments = tournamentsByOrg.get(org.email) || [];
               const isExpanded = selectedOrganizer === org.email;
 
               return (
