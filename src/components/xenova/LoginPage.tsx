@@ -16,8 +16,6 @@ import {
   Zap,
   School,
   CheckCircle2,
-  Gamepad2,
-  Trophy,
   AlertCircle,
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
@@ -182,16 +180,6 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillDemo = (role: 'player' | 'organizer') => {
-    setFormData({
-      name: role === 'player' ? 'Veera Chandra' : 'Veera Chandra (Organizer)',
-      email: 'veerachandra2008@gmail.com',
-      password: 'veera2008',
-      college: 'Malla Reddy university',
-      role,
-    });
   };
 
   return (
@@ -377,32 +365,6 @@ export default function LoginPage() {
             )}
           </button>
         </form>
-
-        {/* 5. Uiverse / 21st.dev 1-Click Quick Demo Access */}
-        <div className="space-y-2.5 pt-2 border-t border-zinc-800/80">
-          <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-            <span>Instant Demo Access</span>
-            <span className="text-emerald-400">No Typing Needed</span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => fillDemo('player')}
-              className="flex items-center justify-center gap-1.5 p-2 rounded-xl border border-zinc-800 bg-zinc-900/60 text-[11px] font-bold text-zinc-300 hover:bg-zinc-800 hover:text-white transition"
-            >
-              <Gamepad2 className="h-3.5 w-3.5 text-emerald-400" /> Gamer Demo
-            </button>
-            <button
-              type="button"
-              onClick={() => fillDemo('organizer')}
-              className="flex items-center justify-center gap-1.5 p-2 rounded-xl border border-zinc-800 bg-zinc-900/60 text-[11px] font-bold text-zinc-300 hover:bg-zinc-800 hover:text-white transition"
-            >
-              <Trophy className="h-3.5 w-3.5 text-amber-400" /> Host Demo
-            </button>
-          </div>
-        </div>
-
       </motion.div>
     </div>
   );
