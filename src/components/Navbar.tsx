@@ -33,6 +33,7 @@ const navLinks = [
 export const Navbar = () => {
   const router = useRouter();
   const pathname = usePathname();
+  const [mounted, setMounted] = useState(false);
   const [session, setSession] = useState<any>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [joinDropdownOpen, setJoinDropdownOpen] = useState(false);
@@ -99,6 +100,7 @@ export const Navbar = () => {
   };
 
   useEffect(() => {
+    setMounted(true);
     syncSession();
     checkTicketsStatus();
 
@@ -330,9 +332,12 @@ export const Navbar = () => {
               >
                 {session?.avatar || session?.avatar_url ? (
                   <img
-                    key={session.avatar || session.avatar_url}
                     src={session.avatar || session.avatar_url}
                     alt="Profile"
+                    loading="eager"
+                    decoding="sync"
+                    // @ts-ignore
+                    fetchPriority="high"
                     className="w-full h-full object-cover"
                   />
                 ) : (

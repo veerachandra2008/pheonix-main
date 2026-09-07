@@ -127,24 +127,33 @@ export default function SettingsPage() {
             }
           } catch {}
 
-          // 2. Backend API Query
-          const apiBase = getApiBaseUrl();
-          const res = await fetch(`${apiBase}/auth/profile?email=${encodeURIComponent(user.email)}`, { cache: 'no-store' });
-          if (res.ok) {
-            const json = await res.json();
-            if (json.success && json.data) {
-              const live = json.data;
-              if (live.name) setName(live.name);
-              if (live.tag) setTag(live.tag);
-              if (live.college) setCollege(live.college);
-              if (live.team) setTeam(live.team);
-              if (live.bio) setBio(live.bio);
-              if (live.avatar || live.avatar_url) {
-                setAvatar(live.avatar || live.avatar_url);
+          // 2. Backend API Query (only if authenticated)
+          const { data: { session: sbAuth } } = await supabase.auth.getSession();
+          const token = sbAuth?.access_token;
+          if (token) {
+            const apiBase = getApiBaseUrl();
+            const res = await fetch(`${apiBase}/auth/profile?email=${encodeURIComponent(user.email)}`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+              cache: 'no-store'
+            });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && json.data) {
+                const live = json.data;
+                if (live.name) setName(live.name);
+                if (live.tag) setTag(live.tag);
+                if (live.college) setCollege(live.college);
+                if (live.team) setTeam(live.team);
+                if (live.bio) setBio(live.bio);
+                if (live.avatar || live.avatar_url) {
+                  setAvatar(live.avatar || live.avatar_url);
+                }
+                // Update local session
+                const updatedSession = { ...user, ...live, avatar: live.avatar || live.avatar_url || user.avatar };
+                setXenovaSession(updatedSession);
               }
-              // Update local session
-              const updatedSession = { ...user, ...live, avatar: live.avatar || live.avatar_url || user.avatar };
-              setXenovaSession(updatedSession);
             }
           }
         } catch (err) {

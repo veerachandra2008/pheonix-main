@@ -124,30 +124,27 @@ export default function DashboardPage() {
         console.warn('Dashboard Supabase users fetch notice:', sbErr);
       }
 
-      // 2. Fetch fresh user profile from Backend API (/api/auth/profile)
+      // 2. Fetch fresh user profile from Backend API (/api/auth/profile) only if authenticated
       try {
-        const apiBase = getApiBaseUrl();
-        const res = await fetch(`${apiBase}/auth/profile?email=${encodeURIComponent(cleanEmail)}`, { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.data) {
-            setSession((prev: any) => ({ ...(prev || {}), ...data.data }));
-            setXenovaSession(data.data);
-          }
-        }
-      } catch (apiErr) {
-        // Relative /api fallback
-        try {
-          const fallbackRes = await fetch(`/api/auth/profile?email=${encodeURIComponent(cleanEmail)}`, { cache: 'no-store' });
-          if (fallbackRes.ok) {
-            const data = await fallbackRes.json();
+        const { data: { session: sbAuth } } = await supabase.auth.getSession();
+        const token = sbAuth?.access_token;
+        if (token) {
+          const apiBase = getApiBaseUrl();
+          const res = await fetch(`${apiBase}/auth/profile?email=${encodeURIComponent(cleanEmail)}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            cache: 'no-store'
+          });
+          if (res.ok) {
+            const data = await res.json();
             if (data.success && data.data) {
               setSession((prev: any) => ({ ...(prev || {}), ...data.data }));
-              window.dispatchEvent(new Event('xenova-auth-change'));
+              setXenovaSession(data.data);
             }
           }
-        } catch {}
-      }
+        }
+      } catch {}
     };
 
     const user = getXenovaSession();
@@ -228,11 +225,21 @@ export default function DashboardPage() {
             <div className="flex flex-col sm:flex-row sm:items-center gap-6">
               
               {/* Avatar Crest */}
-              <div className="h-24 w-24 sm:h-28 sm:w-28 rounded-3xl border-2 border-emerald-500/50 bg-emerald-500/10 overflow-hidden flex items-center justify-center font-black text-emerald-400 text-3xl shadow-2xl shrink-0">
+              <div className="h-24 w-24 sm:h-28 sm:w-28 rounded-3xl border-2 border-emerald-500/50 bg-emerald-500/10 overflow-hidden flex items-center justify-center font-black text-emerald-400 text-3xl shadow-2xl shrink-0 relative">
                 {session?.avatar || session?.avatar_url ? (
-                  <img src={session.avatar || session.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                  <img
+                    src={session.avatar || session.avatar_url}
+                    alt="Profile"
+                    loading="eager"
+                    decoding="sync"
+                    // @ts-ignore
+                    fetchPriority="high"
+                    className="w-full h-full object-cover"
+                  />
                 ) : (
-                  session?.name?.slice(0, 2).toUpperCase() || 'XP'
+                  <span suppressHydrationWarning>
+                    {session?.name?.slice(0, 2).toUpperCase() || 'XP'}
+                  </span>
                 )}
               </div>
 
@@ -241,23 +248,23 @@ export default function DashboardPage() {
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase">
                     <ShieldCheck className="h-3.5 w-3.5" /> Verified Varsity Athlete
                   </span>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900 border border-white/10 text-zinc-300 text-xs font-bold uppercase">
+                  <span suppressHydrationWarning className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900 border border-white/10 text-zinc-300 text-xs font-bold uppercase">
                     {session?.college || 'Nexus Institute of Technology'}
                   </span>
                 </div>
 
                 <h1 className="text-3xl sm:text-5xl font-black uppercase tracking-tight text-white leading-none">
-                  Welcome back, <span className="text-emerald-400">{session?.name || 'Player'}</span>
+                  Welcome back, <span suppressHydrationWarning className="text-emerald-400">{session?.name || 'Player'}</span>
                 </h1>
 
                 <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm text-zinc-400 font-medium">
-                  <span>Gamer Tag: <strong className="text-white font-bold">@{session?.tag || 'player'}</strong></span>
+                  <span>Gamer Tag: <strong suppressHydrationWarning className="text-white font-bold">@{session?.tag || 'player'}</strong></span>
                   <span>•</span>
-                  <span>Team: <strong className="text-emerald-400 font-bold">{session?.team || 'Free Agent'}</strong></span>
+                  <span>Team: <strong suppressHydrationWarning className="text-emerald-400 font-bold">{session?.team || 'Free Agent'}</strong></span>
                   {session?.role && (
                     <>
                       <span>•</span>
-                      <span className="text-zinc-300">Role: <strong className="text-teal-400 font-bold uppercase">{session.role}</strong></span>
+                      <span className="text-zinc-300">Role: <strong suppressHydrationWarning className="text-teal-400 font-bold uppercase">{session.role}</strong></span>
                     </>
                   )}
                   {session?.rank && (
@@ -273,7 +280,7 @@ export default function DashboardPage() {
                   {session?.bio ? (
                     <div className="inline-flex items-start gap-2.5 rounded-2xl bg-white/[0.04] border border-white/10 px-4 py-2.5 max-w-2xl backdrop-blur-md">
                       <span className="text-emerald-400 text-sm font-serif select-none">“</span>
-                      <p className="text-xs sm:text-sm text-zinc-200 font-normal italic leading-relaxed">
+                      <p suppressHydrationWarning className="text-xs sm:text-sm text-zinc-200 font-normal italic leading-relaxed">
                         {session.bio}
                       </p>
                       <span className="text-emerald-400 text-sm font-serif select-none">”</span>
