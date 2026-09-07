@@ -1312,6 +1312,15 @@ def verify_manual_upi_payment(payment_id):
     if method != 'MANUAL_UPI':
         return jsonify({'success': False, 'message': 'Only Manual UPI payments can be processed through this endpoint.'}), 400
 
+    # Authoritative tournament ownership check
+    tournament_slug = payment.get('tournament_slug') or ''
+    tournament = load_tournament_for_payment(tournament_slug)
+    if not tournament:
+        return jsonify({'success': False, 'message': 'Associated tournament not found.'}), 404
+
+    if not is_user_authorized_for_tournament(user, tournament):
+        return jsonify({'success': False, 'message': 'You are not authorized to verify payments for this tournament.'}), 403
+
     current_status = (payment.get('status') or '').strip().upper()
 
     # Rule 1: DUPLICATE_REVIEW Safety -> HTTP 409
@@ -1347,8 +1356,44 @@ def verify_manual_upi_payment(payment_id):
             'passId': existing_pass
         }), 200
 
-    # If currently processing by another concurrent request, wait for completion
+    allow_processing_recovery = False
+    # If currently processing by another concurrent request, check registration and wait for completion
     if current_status == 'PROCESSING':
+        # 1. Check if registration was already created before a crash/interruption
+        existing_pass = None
+        try:
+            supabase = get_supabase_client()
+            r_chk = supabase.table('registrations').select('pass_id').or_(f"order_id.eq.{order_id},payment_id.eq.{order_id}").execute()
+            if r_chk.data and len(r_chk.data) > 0:
+                existing_pass = r_chk.data[0].get('pass_id')
+        except Exception:
+            pass
+        if not existing_pass:
+            for pk, rec in IN_MEMORY_REGISTRATIONS.items():
+                if rec.get('order_id') == order_id or rec.get('payment_id') == order_id:
+                    existing_pass = pk
+                    break
+
+        if existing_pass:
+            try:
+                supabase.table('payment_orders').update({
+                    'status': 'VERIFIED',
+                    'updated_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+                }).eq('order_id', order_id).execute()
+            except Exception:
+                pass
+            if order_id in IN_MEMORY_PAYMENT_ORDERS:
+                IN_MEMORY_PAYMENT_ORDERS[order_id]['status'] = 'VERIFIED'
+            return jsonify({
+                'success': True,
+                'already_verified': True,
+                'message': 'Payment is already verified.',
+                'order_id': order_id,
+                'status': 'VERIFIED',
+                'passId': existing_pass
+            }), 200
+
+        # 2. Wait briefly for active concurrent request to complete
         for _ in range(30):
             time.sleep(0.05)
             chk_payment = load_payment_order(payment_id)
@@ -1386,6 +1431,11 @@ def verify_manual_upi_payment(payment_id):
                 'passId': existing_pass
             }), 200
 
+        # 3. If still in PROCESSING after polling and no registration exists, allow safe recovery
+        if current_status == 'PROCESSING':
+            allow_processing_recovery = True
+            current_status = 'PENDING'
+
     # Rejected cannot be verified -> 409 Conflict
     if current_status == 'REJECTED':
         return jsonify({
@@ -1402,15 +1452,6 @@ def verify_manual_upi_payment(payment_id):
             'message': f"Cannot verify payment with status '{current_status}'. Only PENDING payments can be verified."
         }), 400
 
-    # Authoritative tournament ownership check
-    tournament_slug = payment.get('tournament_slug') or ''
-    tournament = load_tournament_for_payment(tournament_slug)
-    if not tournament:
-        return jsonify({'success': False, 'message': 'Associated tournament not found.'}), 404
-
-    if not is_user_authorized_for_tournament(user, tournament):
-        return jsonify({'success': False, 'message': 'You are not authorized to verify payments for this tournament.'}), 403
-
     # Re-read authoritative tournament fee & verify DB amount
     is_paid, fee_rupees, expected_amount_paise = parse_tournament_fee(tournament.get('fee'))
     stored_amount_paise = payment.get('amount_paise')
@@ -1420,10 +1461,37 @@ def verify_manual_upi_payment(payment_id):
             'message': f"Stored payment amount ({stored_amount_paise} paise) does not match authoritative tournament fee ({expected_amount_paise} paise)."
         }), 400
 
-    # Verify UTR exists
-    utr = (payment.get('utr_id') or '').strip()
-    if not utr:
+    # Verify UTR exists and is normalized
+    raw_utr = (payment.get('utr_id') or '').strip()
+    if not raw_utr:
         return jsonify({'success': False, 'message': 'Payment is missing required UTR / Transaction ID.'}), 400
+
+    normalized_utr = re.sub(r'[^A-Z0-9]', '', raw_utr.upper())
+    if len(normalized_utr) < 6 or len(normalized_utr) > 30:
+        return jsonify({'success': False, 'message': 'Invalid UTR format. Must be between 6 and 30 alphanumeric characters.'}), 400
+
+    # Prevent two different payments from being VERIFIED with the same UTR
+    try:
+        supabase = get_supabase_client()
+        chk_utr = supabase.table('payment_orders').select('order_id, status, utr_id').eq('utr_id', normalized_utr).eq('status', 'VERIFIED').neq('order_id', order_id).execute()
+        if chk_utr.data and len(chk_utr.data) > 0:
+            other_id = chk_utr.data[0].get('order_id')
+            return jsonify({
+                'success': False,
+                'message': f"UTR {normalized_utr} has already been verified for another tournament registration ({other_id})."
+            }), 409
+    except Exception as utr_chk_err:
+        print(f"[WARN] UTR verified check notice: {utr_chk_err}")
+
+    for oid, op in IN_MEMORY_PAYMENT_ORDERS.items():
+        if oid != order_id:
+            o_utr = re.sub(r'[^A-Z0-9]', '', (op.get('utr_id') or '').upper())
+            o_st = (op.get('status') or '').upper()
+            if o_utr == normalized_utr and o_st == 'VERIFIED':
+                return jsonify({
+                    'success': False,
+                    'message': f"UTR {normalized_utr} has already been verified for another tournament registration ({oid})."
+                }), 409
 
     # Verify screenshot_path exists
     screenshot = (payment.get('screenshot_path') or '').strip()
@@ -1455,7 +1523,7 @@ def verify_manual_upi_payment(payment_id):
         verifier_id = str(user.get('id') or user.get('email'))
         supabase = get_supabase_client()
 
-        # 1. Atomic claim in Supabase: PENDING -> PROCESSING
+        # 1. Atomic claim in Supabase: PENDING -> PROCESSING (or recover stranded PROCESSING)
         claimed_db = False
         try:
             claim_res = supabase.table('payment_orders').update({
@@ -1466,6 +1534,15 @@ def verify_manual_upi_payment(payment_id):
 
             if claim_res.data and len(claim_res.data) > 0:
                 claimed_db = True
+            elif allow_processing_recovery:
+                # Recover stranded processing order
+                rec_res = supabase.table('payment_orders').update({
+                    'status': 'PROCESSING',
+                    'verified_by': verifier_id,
+                    'updated_at': server_time
+                }).eq('order_id', order_id).eq('status', 'PROCESSING').execute()
+                if rec_res.data and len(rec_res.data) > 0:
+                    claimed_db = True
             else:
                 # Row was not in PENDING status in DB
                 fresh = supabase.table('payment_orders').select('*').eq('order_id', order_id).execute()
@@ -1652,6 +1729,15 @@ def reject_manual_upi_payment(payment_id):
     if method != 'MANUAL_UPI':
         return jsonify({'success': False, 'message': 'Only Manual UPI payments can be processed through this endpoint.'}), 400
 
+    # Authoritative tournament ownership check
+    tournament_slug = payment.get('tournament_slug') or ''
+    tournament = load_tournament_for_payment(tournament_slug)
+    if not tournament:
+        return jsonify({'success': False, 'message': 'Associated tournament not found.'}), 404
+
+    if not is_user_authorized_for_tournament(user, tournament):
+        return jsonify({'success': False, 'message': 'You are not authorized to reject payments for this tournament.'}), 403
+
     current_status = (payment.get('status') or '').strip().upper()
 
     # Rule 1: DUPLICATE_REVIEW Safety -> HTTP 409
@@ -1682,21 +1768,81 @@ def reject_manual_upi_payment(payment_id):
             'status': 'VERIFIED'
         }), 409
 
+    allow_processing_reject = False
+    if current_status == 'PROCESSING':
+        # Check if registration was already finalized
+        existing_pass = None
+        try:
+            supabase = get_supabase_client()
+            r_chk = supabase.table('registrations').select('pass_id').or_(f"order_id.eq.{order_id},payment_id.eq.{order_id}").execute()
+            if r_chk.data and len(r_chk.data) > 0:
+                existing_pass = r_chk.data[0].get('pass_id')
+        except Exception:
+            pass
+        if not existing_pass:
+            for pk, rec in IN_MEMORY_REGISTRATIONS.items():
+                if rec.get('order_id') == order_id or rec.get('payment_id') == order_id:
+                    existing_pass = pk
+                    break
+        if existing_pass:
+            return jsonify({
+                'success': False,
+                'message': 'Payment has already been verified and cannot be rejected.',
+                'order_id': order_id,
+                'status': 'VERIFIED'
+            }), 409
+
+        # Poll briefly for completion
+        for _ in range(30):
+            time.sleep(0.05)
+            chk_payment = load_payment_order(payment_id)
+            if chk_payment:
+                st = (chk_payment.get('status') or '').upper()
+                if st == 'VERIFIED':
+                    current_status = 'VERIFIED'
+                    payment = chk_payment
+                    break
+                elif st == 'REJECTED':
+                    current_status = 'REJECTED'
+                    payment = chk_payment
+                    break
+                elif st == 'DUPLICATE_REVIEW':
+                    current_status = 'DUPLICATE_REVIEW'
+                    payment = chk_payment
+                    break
+
+        if current_status == 'VERIFIED':
+            return jsonify({
+                'success': False,
+                'message': 'Payment has already been verified and cannot be rejected.',
+                'order_id': order_id,
+                'status': 'VERIFIED'
+            }), 409
+        elif current_status == 'REJECTED':
+            return jsonify({
+                'success': True,
+                'already_rejected': True,
+                'message': 'Payment is already rejected.',
+                'order_id': order_id,
+                'status': 'REJECTED'
+            }), 200
+        elif current_status == 'DUPLICATE_REVIEW':
+            return jsonify({
+                'success': False,
+                'message': 'Payment is flagged for DUPLICATE_REVIEW and requires duplicate-UTR review.',
+                'order_id': order_id,
+                'status': 'DUPLICATE_REVIEW'
+            }), 409
+        elif current_status == 'PROCESSING':
+            allow_processing_reject = True
+            current_status = 'PENDING'
+
     # Only PENDING can be rejected
     if current_status != 'PENDING':
         return jsonify({
             'success': False,
             'message': f"Cannot reject payment with status '{current_status}'. Only PENDING payments can be rejected."
         }), 400
-
-    # Authoritative tournament ownership check
-    tournament_slug = payment.get('tournament_slug') or ''
-    tournament = load_tournament_for_payment(tournament_slug)
-    if not tournament:
-        return jsonify({'success': False, 'message': 'Associated tournament not found.'}), 404
-
-    if not is_user_authorized_for_tournament(user, tournament):
-        return jsonify({'success': False, 'message': 'You are not authorized to reject payments for this tournament.'}), 403
 
     sanitized_reason = re.sub(r'[\r\n\t]+', ' ', reason)[:500].strip()
 
@@ -1714,6 +1860,15 @@ def reject_manual_upi_payment(payment_id):
                 'rejection_reason': sanitized_reason,
                 'updated_at': server_time
             }).eq('order_id', order_id).eq('status', 'PENDING').execute()
+
+            if (not update_res.data or len(update_res.data) == 0) and allow_processing_reject:
+                update_res = supabase.table('payment_orders').update({
+                    'status': 'REJECTED',
+                    'rejected_by': rejector_id,
+                    'rejected_at': server_time,
+                    'rejection_reason': sanitized_reason,
+                    'updated_at': server_time
+                }).eq('order_id', order_id).eq('status', 'PROCESSING').execute()
 
             if not update_res.data or len(update_res.data) == 0:
                 fresh = supabase.table('payment_orders').select('*').eq('order_id', order_id).execute()
@@ -1741,6 +1896,24 @@ def reject_manual_upi_payment(payment_id):
                             'order_id': order_id,
                             'status': 'DUPLICATE_REVIEW'
                         }), 409
+                    elif fresh_status == 'PROCESSING':
+                        return jsonify({
+                            'success': False,
+                            'message': 'Payment is currently being processed and cannot be rejected.',
+                            'order_id': order_id,
+                            'status': 'PROCESSING'
+                        }), 409
+                    return jsonify({
+                        'success': False,
+                        'message': 'Payment could not be rejected. Please try again.',
+                        'order_id': order_id
+                    }), 409
+                elif order_id not in IN_MEMORY_PAYMENT_ORDERS:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Payment could not be rejected. Please try again.',
+                        'order_id': order_id
+                    }), 409
         except Exception as sb_err:
             print(f"[WARN] Supabase reject update notice: {sb_err}")
 

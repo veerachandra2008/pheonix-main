@@ -102,8 +102,10 @@ def record_test(code, title, passed, details=""):
     print(f"[{status}] Test {code:02d}: {title} -> {details}")
 
 def make_test_order(order_id, tournament_slug, status='PENDING', amount_paise=50000,
-                    method='MANUAL_UPI', utr_id='UTR123456789',
+                    method='MANUAL_UPI', utr_id=None,
                     screenshot='orders/test/shot.png', reg_payload=None):
+    if utr_id is None:
+        utr_id = f"UTR_{order_id.replace('-', '_')}"
     if reg_payload is None:
         reg_payload = {
             'team_name': 'Alpha Team',
