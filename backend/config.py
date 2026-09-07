@@ -99,8 +99,8 @@ from urllib3.util.retry import Retry
 # Persistent Connection Pool for High-Speed Database Queries
 _HTTP_SESSION = requests.Session()
 _retry_strategy = Retry(
-    total=1,
-    backoff_factor=0.05,
+    total=3,
+    backoff_factor=0.1,
     status_forcelist=[502, 503, 504],
 )
 _adapter = HTTPAdapter(pool_connections=30, pool_maxsize=30, max_retries=_retry_strategy)
@@ -254,10 +254,57 @@ class SupabaseQueryBuilder:
                     return SupabaseResponse([])
         return DeleteExecutor(self.url, self.headers, dict(self.params), self.timeout)
 
+class SupabaseStorageBucket:
+    def __init__(self, base_url, key, bucket_id, timeout=20):
+        self.base_url = base_url.rstrip('/')
+        self.key = key
+        self.bucket_id = bucket_id
+        self.timeout = timeout
+        self.headers = {
+            "apikey": self.key,
+            "Authorization": f"Bearer {self.key}"
+        }
+
+    def upload(self, path, file_bytes, file_options=None):
+        clean_path = path.lstrip('/')
+        url = f"{self.base_url}/storage/v1/object/{self.bucket_id}/{clean_path}"
+        headers = dict(self.headers)
+        content_type = "image/jpeg"
+        upsert = True
+        if file_options and isinstance(file_options, dict):
+            content_type = file_options.get("content-type") or file_options.get("contentType") or content_type
+            upsert = file_options.get("upsert", True)
+        headers["Content-Type"] = content_type
+        if upsert:
+            headers["x-upsert"] = "true"
+        r = _HTTP_SESSION.post(url, headers=headers, data=file_bytes, timeout=self.timeout)
+        if not r.ok:
+            raise Exception(f"Storage upload error ({r.status_code}): {r.text}")
+        try:
+            return r.json()
+        except Exception:
+            return {"Key": f"{self.bucket_id}/{clean_path}"}
+
+    def remove(self, paths):
+        if isinstance(paths, str):
+            paths = [paths]
+        url = f"{self.base_url}/storage/v1/object/{self.bucket_id}"
+        r = _HTTP_SESSION.delete(url, headers=self.headers, json={"prefixes": paths}, timeout=self.timeout)
+        return r.json() if r.ok else []
+
+class SupabaseStorageClient:
+    def __init__(self, base_url, key):
+        self.base_url = base_url
+        self.key = key
+
+    def from_(self, bucket_id):
+        return SupabaseStorageBucket(self.base_url, self.key, bucket_id)
+
 class SupabaseRestClient:
     def __init__(self, url, key):
         self.url = url
         self.key = key
+        self.storage = SupabaseStorageClient(url, key)
     def table(self, name):
         return SupabaseQueryBuilder(self.url, self.key, name)
 

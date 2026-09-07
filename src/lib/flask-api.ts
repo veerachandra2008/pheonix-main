@@ -12,12 +12,9 @@ export interface CreateOrderParams {
 }
 
 export interface VerifyPaymentParams {
-  order_id?: string;
-  razorpay_order_id?: string;
-  razorpay_payment_id?: string;
-  razorpay_signature?: string;
-  paytm_response?: any;
-  txn_id?: string;
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
 }
 
 export interface RegisterUserParams {

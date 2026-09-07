@@ -13,14 +13,12 @@ import {
   Lock,
   Loader2,
   CreditCard,
-  Clock,
-  RefreshCw,
 } from 'lucide-react';
 import { saveRegistration } from '@/lib/tournaments-db';
 import { tournaments } from '@/app/tournaments/data';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
-import { getXenovaSession } from '@/lib/auth-session';
+import ManualUpiPaymentModal from '@/components/ManualUpiPaymentModal';
 
 interface PageProps {
   params?: Promise<{ slug: string }>;
@@ -29,7 +27,6 @@ interface PageProps {
 declare global {
   interface Window {
     Razorpay?: any;
-    Paytm?: any;
   }
 }
 
@@ -44,12 +41,10 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
   const [confirmed, setConfirmed] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [paymentStep, setPaymentStep] = useState<
-    'idle' | 'creating_order' | 'opening_gateway' | 'opening_razorpay' | 'verifying_payment' | 'generating_pass'
+    'idle' | 'creating_order' | 'opening_razorpay' | 'verifying_payment' | 'generating_pass'
   >('idle');
   const [errorMessage, setErrorMessage] = useState('');
-  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
-  const [pendingMessage, setPendingMessage] = useState<string>('');
-  const [isReconciling, setIsReconciling] = useState(false);
+  const [isUpiModalOpen, setIsUpiModalOpen] = useState(false);
 
   useEffect(() => {
     let resolvedSlug = rawSlug;
@@ -60,18 +55,6 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
           setSlug(p.slug);
         }
       }).catch(() => {});
-    }
-
-    if (typeof window !== 'undefined') {
-      try {
-        const searchParams = new URLSearchParams(window.location.search);
-        const urlOrderId = searchParams.get('order_id');
-        const urlStatus = searchParams.get('status');
-        if (urlOrderId && (urlStatus === 'pending' || searchParams.get('pending') === 'true')) {
-          setPendingOrderId(urlOrderId);
-          setPendingMessage("Your payment is being confirmed by your bank/Paytm. Please don't pay again. We are checking the transaction.");
-        }
-      } catch {}
     }
 
     const raw = sessionStorage.getItem('reg_selection');
@@ -95,7 +78,8 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
 
         let sessionUser: any = null;
         try {
-          sessionUser = getXenovaSession();
+          const rawSession = localStorage.getItem('xenova_session');
+          if (rawSession) sessionUser = JSON.parse(rawSession);
         } catch {}
 
         if (found) {
@@ -135,38 +119,6 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
       }
     }
   }, [rawSlug, paramsPromise, router]);
-
-  const loadPaytmScript = (paytmHost: string, mid: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      if (typeof window === 'undefined') {
-        resolve(false);
-        return;
-      }
-      if (window.Paytm && window.Paytm.CheckoutJS) {
-        resolve(true);
-        return;
-      }
-      const host = (paytmHost || 'https://securestage.paytmpayments.com').replace(/\/$/, '');
-      const scriptSrc = `${host}/merchantpgpui/checkoutjs/merchants/${mid}.js`;
-      const existingScript = document.querySelector(`script[src="${scriptSrc}"]`) as HTMLScriptElement;
-      if (existingScript) {
-        if (window.Paytm?.CheckoutJS) {
-          resolve(true);
-          return;
-        }
-        existingScript.addEventListener('load', () => resolve(true));
-        existingScript.addEventListener('error', () => resolve(false));
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = scriptSrc;
-      script.async = true;
-      script.crossOrigin = 'anonymous';
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
-    });
-  };
 
   const loadRazorpayScript = (): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -210,67 +162,6 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
     if (!feeStr || feeStr.toLowerCase().includes('free')) return 0;
     const match = feeStr.match(/\d+/);
     return match ? parseInt(match[0], 10) : 0;
-  };
-
-  // Reconcile pending order authoritatively with backend
-  const handleCheckPaymentStatus = async (overrideOrderId?: string) => {
-    const targetOrderId = overrideOrderId || pendingOrderId;
-    if (!targetOrderId) return;
-
-    setIsReconciling(true);
-    setErrorMessage('');
-    const apiBase = getApiBaseUrl();
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session || !session.access_token) {
-        router.push(`/login?redirect=/registration/${slug}/confirm`);
-        return;
-      }
-      const token = session.access_token;
-
-      const res = await fetch(`${apiBase}/payments/reconcile`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ order_id: targetOrderId })
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (data.local_status === 'SUCCESS' || data.passId || (data.success && data.reconciled && data.pass_id)) {
-        const passId = data.passId || data.pass_id;
-        try {
-          sessionStorage.setItem(
-            'reg_selection',
-            JSON.stringify({
-              ...selection,
-              email,
-              passId: passId,
-              paymentId: targetOrderId,
-            })
-          );
-        } catch {}
-        router.push(`/registration/${slug}/pass?passId=${passId}`);
-        return;
-      }
-
-      if (data.local_status === 'PENDING' || data.pending) {
-        setPendingMessage("Your payment is still being confirmed. Please don't make another payment.");
-      } else if (data.local_status === 'FAILED' || data.local_status === 'EXPIRED') {
-        setPendingOrderId(null);
-        setPendingMessage('');
-        setErrorMessage('Payment failed. You can safely retry.');
-      } else {
-        setPendingMessage(data.message || 'Status checked. Transaction is still processing.');
-      }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Error checking payment status.');
-    } finally {
-      setIsReconciling(false);
-    }
   };
 
   const handleContinue = async () => {
@@ -365,8 +256,23 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
     }
 
     // ─── CASE B: PAID TOURNAMENT (Amount > 0) ───
+    // Launch Manual UPI Payment Modal (Phase 3)
+    setIsUpiModalOpen(true);
+    return;
+  };
+
+  // Preserved Razorpay checkout flow
+  const handleRazorpayCheckout = async () => {
+    const apiBase = getApiBaseUrl();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return;
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`
+    };
+
     try {
-      // Step 1: Request authoritative Paytm order from backend (server-authoritative amount)
+      // Step 1: Request real Razorpay order from backend (server-authoritative amount)
       setPaymentStep('creating_order');
       let orderRes: Response;
 
@@ -384,7 +290,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
           }),
         });
       } catch (fetchErr: any) {
-        setErrorMessage('Could not connect to payment backend server. Please verify the backend server is running.');
+        setErrorMessage('Could not connect to payment backend server. Please verify the Flask server is running.');
         setPaymentStep('idle');
         return;
       }
@@ -398,171 +304,123 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
         return;
       }
 
-      if (!orderRes.ok || !orderData || !orderData.success || !orderData.order_id || !orderData.txn_token) {
-        if (orderRes.status === 409 && orderData?.pending && orderData?.order_id) {
-          setPendingOrderId(orderData.order_id);
-          setPendingMessage("Your payment is being confirmed by your bank/Paytm. Please don't pay again. We are checking the transaction.");
-          setPaymentStep('idle');
-          return;
-        }
-        if (orderData?.already_completed && orderData?.passId) {
-          router.push(`/registration/${slug}/pass?passId=${orderData.passId}`);
-          return;
-        }
-        setErrorMessage(orderData?.message || 'Failed to initialize payment order on Paytm.');
+      if (!orderRes.ok || !orderData || !orderData.success || !orderData.order_id || !orderData.key_id) {
+        setErrorMessage(orderData?.message || 'Failed to initialize payment order on Razorpay.');
         setPaymentStep('idle');
         return;
       }
 
-      // Step 2: Ensure Paytm CheckoutJS is loaded
-      setPaymentStep('opening_gateway');
-      const paytmHost = orderData.paytm_host || 'https://securestage.paytmpayments.com';
-      const mid = orderData.mid;
-      const isLoaded = await loadPaytmScript(paytmHost, mid);
+      // Step 2: Ensure Razorpay SDK is fully loaded before opening checkout
+      setPaymentStep('opening_razorpay');
+      const isLoaded = await loadRazorpayScript();
 
-      if (!isLoaded || !window.Paytm?.CheckoutJS) {
-        setErrorMessage('Paytm Checkout failed to load. Please check your internet connection and try again.');
+      if (!isLoaded || !window.Razorpay) {
+        setErrorMessage('Razorpay SDK failed to load. Please check your internet connection and try again.');
         setPaymentStep('idle');
         return;
       }
 
-      // Step 3: Launch Paytm Checkout JS
-      const amountStr = orderData.amount_rupees || (Number(orderData.amount) / 100).toFixed(2);
-      const config = {
-        root: '',
-        flow: 'DEFAULT',
-        data: {
-          orderId: orderData.order_id,
-          token: orderData.txn_token,
-          tokenType: 'TXN_TOKEN',
-          amount: amountStr,
+      // Step 3: Launch Razorpay Checkout Modal
+      const options = {
+        key: orderData.key_id,
+        amount: orderData.amount,
+        currency: orderData.currency || 'INR',
+        name: 'Xenova Esports Platform',
+        description: `Entry Fee for ${selection.tournamentTitle}`,
+        order_id: orderData.order_id,
+        prefill: {
+          name: selection.captainName,
+          email,
         },
-        handler: {
-          notifyVerifyRequest: function (orderDetails: any) {
-            console.log('[Paytm CheckoutJS] notifyVerifyRequest:', orderDetails);
-          },
-          transactionStatus: async function (paymentStatus: any) {
-            console.log('[Paytm CheckoutJS] transactionStatus received:', paymentStatus);
-
-            // If pending status reported by gateway
-            if (paymentStatus && (paymentStatus.STATUS === 'PENDING' || paymentStatus.RESPCODE === '01')) {
-              setPendingOrderId(orderData.order_id);
-              setPendingMessage("Your payment is being confirmed by your bank/Paytm. Please don't pay again. We are checking the transaction.");
-              setPaymentStep('idle');
-              return;
-            }
-
-            // If explicit failure reported by gateway
-            if (
-              paymentStatus &&
-              (paymentStatus.STATUS === 'TXN_FAILURE' ||
-                paymentStatus.RESPCODE === '227' ||
-                paymentStatus.RESPCODE === '295' ||
-                paymentStatus.RESPCODE === '810')
-            ) {
-              setErrorMessage(paymentStatus.RESPMSG || 'Payment failed or was cancelled by user.');
-              setPaymentStep('idle');
-              return;
-            }
-
-            // Step 4: Authoritative Server-to-Server Payment Verification
-            // Note: Browser response is never authoritative.
-            // Backend executes Paytm Order Status API v3 query server-to-server.
-            setPaymentStep('verifying_payment');
-
-            try {
-              const verifyRes = await fetch(`${apiBase}/payments/verify-payment`, {
-                method: 'POST',
-                headers: authHeaders,
-                body: JSON.stringify({
-                  order_id: orderData.order_id,
-                  paytm_response: paymentStatus,
-                  tournamentSlug: selection.tournamentSlug,
-                  tournamentTitle: selection.tournamentTitle,
-                  tournamentGame: selection.tournamentGame,
-                  tournamentDate: selection.tournamentDate,
-                  tournamentFormat: selection.tournamentFormat,
-                  tournamentRegion: selection.tournamentRegion,
-                  tournamentFee: selection.tournamentFee,
-                  teamName: selection.teamName,
-                  college: selection.college,
-                  captainName: selection.captainName,
-                  email,
-                  players: selection.players || [],
-                  playerEmails: selection.playerEmails || [email],
-                }),
-              });
-
-              let verifyData: any = null;
-              try {
-                verifyData = await verifyRes.json();
-              } catch {
-                setErrorMessage('Failed to parse payment verification response from server.');
-                setPaymentStep('idle');
-                return;
-              }
-
-              if (verifyRes.status === 202 || verifyData?.pending) {
-                setPendingOrderId(orderData.order_id);
-                setPendingMessage("Your payment is being confirmed by your bank/Paytm. Please don't pay again. We are checking the transaction.");
-                setPaymentStep('idle');
-                return;
-              }
-
-              if (!verifyRes.ok || !verifyData || !verifyData.success || !verifyData.passId) {
-                setErrorMessage(
-                  verifyData?.message || 'Paytm payment verification failed. No pass was generated.'
-                );
-                setPaymentStep('idle');
-                return;
-              }
-
-              const verifiedPassId = verifyData.passId;
-
-              setPaymentStep('generating_pass');
-              try {
-                sessionStorage.setItem(
-                  'reg_selection',
-                  JSON.stringify({
-                    ...selection,
-                    email,
-                    passId: verifiedPassId,
-                    paymentId: paymentStatus?.TXNID || orderData.order_id,
-                  })
-                );
-              } catch {}
-
-              router.push(`/registration/${slug}/pass?passId=${verifiedPassId}`);
-            } catch (verifyErr: any) {
-              setErrorMessage(verifyErr.message || 'Error occurred while verifying payment with Paytm.');
-              setPaymentStep('idle');
-            }
-          },
+        theme: {
+          color: '#10B981', // Emerald 500 theme accent
         },
-        merchant: {
-          mid: mid,
-          name: 'XENOVA Esports Platform',
-          redirect: false,
-        },
-      };
-
-      const launchPaytm = () => {
-        window.Paytm.CheckoutJS.init(config)
-          .then(() => {
-            window.Paytm.CheckoutJS.invoke();
-          })
-          .catch((initErr: any) => {
-            console.error('Paytm CheckoutJS init error:', initErr);
-            setErrorMessage(initErr?.message || 'Could not open Paytm payment interface.');
+        handler: async function (response: any) {
+          if (!response.razorpay_payment_id || !response.razorpay_signature) {
+            setErrorMessage('Payment completed on gateway but verification details were missing.');
             setPaymentStep('idle');
-          });
+            return;
+          }
+
+          // Step 4: Backend HMAC-SHA256 Payment Verification & Server-Authoritative Registration
+          setPaymentStep('verifying_payment');
+
+          try {
+            const verifyRes = await fetch(`${apiBase}/payments/verify-payment`, {
+              method: 'POST',
+              headers: authHeaders,
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id || orderData.order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                tournamentSlug: selection.tournamentSlug,
+                tournamentTitle: selection.tournamentTitle,
+                tournamentGame: selection.tournamentGame,
+                tournamentDate: selection.tournamentDate,
+                tournamentFormat: selection.tournamentFormat,
+                tournamentRegion: selection.tournamentRegion,
+                tournamentFee: selection.tournamentFee,
+                teamName: selection.teamName,
+                college: selection.college,
+                captainName: selection.captainName,
+                email,
+                players: selection.players || [],
+                playerEmails: selection.playerEmails || [email],
+              }),
+            });
+
+            let verifyData: any = null;
+            try {
+              verifyData = await verifyRes.json();
+            } catch (err) {
+              setErrorMessage('Failed to parse payment verification response from server.');
+              setPaymentStep('idle');
+              return;
+            }
+
+            if (!verifyRes.ok || !verifyData || !verifyData.success || !verifyData.passId) {
+              setErrorMessage(
+                verifyData?.message || 'Payment signature verification failed. No pass was generated.'
+              );
+              setPaymentStep('idle');
+              return;
+            }
+
+            const verifiedPassId = verifyData.passId;
+
+            setPaymentStep('generating_pass');
+            try {
+              sessionStorage.setItem(
+                'reg_selection',
+                JSON.stringify({
+                  ...selection,
+                  email,
+                  passId: verifiedPassId,
+                  paymentId: response.razorpay_payment_id,
+                })
+              );
+            } catch {}
+
+            router.push(`/registration/${slug}/pass?passId=${verifiedPassId}`);
+          } catch (verifyErr: any) {
+            setErrorMessage(verifyErr.message || 'Error occurred while verifying payment signature.');
+            setPaymentStep('idle');
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            setPaymentStep('idle');
+          },
+        },
       };
 
-      if (typeof window.Paytm.CheckoutJS.onLoad === 'function') {
-        window.Paytm.CheckoutJS.onLoad(launchPaytm);
-      } else {
-        launchPaytm();
-      }
+      const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', function (response: any) {
+        const failDesc = response?.error?.description || response?.error?.reason || 'Payment failed or was cancelled.';
+        setErrorMessage(`Payment Failed: ${failDesc}`);
+        setPaymentStep('idle');
+      });
+      rzp.open();
     } catch (err: any) {
       setErrorMessage(err.message || 'An error occurred initiating checkout.');
       setPaymentStep('idle');
@@ -580,7 +438,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
   const numericAmount = parseFeeAmount(selection.tournamentFee);
 
   return (
-    <main className="min-h-screen bg-[#09090b] text-white font-sans relative w-full max-w-full overflow-x-hidden pb-16 sm:pb-20">
+    <main className="min-h-screen bg-[#09090b] text-white font-sans relative">
       {/* ─── FULLSCREEN LOADING OVERLAY ─── */}
       {paymentStep !== 'idle' && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
@@ -589,9 +447,8 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
           </div>
           <p className="text-xl font-black text-white tracking-tight mb-2">
             {paymentStep === 'creating_order' && 'Creating Payment Order...'}
-            {paymentStep === 'opening_gateway' && 'Opening Paytm Secure Gateway...'}
-            {paymentStep === 'opening_razorpay' && 'Opening Secure Gateway...'}
-            {paymentStep === 'verifying_payment' && 'Authoritatively Verifying Payment with Paytm...'}
+            {paymentStep === 'opening_razorpay' && 'Opening Razorpay Secure Gateway...'}
+            {paymentStep === 'verifying_payment' && 'Verifying HMAC Payment Signature...'}
             {paymentStep === 'generating_pass' && 'Generating Verified Database Ticket...'}
           </p>
           <p className="text-sm text-zinc-400 max-w-sm">
@@ -601,17 +458,17 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
       )}
 
       {/* ─── STICKY TOP NAV ─── */}
-      <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#09090b]/90 backdrop-blur-xl transition-all">
-        <div className="mx-auto max-w-7xl px-3.5 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2">
+      <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#09090b]/80 backdrop-blur-xl">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <Link
             href={`/registration/${slug}`}
-            className="inline-flex items-center gap-1.5 sm:gap-2 text-zinc-400 hover:text-white text-[11px] sm:text-sm font-medium transition px-2.5 sm:px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 shrink-0"
+            className="inline-flex items-center gap-2 text-zinc-400 hover:text-white text-sm font-medium transition"
           >
-            <ArrowLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-            <span>Back</span>
+            <ArrowLeft className="h-4 w-4" />
+            Back
           </Link>
 
-          {/* Step Indicator (Desktop) */}
+          {/* Step Indicator */}
           <div className="hidden sm:flex items-center gap-2">
             {['Select Team', 'Verify Squad', 'Entry Pass'].map((label, i) => (
               <React.Fragment key={label}>
@@ -648,37 +505,20 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
             ))}
           </div>
 
-          {/* Step Indicator (Mobile Compact) */}
-          <div className="flex sm:hidden items-center gap-2 shrink-0">
-            <div className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="w-1.5 h-1.5 rounded-full bg-white/20" />
-            </div>
-            <span className="text-[11px] font-mono text-emerald-400 font-black px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25">
-              Step 2/3
-            </span>
-          </div>
-
-          <div className="hidden sm:block text-xs text-zinc-600 font-medium">Step 2 of 3</div>
-        </div>
-
-        {/* Subtle mobile progress bar */}
-        <div className="sm:hidden w-full h-[2px] bg-white/5">
-          <div className="h-full bg-emerald-500 w-2/3 transition-all duration-300" />
+          <div className="text-xs text-zinc-600 font-medium">Step 2 of 3</div>
         </div>
       </nav>
 
       {/* ─── CONTENT ─── */}
-      <div className="mx-auto max-w-3xl px-3.5 sm:px-6 lg:px-8 py-6 sm:py-10 lg:py-16 space-y-6 sm:space-y-8">
+      <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-10 lg:py-16 space-y-8">
         {/* Header */}
         <div className="space-y-1.5">
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-bold uppercase tracking-widest">
             <ShieldCheck className="h-3 w-3" />
             Squad Verification
           </div>
-          <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-white tracking-tight break-words">Confirm your squad details</h1>
-          <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed">
+          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">Confirm your squad details</h1>
+          <p className="text-sm text-zinc-400">
             Review your team information and verify your student status before proceeding.
           </p>
         </div>
@@ -691,46 +531,9 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
           </div>
         )}
 
-        {/* Pending payment notification banner */}
-        {pendingOrderId && (
-          <div className="p-6 rounded-3xl bg-amber-500/10 border border-amber-500/30 space-y-4">
-            <div className="flex items-start gap-3.5">
-              <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
-                <Clock className="w-5 h-5 text-amber-400" />
-              </div>
-              <div className="space-y-1">
-                <p className="text-base font-bold text-white">Payment Confirmation in Progress</p>
-                <p className="text-sm text-amber-200/90 leading-relaxed">
-                  {pendingMessage || "Your payment is being confirmed by your bank/Paytm. Please don't pay again. We are checking the transaction."}
-                </p>
-                <p className="text-xs text-zinc-400 font-mono mt-1">Order ID: {pendingOrderId}</p>
-              </div>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-3 pt-1">
-              <button
-                onClick={() => handleCheckPaymentStatus()}
-                disabled={isReconciling}
-                className="px-6 py-3.5 rounded-2xl bg-amber-500 text-black font-bold text-sm flex items-center justify-center gap-2 hover:bg-amber-400 transition shadow-lg shadow-amber-500/20 disabled:opacity-50"
-              >
-                {isReconciling ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Checking Status...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="w-4 h-4" />
-                    Check Payment Status
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Tournament summary strip */}
-        <div className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-2xl bg-white/[0.03] border border-white/[0.07]">
-          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl overflow-hidden shrink-0 border border-white/10">
+        <div className="flex items-center gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/[0.07]">
+          <div className="w-14 h-14 rounded-xl overflow-hidden shrink-0 border border-white/10">
             <img
               src={selection.tournamentImage || '/hero-arena.jpg'}
               alt={selection.tournamentGame}
@@ -738,39 +541,39 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
             />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs sm:text-sm font-bold text-white truncate">{selection.tournamentTitle}</p>
-            <p className="text-[11px] sm:text-xs text-zinc-500 mt-0.5 truncate">
+            <p className="text-sm font-bold text-white truncate">{selection.tournamentTitle}</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
               {selection.tournamentGame} · {selection.tournamentFormat} · {selection.tournamentDate}
             </p>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-[10px] sm:text-[11px] text-zinc-500">Entry Fee</p>
-            <p className="text-xs sm:text-sm font-black text-emerald-400">{selection.tournamentFee}</p>
+            <p className="text-[11px] text-zinc-500">Entry Fee</p>
+            <p className="text-sm font-black text-emerald-400">{selection.tournamentFee}</p>
           </div>
         </div>
 
         {/* Team card with 4 Players Breakdown */}
         <div className="space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+          <div className="flex items-center justify-between">
             <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Verified 4-Player Roster</p>
-            <span className="self-start sm:self-auto text-[10px] font-black uppercase text-emerald-400 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30">
+            <span className="text-[10px] font-black uppercase text-emerald-400 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30">
               4 / 4 Members Registered
             </span>
           </div>
 
-          <div className="p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl space-y-4 sm:space-y-5">
-            <div className="flex items-center gap-3 sm:gap-4">
-              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center font-black text-base sm:text-lg text-emerald-400 shrink-0">
+          <div className="p-5 sm:p-6 rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl space-y-5">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center font-black text-lg text-emerald-400 shrink-0">
                 {selection.teamName?.slice(0, 2).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm sm:text-base font-black text-white truncate">{selection.teamName}</p>
-                <p className="text-xs text-zinc-400 mt-0.5 truncate">{selection.college}</p>
+                <p className="text-base font-black text-white">{selection.teamName}</p>
+                <p className="text-xs text-zinc-400 mt-0.5">{selection.college}</p>
               </div>
             </div>
 
             {/* 4-Player Table */}
-            <div className="space-y-2 pt-1 sm:pt-2">
+            <div className="space-y-2 pt-2">
               {(selection.players && selection.players.length > 0 ? selection.players : [
                 { slot: 1, name: selection.captainName, inGameTag: 'CAPTAIN', email: selection.email, isCaptain: true },
                 { slot: 2, name: 'Teammate 2', inGameTag: 'PLAYER_2', email: 'teammate2@university.edu', isCaptain: false },
@@ -779,20 +582,20 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
               ]).map((p: any) => (
                 <div
                   key={p.slot}
-                  className="p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-black/40 border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2"
+                  className="p-3 rounded-2xl bg-black/40 border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`px-2 py-0.5 rounded-lg text-[9px] sm:text-[10px] font-black uppercase shrink-0 ${
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase ${
                       p.isCaptain || p.slot === 1
                         ? 'bg-emerald-500 text-black'
                         : 'bg-white/10 text-slate-300'
                     }`}>
                       {p.isCaptain || p.slot === 1 ? '👑 Captain' : `P${p.slot}`}
                     </span>
-                    <span className="text-xs font-bold text-white truncate">{p.name}</span>
-                    <span className="text-[11px] font-mono font-bold text-emerald-400 shrink-0">({p.inGameTag || 'IGN'})</span>
+                    <span className="text-xs font-bold text-white">{p.name}</span>
+                    <span className="text-[11px] font-mono font-bold text-emerald-400">({p.inGameTag || 'IGN'})</span>
                   </div>
-                  <span className="text-xs font-mono text-slate-400 sm:text-right truncate break-all">{p.email}</span>
+                  <span className="text-xs font-mono text-slate-400 sm:text-right truncate">{p.email}</span>
                 </div>
               ))}
             </div>
@@ -800,7 +603,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
         </div>
 
         {/* Verification form */}
-        <div className="space-y-4 sm:space-y-5 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl">
+        <div className="space-y-5 p-6 rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl">
           <div>
             <p className="text-sm font-bold text-white mb-1">Identity Verification</p>
             <p className="text-xs text-zinc-500">
@@ -822,7 +625,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
                 setEmailError('');
               }}
               placeholder="you@university.ac.in"
-              className={`w-full rounded-xl sm:rounded-2xl bg-white/[0.04] border px-3.5 sm:px-4 py-3 sm:py-3.5 text-base sm:text-sm text-white placeholder:text-zinc-600 outline-none focus:border-emerald-500 transition backdrop-blur-sm ${
+              className={`w-full rounded-2xl bg-white/[0.04] border px-4 py-3.5 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-emerald-500 transition backdrop-blur-sm ${
                 emailError ? 'border-red-500/60' : 'border-white/10 hover:border-white/20'
               }`}
             />
@@ -840,7 +643,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
               setConfirmed(!confirmed);
               setEmailError('');
             }}
-            className="w-full flex items-start gap-3 p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white/[0.02] border border-white/[0.07] hover:border-white/15 transition text-left"
+            className="w-full flex items-start gap-3.5 p-4 rounded-2xl bg-white/[0.02] border border-white/[0.07] hover:border-white/15 transition text-left"
           >
             <div
               className={`w-5 h-5 rounded-lg border shrink-0 mt-0.5 flex items-center justify-center transition-all duration-200 ${
@@ -866,7 +669,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
         </div>
 
         {/* Info strip */}
-        <div className="flex items-start gap-3 p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-sky-500/[0.06] border border-sky-500/20">
+        <div className="flex items-start gap-3 p-4 rounded-2xl bg-sky-500/[0.06] border border-sky-500/20">
           <Lock className="h-4 w-4 text-sky-400 shrink-0 mt-0.5" />
           <p className="text-xs text-zinc-400 leading-relaxed">
             Your information is used solely for identity verification and tournament communications. It will not be shared with third parties.
@@ -874,7 +677,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
         </div>
 
         {/* Final summary before commit */}
-        <div className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl space-y-4">
+        <div className="p-5 rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl space-y-4">
           <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Order Summary</p>
           <div className="space-y-2.5">
             {[
@@ -884,53 +687,46 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
               { label: 'Date', value: selection.tournamentDate },
               { label: 'Entry Fee', value: selection.tournamentFee, highlight: true },
             ].map(({ label, value, highlight }) => (
-              <div key={label} className="flex items-center justify-between gap-2">
-                <span className="text-xs text-zinc-500 shrink-0">{label}</span>
-                <span className={`text-xs font-semibold truncate text-right ${highlight ? 'text-emerald-400' : 'text-white'}`}>{value}</span>
+              <div key={label} className="flex items-center justify-between">
+                <span className="text-xs text-zinc-500">{label}</span>
+                <span className={`text-xs font-semibold ${highlight ? 'text-emerald-400' : 'text-white'}`}>{value}</span>
               </div>
             ))}
           </div>
-          <div className="border-t border-white/[0.07] pt-4 space-y-3">
-            {pendingOrderId ? (
-              <button
-                onClick={() => handleCheckPaymentStatus()}
-                disabled={isReconciling}
-                className="w-full flex items-center justify-center gap-2 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-amber-500 text-black font-black text-sm uppercase tracking-wider hover:bg-amber-400 transition shadow-lg shadow-amber-500/20 disabled:opacity-50"
-              >
-                {isReconciling ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Checking Payment Status...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="w-4 h-4" />
-                    Check Payment Status ({pendingOrderId})
-                  </>
-                )}
-              </button>
-            ) : (
-              <button
-                onClick={handleContinue}
-                disabled={paymentStep !== 'idle'}
-                className="w-full flex items-center justify-center gap-2 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-emerald-500 text-black font-black text-sm uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20 disabled:opacity-50 active:scale-[0.98]"
-              >
-                {numericAmount > 0 ? (
-                  <>
-                    <CreditCard className="h-4 w-4" />
-                    Pay {selection.tournamentFee} & Confirm Registration
-                  </>
-                ) : (
-                  <>
-                    Confirm Registration (Free Entry)
-                    <ChevronRight className="h-4 w-4" />
-                  </>
-                )}
-              </button>
-            )}
+          <div className="border-t border-white/[0.07] pt-4">
+            <button
+              onClick={handleContinue}
+              disabled={paymentStep !== 'idle'}
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500 text-black font-black text-sm uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+            >
+              {numericAmount > 0 ? (
+                <>
+                  <CreditCard className="h-4 w-4" />
+                  Pay {selection.tournamentFee} & Confirm Registration
+                </>
+              ) : (
+                <>
+                  Confirm Registration (Free Entry)
+                  <ChevronRight className="h-4 w-4" />
+                </>
+              )}
+            </button>
           </div>
         </div>
       </div>
+
+      {/* ─── MANUAL UPI PAYMENT MODAL (PHASE 3) ─── */}
+      {selection && (
+        <ManualUpiPaymentModal
+          isOpen={isUpiModalOpen}
+          onClose={() => setIsUpiModalOpen(false)}
+          tournamentSlug={selection.tournamentSlug || slug}
+          tournamentTitle={selection.tournamentTitle || 'Tournament'}
+          tournamentFee={selection.tournamentFee || '₹500'}
+          selection={selection}
+          captainEmail={email}
+        />
+      )}
     </main>
   );
 }
