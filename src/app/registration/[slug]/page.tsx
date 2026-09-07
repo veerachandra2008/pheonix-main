@@ -215,24 +215,25 @@ export default function RegistrationStepOne() {
   }
 
   return (
-    <main className="min-h-screen bg-[#070B14] text-white font-sans selection:bg-emerald-500 selection:text-zinc-950 pb-20">
+    <main className="min-h-screen bg-[#070B14] text-white font-sans selection:bg-emerald-500 selection:text-zinc-950 pb-16 sm:pb-20 w-full max-w-full overflow-x-hidden">
       
       {/* ─── STICKY TOP NAV ─── */}
-      <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#0C111D]/80 backdrop-blur-xl">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#0C111D]/90 backdrop-blur-xl transition-all">
+        <div className="mx-auto max-w-7xl px-3.5 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2">
           <Link
             href={`/tournaments/${tournament.slug}`}
-            className="inline-flex items-center gap-2 text-slate-400 hover:text-white text-xs font-bold uppercase tracking-wider transition px-3 py-1.5 rounded-lg bg-white/5 border border-white/10"
+            className="inline-flex items-center gap-1.5 sm:gap-2 text-slate-400 hover:text-white text-[11px] sm:text-xs font-bold uppercase tracking-wider transition px-2.5 sm:px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 shrink-0"
           >
-            <ArrowLeft className="h-4 w-4" /> Back to Lobby
+            <ArrowLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <span>Lobby</span>
           </Link>
 
-          {/* Step Indicator */}
+          {/* Step Indicator (Desktop) */}
           <div className="hidden sm:flex items-center gap-2">
             {[
               { num: 1, label: '4-Player Roster', active: true },
               { num: 2, label: 'Review & Verify', active: false },
-              { num: 3, label: 'Entry Pass Pass', active: false },
+              { num: 3, label: 'Entry Pass', active: false },
             ].map((step, idx) => (
               <React.Fragment key={step.num}>
                 <div
@@ -256,43 +257,76 @@ export default function RegistrationStepOne() {
             ))}
           </div>
 
-          <span className="text-xs font-mono text-emerald-400 font-bold">Step 1 of 3</span>
+          {/* Step Indicator (Mobile Compact) */}
+          <div className="flex sm:hidden items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-white/20" />
+              <span className="w-1.5 h-1.5 rounded-full bg-white/20" />
+            </div>
+            <span className="text-[11px] font-mono text-emerald-400 font-black px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25">
+              Step 1/3
+            </span>
+          </div>
+
+          <span className="hidden sm:inline-block text-xs font-mono text-emerald-400 font-bold">Step 1 of 3</span>
+        </div>
+
+        {/* Subtle mobile progress bar at bottom of sticky header */}
+        <div className="sm:hidden w-full h-[2px] bg-white/5">
+          <div className="h-full bg-emerald-500 w-1/3 transition-all duration-300" />
         </div>
       </nav>
 
       {/* ─── MAIN CONTAINER ─── */}
-      <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 pt-10">
-        <form onSubmit={handleContinue} className="space-y-10">
+      <div className="mx-auto max-w-5xl px-3.5 sm:px-6 lg:px-8 pt-6 sm:pt-10">
+        <form onSubmit={handleContinue} className="space-y-6 sm:space-y-10">
           
           {/* Header Title */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-emerald-400 text-xs font-black uppercase tracking-widest">
-              <Sparkles className="h-4 w-4" />
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2 text-emerald-400 text-[11px] sm:text-xs font-black uppercase tracking-widest">
+              <Sparkles className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
               <span>Official Squad Registration</span>
             </div>
-            <h1 className="text-3xl sm:text-4xl font-black uppercase tracking-tight text-white">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black uppercase tracking-tight text-white break-words leading-tight">
               {tournament.title || tournament.name}
             </h1>
-            <p className="text-slate-400 text-xs sm:text-sm">
+            <p className="text-slate-400 text-xs sm:text-sm leading-relaxed">
               Register exactly <strong className="text-emerald-400">4 players (Captain + 3 Teammates)</strong>. All 4 members must provide their full names, in-game tags, and valid student emails.
             </p>
+
+            {/* Quick meta badges strip for mobile & desktop */}
+            <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] font-bold">
+              <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-300 flex items-center gap-1.5">
+                <Trophy className="h-3 w-3 text-amber-400 shrink-0" />
+                Pool: <span className="text-amber-400">{tournament.prize || 'Verified'}</span>
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-300 flex items-center gap-1.5">
+                <Zap className="h-3 w-3 text-emerald-400 shrink-0" />
+                Fee: <span className="text-emerald-400">{tournament.fee || 'Free'}</span>
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-slate-300 flex items-center gap-1.5">
+                <Users className="h-3 w-3 text-sky-400 shrink-0" />
+                <span>4v4 Squad</span>
+              </span>
+            </div>
           </div>
 
           {/* Error Banner */}
           {errorMsg && (
-            <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-center gap-2.5">
-              <AlertCircle className="h-5 w-5 shrink-0 text-rose-400" />
+            <div className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-start sm:items-center gap-2.5 break-words">
+              <AlertCircle className="h-5 w-5 shrink-0 text-rose-400 mt-0.5 sm:mt-0" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           {/* ═══════════════ SQUAD INFO CARD ═══════════════ */}
-          <div className="p-6 sm:p-8 rounded-3xl bg-[#0C111D] border border-white/10 space-y-6 shadow-xl">
-            <h3 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
-              <Users className="h-4 w-4 text-emerald-400" /> 1. Squad Identification
+          <div className="p-4 sm:p-6 lg:p-8 rounded-2xl sm:rounded-3xl bg-[#0C111D] border border-white/10 space-y-4 sm:space-y-6 shadow-xl">
+            <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
+              <Users className="h-4 w-4 text-emerald-400 shrink-0" /> 1. Squad Identification
             </h3>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               <div className="space-y-1.5">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
                   Squad / Team Name <span className="text-rose-400">*</span>
@@ -303,13 +337,13 @@ export default function RegistrationStepOne() {
                   onChange={(e) => { setTeamName(e.target.value); setErrorMsg(''); }}
                   placeholder="e.g. TEAM TITANS"
                   required
-                  className="w-full px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-sm font-bold uppercase outline-none focus:border-emerald-500"
+                  className="w-full px-3.5 sm:px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-base sm:text-sm font-bold uppercase outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition"
                 />
               </div>
 
               <div className="space-y-1.5">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                  <School className="h-3.5 w-3.5 text-emerald-400" /> University / College <span className="text-rose-400">*</span>
+                  <School className="h-3.5 w-3.5 text-emerald-400 shrink-0" /> University / College <span className="text-rose-400">*</span>
                 </label>
                 <input
                   type="text"
@@ -317,24 +351,24 @@ export default function RegistrationStepOne() {
                   onChange={(e) => { setCollege(e.target.value); setErrorMsg(''); }}
                   placeholder="e.g. Nexus Institute of Technology"
                   required
-                  className="w-full px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-sm outline-none focus:border-emerald-500 font-semibold"
+                  className="w-full px-3.5 sm:px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-base sm:text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 font-semibold transition"
                 />
               </div>
             </div>
           </div>
 
           {/* ═══════════════ EXACTLY 4 SQUAD PLAYERS ═══════════════ */}
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-emerald-400" /> 2. Four Squad Members (All 4 Required)
+          <div className="space-y-4 sm:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" /> 2. Four Squad Members (All 4 Required)
               </h3>
-              <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-black uppercase rounded-full">
+              <span className="self-start sm:self-auto px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] sm:text-[11px] font-black uppercase rounded-full shrink-0">
                 4 / 4 Roster Slots
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
               {players.map((player, idx) => {
                 const isCap = idx === 0;
                 return (
@@ -343,28 +377,28 @@ export default function RegistrationStepOne() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.05 }}
-                    className={`p-6 rounded-3xl border shadow-xl relative space-y-4 ${
+                    className={`p-4 sm:p-6 rounded-2xl sm:rounded-3xl border shadow-xl relative space-y-3.5 sm:space-y-4 ${
                       isCap
                         ? 'bg-gradient-to-b from-emerald-500/10 via-[#0C111D] to-[#0C111D] border-emerald-500/40'
                         : 'bg-[#0C111D] border-white/10'
                     }`}
                   >
                     {/* Header badge */}
-                    <div className="flex items-center justify-between">
-                      <span className={`text-xs font-black uppercase tracking-wider px-3 py-1 rounded-full ${
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`text-[11px] sm:text-xs font-black uppercase tracking-wider px-2.5 sm:px-3 py-1 rounded-full shrink-0 ${
                         isCap
                           ? 'bg-emerald-500 text-black'
                           : 'bg-white/10 text-slate-300'
                       }`}>
                         {isCap ? '👑 Player 1 (Captain)' : `Player ${player.slot}`}
                       </span>
-                      <span className="text-[11px] font-mono text-slate-500">Slot {player.slot}</span>
+                      <span className="text-[10px] sm:text-[11px] font-mono text-slate-500 shrink-0">Slot {player.slot}</span>
                     </div>
 
                     {/* Full Name */}
                     <div className="space-y-1">
                       <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                        <User className="h-3 w-3 text-slate-400" /> Full Name <span className="text-rose-400">*</span>
+                        <User className="h-3 w-3 text-slate-400 shrink-0" /> Full Name <span className="text-rose-400">*</span>
                       </label>
                       <input
                         type="text"
@@ -372,14 +406,14 @@ export default function RegistrationStepOne() {
                         onChange={(e) => handlePlayerChange(idx, 'name', e.target.value)}
                         placeholder={isCap ? "e.g. Rahul Sharma" : `e.g. Teammate ${player.slot} Name`}
                         required
-                        className="w-full px-3.5 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-bold outline-none focus:border-emerald-500"
+                        className="w-full px-3.5 py-2.5 sm:py-3 bg-black/50 border border-white/10 rounded-xl text-white text-base sm:text-xs font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition"
                       />
                     </div>
 
                     {/* In-Game Tag / IGN */}
                     <div className="space-y-1">
                       <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                        <Hash className="h-3 w-3 text-emerald-400" /> In-Game Tag / IGN <span className="text-rose-400">*</span>
+                        <Hash className="h-3 w-3 text-emerald-400 shrink-0" /> In-Game Tag / IGN <span className="text-rose-400">*</span>
                       </label>
                       <input
                         type="text"
@@ -387,14 +421,14 @@ export default function RegistrationStepOne() {
                         onChange={(e) => handlePlayerChange(idx, 'inGameTag', e.target.value)}
                         placeholder="e.g. TITAN#9999 or VIPER_OP"
                         required
-                        className="w-full px-3.5 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-mono font-bold outline-none focus:border-emerald-500 uppercase"
+                        className="w-full px-3.5 py-2.5 sm:py-3 bg-black/50 border border-white/10 rounded-xl text-white text-base sm:text-xs font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 uppercase transition"
                       />
                     </div>
 
                     {/* Player Email (MANDATORY FOR ALL 4 PLAYERS) */}
                     <div className="space-y-1">
                       <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                        <Mail className="h-3 w-3 text-amber-400" /> Student Email Address <span className="text-rose-400">*</span>
+                        <Mail className="h-3 w-3 text-amber-400 shrink-0" /> Student Email Address <span className="text-rose-400">*</span>
                       </label>
                       <input
                         type="email"
@@ -402,7 +436,7 @@ export default function RegistrationStepOne() {
                         onChange={(e) => handlePlayerChange(idx, 'email', e.target.value)}
                         placeholder={`player${player.slot}@university.edu`}
                         required
-                        className="w-full px-3.5 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-mono outline-none focus:border-emerald-500"
+                        className="w-full px-3.5 py-2.5 sm:py-3 bg-black/50 border border-white/10 rounded-xl text-white text-base sm:text-xs font-mono outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition"
                       />
                     </div>
 
@@ -410,14 +444,14 @@ export default function RegistrationStepOne() {
                     {isCap && (
                       <div className="space-y-1">
                         <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                          <Phone className="h-3 w-3 text-emerald-400" /> Captain Phone / WhatsApp
+                          <Phone className="h-3 w-3 text-emerald-400 shrink-0" /> Captain Phone / WhatsApp
                         </label>
                         <input
                           type="tel"
                           value={player.phone || ''}
                           onChange={(e) => handlePlayerChange(idx, 'phone', e.target.value)}
                           placeholder="+91 9876543210"
-                          className="w-full px-3.5 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-xs font-mono outline-none focus:border-emerald-500"
+                          className="w-full px-3.5 py-2.5 sm:py-3 bg-black/50 border border-white/10 rounded-xl text-white text-base sm:text-xs font-mono outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition"
                         />
                       </div>
                     )}
@@ -429,13 +463,18 @@ export default function RegistrationStepOne() {
 
           {/* ═══════════════ BOTTOM ACTION ═══════════════ */}
           <div className="pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="text-xs text-slate-400 text-center sm:text-left">
-              Registration Fee: <strong className="text-white">{tournament.fee || 'Free'}</strong> · Prize Pool: <strong className="text-amber-400">{tournament.prize}</strong>
+            <div className="text-xs text-slate-400 text-center sm:text-left space-y-0.5">
+              <div>
+                Registration Fee: <strong className="text-white">{tournament.fee || 'Free'}</strong> · Prize Pool: <strong className="text-amber-400">{tournament.prize}</strong>
+              </div>
+              <div className="text-[11px] text-slate-500 font-mono">
+                Squad of 4 · Instant Verification · Next: Review Details
+              </div>
             </div>
 
             <button
               type="submit"
-              className="w-full sm:w-auto px-8 py-4 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-black font-black text-sm uppercase tracking-wider rounded-2xl transition shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full sm:w-auto px-8 py-3.5 sm:py-4 bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-black font-black text-sm uppercase tracking-wider rounded-xl sm:rounded-2xl transition shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer shrink-0"
             >
               Verify 4-Player Squad
               <ChevronRight className="h-4 w-4" />

@@ -47,6 +47,7 @@ export const Navbar = () => {
   const isLogin = pathname === '/login';
   const isAdmin = pathname?.startsWith('/admin');
   const isHostFlow = pathname === '/host';
+  const isRegistration = pathname?.startsWith('/registration');
 
   const checkTicketsStatus = async (userEmail?: string) => {
     try {
@@ -180,7 +181,7 @@ export const Navbar = () => {
     router.push('/');
   };
 
-  if (isAdmin || isHostFlow) {
+  if (isAdmin || isHostFlow || isRegistration) {
     return null;
   }
 

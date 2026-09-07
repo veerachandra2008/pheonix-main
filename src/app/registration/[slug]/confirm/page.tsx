@@ -580,7 +580,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
   const numericAmount = parseFeeAmount(selection.tournamentFee);
 
   return (
-    <main className="min-h-screen bg-[#09090b] text-white font-sans relative">
+    <main className="min-h-screen bg-[#09090b] text-white font-sans relative w-full max-w-full overflow-x-hidden pb-16 sm:pb-20">
       {/* ─── FULLSCREEN LOADING OVERLAY ─── */}
       {paymentStep !== 'idle' && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
@@ -601,17 +601,17 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
       )}
 
       {/* ─── STICKY TOP NAV ─── */}
-      <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#09090b]/80 backdrop-blur-xl">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#09090b]/90 backdrop-blur-xl transition-all">
+        <div className="mx-auto max-w-7xl px-3.5 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2">
           <Link
             href={`/registration/${slug}`}
-            className="inline-flex items-center gap-2 text-zinc-400 hover:text-white text-sm font-medium transition"
+            className="inline-flex items-center gap-1.5 sm:gap-2 text-zinc-400 hover:text-white text-[11px] sm:text-sm font-medium transition px-2.5 sm:px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 shrink-0"
           >
-            <ArrowLeft className="h-4 w-4" />
-            Back
+            <ArrowLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <span>Back</span>
           </Link>
 
-          {/* Step Indicator */}
+          {/* Step Indicator (Desktop) */}
           <div className="hidden sm:flex items-center gap-2">
             {['Select Team', 'Verify Squad', 'Entry Pass'].map((label, i) => (
               <React.Fragment key={label}>
@@ -648,20 +648,37 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
             ))}
           </div>
 
-          <div className="text-xs text-zinc-600 font-medium">Step 2 of 3</div>
+          {/* Step Indicator (Mobile Compact) */}
+          <div className="flex sm:hidden items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-white/20" />
+            </div>
+            <span className="text-[11px] font-mono text-emerald-400 font-black px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25">
+              Step 2/3
+            </span>
+          </div>
+
+          <div className="hidden sm:block text-xs text-zinc-600 font-medium">Step 2 of 3</div>
+        </div>
+
+        {/* Subtle mobile progress bar */}
+        <div className="sm:hidden w-full h-[2px] bg-white/5">
+          <div className="h-full bg-emerald-500 w-2/3 transition-all duration-300" />
         </div>
       </nav>
 
       {/* ─── CONTENT ─── */}
-      <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-10 lg:py-16 space-y-8">
+      <div className="mx-auto max-w-3xl px-3.5 sm:px-6 lg:px-8 py-6 sm:py-10 lg:py-16 space-y-6 sm:space-y-8">
         {/* Header */}
         <div className="space-y-1.5">
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-bold uppercase tracking-widest">
             <ShieldCheck className="h-3 w-3" />
             Squad Verification
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">Confirm your squad details</h1>
-          <p className="text-sm text-zinc-400">
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-white tracking-tight break-words">Confirm your squad details</h1>
+          <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed">
             Review your team information and verify your student status before proceeding.
           </p>
         </div>
@@ -712,8 +729,8 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
         )}
 
         {/* Tournament summary strip */}
-        <div className="flex items-center gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/[0.07]">
-          <div className="w-14 h-14 rounded-xl overflow-hidden shrink-0 border border-white/10">
+        <div className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-2xl bg-white/[0.03] border border-white/[0.07]">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl overflow-hidden shrink-0 border border-white/10">
             <img
               src={selection.tournamentImage || '/hero-arena.jpg'}
               alt={selection.tournamentGame}
@@ -721,39 +738,39 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
             />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-white truncate">{selection.tournamentTitle}</p>
-            <p className="text-xs text-zinc-500 mt-0.5">
+            <p className="text-xs sm:text-sm font-bold text-white truncate">{selection.tournamentTitle}</p>
+            <p className="text-[11px] sm:text-xs text-zinc-500 mt-0.5 truncate">
               {selection.tournamentGame} · {selection.tournamentFormat} · {selection.tournamentDate}
             </p>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-[11px] text-zinc-500">Entry Fee</p>
-            <p className="text-sm font-black text-emerald-400">{selection.tournamentFee}</p>
+            <p className="text-[10px] sm:text-[11px] text-zinc-500">Entry Fee</p>
+            <p className="text-xs sm:text-sm font-black text-emerald-400">{selection.tournamentFee}</p>
           </div>
         </div>
 
         {/* Team card with 4 Players Breakdown */}
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
             <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Verified 4-Player Roster</p>
-            <span className="text-[10px] font-black uppercase text-emerald-400 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30">
+            <span className="self-start sm:self-auto text-[10px] font-black uppercase text-emerald-400 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30">
               4 / 4 Members Registered
             </span>
           </div>
 
-          <div className="p-5 sm:p-6 rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl space-y-5">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center font-black text-lg text-emerald-400 shrink-0">
+          <div className="p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl space-y-4 sm:space-y-5">
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center font-black text-base sm:text-lg text-emerald-400 shrink-0">
                 {selection.teamName?.slice(0, 2).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-base font-black text-white">{selection.teamName}</p>
-                <p className="text-xs text-zinc-400 mt-0.5">{selection.college}</p>
+                <p className="text-sm sm:text-base font-black text-white truncate">{selection.teamName}</p>
+                <p className="text-xs text-zinc-400 mt-0.5 truncate">{selection.college}</p>
               </div>
             </div>
 
             {/* 4-Player Table */}
-            <div className="space-y-2 pt-2">
+            <div className="space-y-2 pt-1 sm:pt-2">
               {(selection.players && selection.players.length > 0 ? selection.players : [
                 { slot: 1, name: selection.captainName, inGameTag: 'CAPTAIN', email: selection.email, isCaptain: true },
                 { slot: 2, name: 'Teammate 2', inGameTag: 'PLAYER_2', email: 'teammate2@university.edu', isCaptain: false },
@@ -762,20 +779,20 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
               ]).map((p: any) => (
                 <div
                   key={p.slot}
-                  className="p-3 rounded-2xl bg-black/40 border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                  className="p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-black/40 border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase ${
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`px-2 py-0.5 rounded-lg text-[9px] sm:text-[10px] font-black uppercase shrink-0 ${
                       p.isCaptain || p.slot === 1
                         ? 'bg-emerald-500 text-black'
                         : 'bg-white/10 text-slate-300'
                     }`}>
                       {p.isCaptain || p.slot === 1 ? '👑 Captain' : `P${p.slot}`}
                     </span>
-                    <span className="text-xs font-bold text-white">{p.name}</span>
-                    <span className="text-[11px] font-mono font-bold text-emerald-400">({p.inGameTag || 'IGN'})</span>
+                    <span className="text-xs font-bold text-white truncate">{p.name}</span>
+                    <span className="text-[11px] font-mono font-bold text-emerald-400 shrink-0">({p.inGameTag || 'IGN'})</span>
                   </div>
-                  <span className="text-xs font-mono text-slate-400 sm:text-right truncate">{p.email}</span>
+                  <span className="text-xs font-mono text-slate-400 sm:text-right truncate break-all">{p.email}</span>
                 </div>
               ))}
             </div>
@@ -783,7 +800,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
         </div>
 
         {/* Verification form */}
-        <div className="space-y-5 p-6 rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl">
+        <div className="space-y-4 sm:space-y-5 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl">
           <div>
             <p className="text-sm font-bold text-white mb-1">Identity Verification</p>
             <p className="text-xs text-zinc-500">
@@ -805,7 +822,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
                 setEmailError('');
               }}
               placeholder="you@university.ac.in"
-              className={`w-full rounded-2xl bg-white/[0.04] border px-4 py-3.5 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-emerald-500 transition backdrop-blur-sm ${
+              className={`w-full rounded-xl sm:rounded-2xl bg-white/[0.04] border px-3.5 sm:px-4 py-3 sm:py-3.5 text-base sm:text-sm text-white placeholder:text-zinc-600 outline-none focus:border-emerald-500 transition backdrop-blur-sm ${
                 emailError ? 'border-red-500/60' : 'border-white/10 hover:border-white/20'
               }`}
             />
@@ -823,7 +840,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
               setConfirmed(!confirmed);
               setEmailError('');
             }}
-            className="w-full flex items-start gap-3.5 p-4 rounded-2xl bg-white/[0.02] border border-white/[0.07] hover:border-white/15 transition text-left"
+            className="w-full flex items-start gap-3 p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white/[0.02] border border-white/[0.07] hover:border-white/15 transition text-left"
           >
             <div
               className={`w-5 h-5 rounded-lg border shrink-0 mt-0.5 flex items-center justify-center transition-all duration-200 ${
@@ -849,7 +866,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
         </div>
 
         {/* Info strip */}
-        <div className="flex items-start gap-3 p-4 rounded-2xl bg-sky-500/[0.06] border border-sky-500/20">
+        <div className="flex items-start gap-3 p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-sky-500/[0.06] border border-sky-500/20">
           <Lock className="h-4 w-4 text-sky-400 shrink-0 mt-0.5" />
           <p className="text-xs text-zinc-400 leading-relaxed">
             Your information is used solely for identity verification and tournament communications. It will not be shared with third parties.
@@ -857,7 +874,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
         </div>
 
         {/* Final summary before commit */}
-        <div className="p-5 rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl space-y-4">
+        <div className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl bg-white/[0.04] border border-white/10 backdrop-blur-xl space-y-4">
           <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Order Summary</p>
           <div className="space-y-2.5">
             {[
@@ -867,9 +884,9 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
               { label: 'Date', value: selection.tournamentDate },
               { label: 'Entry Fee', value: selection.tournamentFee, highlight: true },
             ].map(({ label, value, highlight }) => (
-              <div key={label} className="flex items-center justify-between">
-                <span className="text-xs text-zinc-500">{label}</span>
-                <span className={`text-xs font-semibold ${highlight ? 'text-emerald-400' : 'text-white'}`}>{value}</span>
+              <div key={label} className="flex items-center justify-between gap-2">
+                <span className="text-xs text-zinc-500 shrink-0">{label}</span>
+                <span className={`text-xs font-semibold truncate text-right ${highlight ? 'text-emerald-400' : 'text-white'}`}>{value}</span>
               </div>
             ))}
           </div>
@@ -878,7 +895,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
               <button
                 onClick={() => handleCheckPaymentStatus()}
                 disabled={isReconciling}
-                className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-amber-500 text-black font-black text-sm uppercase tracking-wider hover:bg-amber-400 transition shadow-lg shadow-amber-500/20 disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-amber-500 text-black font-black text-sm uppercase tracking-wider hover:bg-amber-400 transition shadow-lg shadow-amber-500/20 disabled:opacity-50"
               >
                 {isReconciling ? (
                   <>
@@ -896,7 +913,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
               <button
                 onClick={handleContinue}
                 disabled={paymentStep !== 'idle'}
-                className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500 text-black font-black text-sm uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-emerald-500 text-black font-black text-sm uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20 disabled:opacity-50 active:scale-[0.98]"
               >
                 {numericAmount > 0 ? (
                   <>

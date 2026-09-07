@@ -261,18 +261,18 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
   const verificationUrl = `${origin}/verify/${ticketData?.passId}`;
 
   return (
-    <main className="min-h-screen bg-[#09090b] text-white font-sans">
+    <main className="min-h-screen bg-[#09090b] text-white font-sans w-full max-w-full overflow-x-hidden pb-16 sm:pb-20">
       {/* ─── STICKY TOP NAV ─── */}
-      <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#09090b]/80 backdrop-blur-xl no-print">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <Link href="/dashboard" className="flex items-center gap-2">
+      <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#09090b]/90 backdrop-blur-xl no-print transition-all">
+        <div className="mx-auto max-w-7xl px-3.5 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2">
+          <Link href="/dashboard" className="flex items-center gap-2 shrink-0">
             <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center">
               <Zap className="h-3.5 w-3.5 text-emerald-400" />
             </div>
             <span className="text-sm font-black text-white tracking-tight">XENOVA</span>
           </Link>
 
-          {/* Step Indicator — all complete */}
+          {/* Step Indicator — all complete (Desktop) */}
           <div className="hidden sm:flex items-center gap-2">
             {['Select Team', 'Verify Squad', 'Entry Pass'].map((label, i) => (
               <React.Fragment key={label}>
@@ -289,31 +289,46 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             ))}
           </div>
 
-          <div className="text-xs text-emerald-500 font-bold">Verified ✓</div>
+          {/* Step Indicator (Mobile Compact) */}
+          <div className="flex sm:hidden items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            </div>
+            <span className="text-[11px] font-mono text-emerald-400 font-black px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25">
+              Verified ✓
+            </span>
+          </div>
+
+          <div className="hidden sm:block text-xs text-emerald-500 font-bold">Verified ✓</div>
         </div>
+
+        {/* Subtle progress bar */}
+        <div className="sm:hidden w-full h-[2px] bg-emerald-500" />
       </nav>
 
       {/* ─── MAIN CONTENT ─── */}
-      <div className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8 py-12 lg:py-16 space-y-8">
+      <div className="mx-auto max-w-2xl px-3.5 sm:px-6 lg:px-8 py-8 sm:py-12 lg:py-16 space-y-6 sm:space-y-8">
         {/* Success Header */}
         <div className="text-center space-y-3 no-print">
           <div className="relative inline-flex">
-            <div className="w-20 h-20 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-              <CheckCircle2 className="h-10 w-10 text-emerald-400" />
+            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+              <CheckCircle2 className="h-8 w-8 sm:h-10 sm:w-10 text-emerald-400" />
             </div>
             <div className="absolute inset-0 rounded-full border border-emerald-500/20 animate-ping opacity-40" />
           </div>
 
           <div className="space-y-1">
-            <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">Registration Complete!</h1>
-            <p className="text-sm text-zinc-400 max-w-sm mx-auto">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight break-words">Registration Complete!</h1>
+            <p className="text-xs sm:text-sm text-zinc-400 max-w-sm mx-auto leading-relaxed">
               Your official esports ticket has been generated and recorded in the database. Present this pass at match lobbies.
             </p>
           </div>
         </div>
 
         {/* ─── EMAIL CONFIRMATION & RESEND BANNER ─── */}
-        <div className="rounded-2xl bg-white/[0.03] border border-white/10 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs no-print shadow-lg">
+        <div className="rounded-2xl bg-white/[0.03] border border-white/10 p-3.5 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs no-print shadow-lg">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0">
               <Mail className="w-4 h-4 text-emerald-400" />
@@ -336,7 +351,7 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             <button
               onClick={handleResendEmail}
               disabled={emailStatus === 'sending'}
-              className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-bold transition flex items-center gap-1.5 disabled:opacity-50 text-xs"
+              className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-bold transition flex items-center justify-center gap-1.5 disabled:opacity-50 text-xs"
             >
               {emailStatus === 'sending' ? (
                 <>
@@ -370,40 +385,40 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/30 to-[#111115]" />
 
             {/* Pass header overlay */}
-            <div className="absolute inset-0 flex items-center justify-between px-7">
-              <div>
-                <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-0.5 flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3" /> Official Entry Pass
+            <div className="absolute inset-0 flex items-center justify-between px-4 sm:px-7 gap-2">
+              <div className="min-w-0 pr-2">
+                <p className="text-[9px] sm:text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-0.5 flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 shrink-0" /> Official Entry Pass
                 </p>
-                <p className="text-white font-black text-xl leading-tight">{ticketData?.tournamentTitle}</p>
+                <p className="text-white font-black text-base sm:text-xl leading-tight truncate">{ticketData?.tournamentTitle}</p>
               </div>
-              <div className="text-right">
-                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-0.5">Game</p>
-                <p className="text-emerald-400 font-black text-sm">{ticketData?.tournamentGame}</p>
+              <div className="text-right shrink-0">
+                <p className="text-[9px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-0.5">Game</p>
+                <p className="text-emerald-400 font-black text-xs sm:text-sm">{ticketData?.tournamentGame}</p>
               </div>
             </div>
           </div>
 
           {/* Pass body */}
-          <div className="bg-[#111115] px-7 py-6 space-y-6">
+          <div className="bg-[#111115] px-4 sm:px-7 py-4 sm:py-6 space-y-4 sm:space-y-6">
             {/* Team + status banner */}
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center font-black text-xl text-emerald-400 shrink-0">
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center font-black text-lg sm:text-xl text-emerald-400 shrink-0">
                 {ticketData?.teamName?.slice(0, 2).toUpperCase()}
               </div>
-              <div>
-                <p className="text-xl font-black text-white">{ticketData?.teamName}</p>
-                <p className="text-xs text-zinc-400 mt-0.5">{ticketData?.college}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-base sm:text-xl font-black text-white truncate">{ticketData?.teamName}</p>
+                <p className="text-xs text-zinc-400 mt-0.5 truncate">{ticketData?.college}</p>
               </div>
-              <div className="ml-auto text-right">
-                <div className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold uppercase tracking-wider inline-block">
+              <div className="shrink-0 text-right">
+                <div className="px-2.5 sm:px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] sm:text-xs font-bold uppercase tracking-wider inline-block">
                   {ticketData?.paymentStatus || 'VERIFIED'}
                 </div>
               </div>
             </div>
 
             {/* Athlete Bio & Squad Motto */}
-            <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-emerald-500/20 flex items-start gap-2.5 shadow-sm">
+            <div className="p-3 sm:p-3.5 rounded-2xl bg-white/[0.03] border border-emerald-500/20 flex items-start gap-2.5 shadow-sm">
               <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
               <div className="space-y-0.5 text-xs">
                 <div className="flex items-center gap-2">
@@ -439,10 +454,10 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
                   ticketData.players.map((p: any) => (
                     <div
                       key={p.slot || p.email}
-                      className="p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center justify-between text-xs gap-2"
+                      className="p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-1 sm:gap-2"
                     >
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
+                        <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase shrink-0 ${
                           p.isCaptain || p.slot === 1
                             ? 'bg-emerald-500 text-black'
                             : 'bg-white/10 text-zinc-400'
@@ -450,15 +465,15 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
                           {p.isCaptain || p.slot === 1 ? '👑 Captain' : `P${p.slot}`}
                         </span>
                         <span className="font-bold text-white truncate">{p.name}</span>
-                        <span className="font-mono text-emerald-400 text-[11px]">({p.inGameTag || 'IGN'})</span>
+                        <span className="font-mono text-emerald-400 text-[11px] shrink-0">({p.inGameTag || 'IGN'})</span>
                       </div>
-                      <span className="font-mono text-zinc-400 text-[11px] truncate max-w-[170px] text-right">{p.email}</span>
+                      <span className="font-mono text-zinc-400 text-[11px] truncate sm:max-w-[170px] sm:text-right break-all">{p.email}</span>
                     </div>
                   ))
                 ) : (
-                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center justify-between text-xs">
-                    <span className="text-zinc-300 font-medium">Captain: {ticketData?.captainName || ticketData?.captain_name || ticketData?.name || 'Registered'}</span>
-                    <span className="font-mono text-zinc-500 text-[11px]">{ticketData?.email || ''}</span>
+                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06] flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-1 sm:gap-2">
+                    <span className="text-zinc-300 font-medium truncate">Captain: {ticketData?.captainName || ticketData?.captain_name || ticketData?.name || 'Registered'}</span>
+                    <span className="font-mono text-zinc-500 text-[11px] truncate break-all">{ticketData?.email || ''}</span>
                   </div>
                 )}
               </div>
@@ -468,15 +483,15 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             <div className="border-t border-dashed border-white/[0.1]" />
 
             {/* Pass ID + Live Scannable QR Code */}
-            <div className="flex items-center justify-between gap-6 p-4 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
-              <div className="space-y-1">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-6 p-4 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
+              <div className="space-y-1 min-w-0 text-center sm:text-left">
                 <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Unique Pass ID</p>
-                <p className="text-xl font-black text-emerald-400 font-mono tracking-widest">{ticketData?.passId}</p>
+                <p className="text-base sm:text-xl font-black text-emerald-400 font-mono tracking-wider sm:tracking-widest break-all">{ticketData?.passId}</p>
                 <p className="text-[10px] text-zinc-500">Scan QR to verify authentic ticket status on server</p>
               </div>
 
               {/* Scannable QR Code Component */}
-              <div className="p-2 bg-white rounded-2xl shrink-0 shadow-lg border border-white/20">
+              <div className="p-2 bg-white rounded-2xl shrink-0 shadow-lg border border-white/20 self-center sm:self-auto">
                 <QRCodeComponent value={verificationUrl} size={84} />
               </div>
             </div>
@@ -487,7 +502,7 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
                 Verified by Xenova Esports Engine
               </span>
-              <span>Ref: {ticketData?.passId}</span>
+              <span className="truncate max-w-[120px] text-right">Ref: {ticketData?.passId}</span>
             </div>
           </div>
         </div>
@@ -496,7 +511,7 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
         <div className="flex flex-col sm:flex-row gap-3 no-print">
           <button
             onClick={handleDownloadPDF}
-            className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500 text-black font-black text-sm uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20"
+            className="flex-1 flex items-center justify-center gap-2 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-emerald-500 text-black font-black text-sm uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20 active:scale-[0.98]"
           >
             <Download className="h-4 w-4" />
             Print / Save Pass (PDF)
@@ -505,7 +520,7 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
           <button
             onClick={handleResendEmail}
             disabled={emailStatus === 'sending'}
-            className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 font-bold text-sm uppercase tracking-wider hover:bg-emerald-500/20 transition disabled:opacity-50"
+            className="flex-1 flex items-center justify-center gap-2 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 font-bold text-sm uppercase tracking-wider hover:bg-emerald-500/20 transition disabled:opacity-50 active:scale-[0.98]"
           >
             {emailStatus === 'sending' ? (
               <>
