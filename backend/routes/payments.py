@@ -53,6 +53,58 @@ def parse_tournament_fee(fee_str):
     amount_paise = int(round(amount_rupees * 100))
     return True, amount_rupees, amount_paise
 
+def validate_complete_squad(reg_payload):
+    """
+    Validates that registration_payload contains a complete 4-player squad
+    according to the XENOVA roster schema.
+    Returns (is_valid, error_message, parsed_players).
+    """
+    if not reg_payload or not isinstance(reg_payload, dict):
+        return False, "Payment is missing registration payload.", []
+
+    team_name = (reg_payload.get('team_name') or reg_payload.get('teamName') or '').strip()
+    college = (reg_payload.get('college') or '').strip()
+    if not team_name:
+        return False, "Team name is required in registration details.", []
+    if not college:
+        return False, "College is required in registration details.", []
+
+    players = reg_payload.get('players')
+    if isinstance(players, str):
+        try:
+            players = json.loads(players)
+        except Exception:
+            players = []
+
+    if not isinstance(players, list) or len(players) < 4:
+        found_cnt = len(players) if isinstance(players, list) else 0
+        return False, f"Complete 4-player squad is required. Found {found_cnt} players.", []
+
+    validated_players = []
+    for idx in range(4):
+        p = players[idx]
+        slot = idx + 1
+        if isinstance(p, str):
+            p_name = p.strip()
+            p_tag = f"TAG_{slot}"
+        elif isinstance(p, dict):
+            p_name = (p.get('name') or p.get('playerName') or '').strip()
+            p_tag = (p.get('inGameTag') or p.get('in_game_tag') or p.get('ign') or f"TAG_{slot}").strip()
+        else:
+            p_name = str(p).strip()
+            p_tag = f"TAG_{slot}"
+
+        if not p_name:
+            return False, f"Player at slot {slot} has an empty name.", []
+
+        validated_players.append({
+            'slot': slot,
+            'name': p_name,
+            'inGameTag': p_tag
+        })
+
+    return True, None, validated_players
+
 def finalize_successful_payment(order_id, payment_id, registration_data=None, user_info=None, bypass_razorpay_fetch=False):
     """
     Unified, idempotent payment finalization function.
@@ -111,7 +163,7 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
 
     # ─── RETRIEVE ORDER METADATA ───
     order_record = IN_MEMORY_PAYMENT_ORDERS.get(order_id) or {}
-    tournament_slug = registration_data.get('tournamentSlug') or order_record.get('tournament_slug') or ''
+    tournament_slug = registration_data.get('tournamentSlug') or registration_data.get('tournament_slug') or order_record.get('tournament_slug') or ''
     if not tournament_slug:
         try:
             ord_db = supabase.table('payment_orders').select('*').eq('order_id', order_id).execute()
@@ -123,17 +175,22 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
 
     # ─── FETCH TOURNAMENT FROM DB FOR AUTHORITATIVE FEE CHECK ───
     expected_amount_paise = None
+    tournament_title_db = None
+    tournament_game_db = None
     if tournament_slug:
         try:
             t_res = supabase.table('tournaments').select('*').eq('slug', tournament_slug).execute()
             if t_res.data and len(t_res.data) > 0:
                 t_row = t_res.data[0]
                 _, _, expected_amount_paise = parse_tournament_fee(t_row.get('fee'))
+                tournament_title_db = t_row.get('title') or t_row.get('name')
+                tournament_game_db = t_row.get('game')
         except Exception as t_err:
             print(f"[WARN] Failed to fetch tournament {tournament_slug}: {t_err}")
 
-    # ─── FETCH PAYMENT FROM RAZORPAY & VERIFY CAPTURE ───
-    if not bypass_razorpay_fetch:
+    # ─── FETCH PAYMENT FROM RAZORPAY & VERIFY CAPTURE (RAZORPAY ONLY) ───
+    is_manual_order = (order_record.get('payment_method') or '').upper() == 'MANUAL_UPI'
+    if not bypass_razorpay_fetch and not is_manual_order:
         try:
             razorpay_client = get_razorpay_client()
             payment_obj = razorpay_client.payment.fetch(payment_id)
@@ -178,18 +235,64 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
 
     # ─── ASSEMBLE REGISTRATION DETAILS ───
     pass_id = generate_pass_id()
-    team_name = registration_data.get('teamName') or order_record.get('team_name') or 'Team'
-    college = registration_data.get('college') or order_record.get('college') or 'University'
-    captain_name = registration_data.get('captainName') or registration_data.get('name') or order_record.get('captain_name') or 'Captain'
-    email = registration_data.get('email') or order_record.get('email') or (user_info.get('email') if user_info else '')
-    tournament_title = registration_data.get('tournamentTitle') or tournament_slug
-    tournament_game = registration_data.get('tournamentGame') or 'Esports'
-    tournament_date = registration_data.get('tournamentDate') or 'TBD'
-    tournament_format = registration_data.get('tournamentFormat') or 'Tournament'
-    tournament_region = registration_data.get('tournamentRegion') or 'Pan India'
-    tournament_fee = registration_data.get('tournamentFee') or 'Paid'
-    players = registration_data.get('players') or order_record.get('players') or []
-    player_emails = registration_data.get('playerEmails') or [email]
+
+    stored_reg = order_record.get('registration_payload') or {}
+    if isinstance(stored_reg, str):
+        try:
+            stored_reg = json.loads(stored_reg)
+        except Exception:
+            stored_reg = {}
+
+    team_name = (
+        registration_data.get('teamName') or registration_data.get('team_name') or 
+        stored_reg.get('teamName') or stored_reg.get('team_name') or 
+        order_record.get('team_name') or 'Team'
+    )
+    college = (
+        registration_data.get('college') or 
+        stored_reg.get('college') or 
+        order_record.get('college') or 'University'
+    )
+    captain_name = (
+        registration_data.get('captainName') or registration_data.get('captain_name') or 
+        registration_data.get('name') or 
+        stored_reg.get('captainName') or stored_reg.get('captain_name') or stored_reg.get('name') or 
+        order_record.get('captain_name') or 'Captain'
+    )
+    email = (
+        registration_data.get('email') or registration_data.get('captain_email') or 
+        stored_reg.get('email') or stored_reg.get('captain_email') or 
+        order_record.get('email') or (user_info.get('email') if user_info else '')
+    )
+    tournament_title = (
+        registration_data.get('tournamentTitle') or registration_data.get('tournament_title') or 
+        tournament_title_db or tournament_slug
+    )
+    tournament_game = (
+        registration_data.get('tournamentGame') or registration_data.get('tournament_game') or 
+        tournament_game_db or 'Esports'
+    )
+    tournament_date = registration_data.get('tournamentDate') or registration_data.get('tournament_date') or 'TBD'
+    tournament_format = registration_data.get('tournamentFormat') or registration_data.get('tournament_format') or 'Tournament'
+    tournament_region = registration_data.get('tournamentRegion') or registration_data.get('tournament_region') or 'Pan India'
+    tournament_fee = registration_data.get('tournamentFee') or registration_data.get('tournament_fee') or 'Paid'
+
+    raw_players = (
+        registration_data.get('players') or 
+        stored_reg.get('players') or 
+        order_record.get('players') or []
+    )
+    if isinstance(raw_players, str):
+        try:
+            players = json.loads(raw_players)
+        except Exception:
+            players = []
+    elif isinstance(raw_players, list):
+        players = list(raw_players)
+    else:
+        players = []
+
+    player_emails = registration_data.get('playerEmails') or stored_reg.get('playerEmails') or [email]
     user_id = (user_info.get('id') if user_info else None) or order_record.get('user_id')
 
     record = {
@@ -296,22 +399,38 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
             print(f"[WARN] Rosters insert warning: {ros_err}")
 
         # Update payment_orders table status if table exists
+        is_manual = (order_record.get('payment_method') or '').upper() == 'MANUAL_UPI'
+        target_status = 'VERIFIED' if is_manual else 'PAID'
+        server_now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
         try:
-            supabase.table('payment_orders').update({
-                'status': 'PAID',
+            update_data = {
+                'status': target_status,
                 'payment_id': payment_id,
-                'updated_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-            }).eq('order_id', order_id).execute()
-        except Exception:
-            pass
+                'updated_at': server_now_iso
+            }
+            if is_manual and user_info and user_info.get('verified_by'):
+                update_data['verified_by'] = str(user_info['verified_by'])
+                update_data['verified_at'] = server_now_iso
+
+            supabase.table('payment_orders').update(update_data).eq('order_id', order_id).execute()
+        except Exception as upd_err:
+            print(f"[WARN] Supabase payment_orders update notice: {upd_err}")
 
     except Exception as sb_err:
         print(f"[WARN] Supabase registration persistence warning: {sb_err}")
 
-    # Mark memory order as paid
+    # Mark memory order as paid / verified
+    is_manual = (order_record.get('payment_method') or '').upper() == 'MANUAL_UPI'
+    target_status = 'VERIFIED' if is_manual else 'PAID'
+    server_now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
     if order_id in IN_MEMORY_PAYMENT_ORDERS:
-        IN_MEMORY_PAYMENT_ORDERS[order_id]['status'] = 'PAID'
+        IN_MEMORY_PAYMENT_ORDERS[order_id]['status'] = target_status
         IN_MEMORY_PAYMENT_ORDERS[order_id]['payment_id'] = payment_id
+        if is_manual and user_info and user_info.get('verified_by'):
+            IN_MEMORY_PAYMENT_ORDERS[order_id]['verified_by'] = str(user_info['verified_by'])
+            IN_MEMORY_PAYMENT_ORDERS[order_id]['verified_at'] = server_now_iso
 
     # ─── DISPATCH DIGITAL ENTRY TICKET VIA BREVO TO CAPTAIN ───
     try:
@@ -892,6 +1011,7 @@ def create_manual_upi_order():
         order_id = f"UPI_{uuid.uuid4().hex[:8].upper()}_{int(time.time())}"
         order_record = {
             'order_id': order_id,
+            'payment_id': order_id,
             'tournament_slug': tournament_slug,
             'user_id': user_id,
             'email': user_email,
@@ -1205,13 +1325,66 @@ def verify_manual_upi_payment(payment_id):
 
     # Idempotent safe already-verified
     if current_status == 'VERIFIED':
+        existing_pass = None
+        try:
+            supabase = get_supabase_client()
+            r_chk = supabase.table('registrations').select('pass_id').or_(f"order_id.eq.{order_id},payment_id.eq.{order_id}").execute()
+            if r_chk.data and len(r_chk.data) > 0:
+                existing_pass = r_chk.data[0].get('pass_id')
+        except Exception:
+            pass
+        if not existing_pass:
+            for pk, rec in IN_MEMORY_REGISTRATIONS.items():
+                if rec.get('order_id') == order_id or rec.get('payment_id') == order_id:
+                    existing_pass = pk
+                    break
         return jsonify({
             'success': True,
             'already_verified': True,
             'message': 'Payment is already verified.',
             'order_id': order_id,
-            'status': 'VERIFIED'
+            'status': 'VERIFIED',
+            'passId': existing_pass
         }), 200
+
+    # If currently processing by another concurrent request, wait for completion
+    if current_status == 'PROCESSING':
+        for _ in range(30):
+            time.sleep(0.05)
+            chk_payment = load_payment_order(payment_id)
+            if chk_payment:
+                st = (chk_payment.get('status') or '').upper()
+                if st == 'VERIFIED':
+                    current_status = 'VERIFIED'
+                    payment = chk_payment
+                    break
+                elif st in ('REJECTED', 'DUPLICATE_REVIEW'):
+                    current_status = st
+                    payment = chk_payment
+                    break
+
+        if current_status == 'VERIFIED':
+            existing_pass = None
+            try:
+                supabase = get_supabase_client()
+                r_chk = supabase.table('registrations').select('pass_id').or_(f"order_id.eq.{order_id},payment_id.eq.{order_id}").execute()
+                if r_chk.data and len(r_chk.data) > 0:
+                    existing_pass = r_chk.data[0].get('pass_id')
+            except Exception:
+                pass
+            if not existing_pass:
+                for pk, rec in IN_MEMORY_REGISTRATIONS.items():
+                    if rec.get('order_id') == order_id or rec.get('payment_id') == order_id:
+                        existing_pass = pk
+                        break
+            return jsonify({
+                'success': True,
+                'already_verified': True,
+                'message': 'Payment is already verified.',
+                'order_id': order_id,
+                'status': 'VERIFIED',
+                'passId': existing_pass
+            }), 200
 
     # Rejected cannot be verified -> 409 Conflict
     if current_status == 'REJECTED':
@@ -1257,36 +1430,67 @@ def verify_manual_upi_payment(payment_id):
     if not screenshot:
         return jsonify({'success': False, 'message': 'Payment is missing required payment screenshot.'}), 400
 
-    # Verify registration_payload exists
-    reg_payload = payment.get('registration_payload')
-    if not reg_payload or (not isinstance(reg_payload, dict) and not isinstance(reg_payload, str)):
+    # Verify registration_payload exists and contains complete 4-player squad
+    raw_reg = payment.get('registration_payload')
+    if not raw_reg:
+        return jsonify({'success': False, 'message': 'Payment is missing registration payload.'}), 400
+    if isinstance(raw_reg, str):
+        try:
+            reg_payload = json.loads(raw_reg)
+        except Exception:
+            return jsonify({'success': False, 'message': 'Invalid registration payload JSON.'}), 400
+    elif isinstance(raw_reg, dict):
+        reg_payload = dict(raw_reg)
+    else:
         return jsonify({'success': False, 'message': 'Payment is missing registration payload.'}), 400
 
-    # Concurrency-safe state transition: PENDING -> VERIFIED
+    # Hard requirement: validate complete 4-player squad
+    is_valid_squad, squad_err, valid_players = validate_complete_squad(reg_payload)
+    if not is_valid_squad:
+        return jsonify({'success': False, 'message': squad_err}), 400
+
+    # Concurrency-safe atomic claim & finalization
     with MANUAL_UPI_LOCK:
         server_time = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         verifier_id = str(user.get('id') or user.get('email'))
+        supabase = get_supabase_client()
 
+        # 1. Atomic claim in Supabase: PENDING -> PROCESSING
+        claimed_db = False
         try:
-            supabase = get_supabase_client()
-            update_res = supabase.table('payment_orders').update({
-                'status': 'VERIFIED',
+            claim_res = supabase.table('payment_orders').update({
+                'status': 'PROCESSING',
                 'verified_by': verifier_id,
-                'verified_at': server_time,
                 'updated_at': server_time
             }).eq('order_id', order_id).eq('status', 'PENDING').execute()
 
-            if not update_res.data or len(update_res.data) == 0:
+            if claim_res.data and len(claim_res.data) > 0:
+                claimed_db = True
+            else:
+                # Row was not in PENDING status in DB
                 fresh = supabase.table('payment_orders').select('*').eq('order_id', order_id).execute()
                 if fresh.data and len(fresh.data) > 0:
                     fresh_status = (fresh.data[0].get('status') or '').upper()
                     if fresh_status == 'VERIFIED':
+                        existing_pass = None
+                        try:
+                            r_chk = supabase.table('registrations').select('pass_id').or_(f"order_id.eq.{order_id},payment_id.eq.{order_id}").execute()
+                            if r_chk.data and len(r_chk.data) > 0:
+                                existing_pass = r_chk.data[0].get('pass_id')
+                        except Exception:
+                            pass
+                        if not existing_pass:
+                            for pk, rec in IN_MEMORY_REGISTRATIONS.items():
+                                if rec.get('order_id') == order_id or rec.get('payment_id') == order_id:
+                                    existing_pass = pk
+                                    break
                         return jsonify({
                             'success': True,
                             'already_verified': True,
                             'message': 'Payment is already verified.',
                             'order_id': order_id,
-                            'status': 'VERIFIED'
+                            'status': 'VERIFIED',
+                            'passId': existing_pass
                         }), 200
                     elif fresh_status == 'REJECTED':
                         return jsonify({
@@ -1303,23 +1507,24 @@ def verify_manual_upi_payment(payment_id):
                             'status': 'DUPLICATE_REVIEW'
                         }), 409
         except Exception as sb_err:
-            print(f"[WARN] Supabase verify update notice: {sb_err}")
+            print(f"[WARN] Supabase claim notice: {sb_err}")
 
-        # Update in-memory fallback
+        # 2. Check and claim in-memory fallback
         if order_id in IN_MEMORY_PAYMENT_ORDERS:
-            curr_mem = IN_MEMORY_PAYMENT_ORDERS[order_id].get('status')
-            if curr_mem == 'PENDING':
-                IN_MEMORY_PAYMENT_ORDERS[order_id]['status'] = 'VERIFIED'
-                IN_MEMORY_PAYMENT_ORDERS[order_id]['verified_by'] = verifier_id
-                IN_MEMORY_PAYMENT_ORDERS[order_id]['verified_at'] = server_time
-                IN_MEMORY_PAYMENT_ORDERS[order_id]['updated_at'] = server_time
-            elif curr_mem == 'VERIFIED':
+            curr_mem = (IN_MEMORY_PAYMENT_ORDERS[order_id].get('status') or '').upper()
+            if curr_mem == 'VERIFIED':
+                existing_pass = None
+                for pk, rec in IN_MEMORY_REGISTRATIONS.items():
+                    if rec.get('order_id') == order_id or rec.get('payment_id') == order_id:
+                        existing_pass = pk
+                        break
                 return jsonify({
                     'success': True,
                     'already_verified': True,
                     'message': 'Payment is already verified.',
                     'order_id': order_id,
-                    'status': 'VERIFIED'
+                    'status': 'VERIFIED',
+                    'passId': existing_pass
                 }), 200
             elif curr_mem == 'REJECTED':
                 return jsonify({
@@ -1328,15 +1533,82 @@ def verify_manual_upi_payment(payment_id):
                     'order_id': order_id,
                     'status': 'REJECTED'
                 }), 409
+            elif curr_mem == 'DUPLICATE_REVIEW':
+                return jsonify({
+                    'success': False,
+                    'message': 'Payment is flagged for DUPLICATE_REVIEW and requires duplicate-UTR review.',
+                    'order_id': order_id,
+                    'status': 'DUPLICATE_REVIEW'
+                }), 409
+            IN_MEMORY_PAYMENT_ORDERS[order_id]['status'] = 'PROCESSING'
 
-    return jsonify({
-        'success': True,
-        'message': 'Payment verified successfully.',
-        'order_id': order_id,
-        'status': 'VERIFIED',
-        'verified_by': verifier_id,
-        'verified_at': server_time
-    }), 200
+        # 3. Finalize using existing finalization system
+        manual_payment_id = payment.get('payment_id') or order_id
+        player_user_id = payment.get('user_id')
+        player_email = payment.get('email') or reg_payload.get('captain_email')
+
+        fin_res = finalize_successful_payment(
+            order_id=order_id,
+            payment_id=manual_payment_id,
+            registration_data=reg_payload,
+            user_info={
+                'id': player_user_id,
+                'email': player_email,
+                'verified_by': verifier_id
+            },
+            bypass_razorpay_fetch=True
+        )
+
+        if not fin_res.get('success'):
+            # Rollback claim back to PENDING on finalization failure
+            try:
+                supabase.table('payment_orders').update({
+                    'status': 'PENDING',
+                    'verified_by': None,
+                    'updated_at': server_time
+                }).eq('order_id', order_id).execute()
+            except Exception:
+                pass
+            if order_id in IN_MEMORY_PAYMENT_ORDERS:
+                IN_MEMORY_PAYMENT_ORDERS[order_id]['status'] = 'PENDING'
+                IN_MEMORY_PAYMENT_ORDERS[order_id].pop('verified_by', None)
+
+            return jsonify({
+                'success': False,
+                'message': f"Failed to finalize registration: {fin_res.get('message', 'Unknown error')}",
+                'order_id': order_id,
+                'status': 'PENDING'
+            }), 500
+
+        pass_id = fin_res.get('passId')
+
+        # 4. Confirm complete 4-player roster was persisted
+        roster_persisted = False
+        try:
+            r_check = supabase.table('tournament_rosters').select('id').eq('pass_id', pass_id).execute()
+            if r_check.data and len(r_check.data) >= 4:
+                roster_persisted = True
+        except Exception:
+            pass
+        if not roster_persisted:
+            from routes.rosters import IN_MEMORY_ROSTERS
+            mem_roster = IN_MEMORY_ROSTERS.get(pass_id, [])
+            if len(mem_roster) >= 4:
+                roster_persisted = True
+
+        if not roster_persisted:
+            print(f"[WARN] Roster verification notice: less than 4 players confirmed for pass {pass_id}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Payment verified and registration confirmed successfully.',
+            'order_id': order_id,
+            'status': 'VERIFIED',
+            'passId': pass_id,
+            'verified_by': verifier_id,
+            'verified_at': server_time,
+            'already_verified': fin_res.get('already_completed', False)
+        }), 200
 
 
 @payments_bp.route('/manual/<payment_id>/reject', methods=['POST'])
