@@ -1113,6 +1113,112 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     }
   }
 
+  // 11. User Tournaments Payment & Registration Status Endpoint
+  if (mainSegment === 'payments' && subSegment === 'user-tournaments-status' && method === 'GET') {
+    try {
+      const url = new URL(req.url);
+      let email = (url.searchParams.get('email') || '').trim().toLowerCase();
+      let userId = (url.searchParams.get('user_id') || '').trim();
+
+      // Check Bearer token if provided
+      const authHeader = req.headers.get('authorization') || '';
+      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+      if (token) {
+        try {
+          const { data: { user } } = await supabaseAdmin.auth.getUser(token);
+          if (user) {
+            if (!userId) userId = user.id;
+            if (!email && user.email) email = user.email.toLowerCase();
+          }
+        } catch {}
+      }
+
+      if (!email && !userId) {
+        return NextResponse.json({
+          success: true,
+          registered: [],
+          pending: [],
+          rejected: [],
+        }, { status: 200 });
+      }
+
+      // 1. Query registrations for confirmed passes
+      let regQuery = supabaseAdmin.from('registrations').select('*');
+      if (userId && email) {
+        regQuery = regQuery.or(`user_id.eq.${userId},email.eq.${email}`);
+      } else if (userId) {
+        regQuery = regQuery.eq('user_id', userId);
+      } else {
+        regQuery = regQuery.eq('email', email);
+      }
+      const { data: regsData } = await regQuery;
+
+      const registered = (regsData || []).map((r: any) => ({
+        tournamentSlug: r.tournament_slug,
+        passId: r.pass_id,
+        teamName: r.team_name,
+        registeredAt: r.registered_at,
+      }));
+
+      const registeredSlugs = new Set(registered.map((r: any) => (r.tournamentSlug || '').toLowerCase()));
+
+      // 2. Query payment_orders for PENDING or REJECTED statuses
+      let orderQuery = supabaseAdmin
+        .from('payment_orders')
+        .select('order_id, tournament_slug, status, created_at, utr_id, amount_paise, payment_method')
+        .order('created_at', { ascending: false });
+
+      if (userId && email) {
+        orderQuery = orderQuery.or(`user_id.eq.${userId},email.eq.${email}`);
+      } else if (userId) {
+        orderQuery = orderQuery.eq('user_id', userId);
+      } else {
+        orderQuery = orderQuery.eq('email', email);
+      }
+      const { data: ordersData } = await orderQuery;
+
+      const pendingMap = new Map<string, any>();
+      const rejectedMap = new Map<string, any>();
+
+      for (const order of ordersData || []) {
+        const slug = (order.tournament_slug || '').toLowerCase();
+        if (!slug || registeredSlugs.has(slug)) continue;
+
+        const st = (order.status || '').toUpperCase();
+        if (st === 'PENDING' || st === 'DUPLICATE_REVIEW') {
+          if (!pendingMap.has(slug)) {
+            pendingMap.set(slug, {
+              tournamentSlug: order.tournament_slug,
+              orderId: order.order_id,
+              status: order.status,
+              createdAt: order.created_at,
+              utrId: order.utr_id,
+            });
+          }
+        } else if (st === 'REJECTED') {
+          if (!pendingMap.has(slug) && !rejectedMap.has(slug)) {
+            rejectedMap.set(slug, {
+              tournamentSlug: order.tournament_slug,
+              orderId: order.order_id,
+              status: order.status,
+              createdAt: order.created_at,
+            });
+          }
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        registered,
+        pending: Array.from(pendingMap.values()),
+        rejected: Array.from(rejectedMap.values()),
+      }, { status: 200 });
+    } catch (err: any) {
+      console.error('[User Tournament Status Exception]', err);
+      return NextResponse.json({ success: false, message: err?.message || 'Server error' }, { status: 500 });
+    }
+  }
+
   // Default fallback response: strict 404 instead of fake 200 OK
   return NextResponse.json({
     success: false,
@@ -1146,8 +1252,9 @@ function isNextJsNativeRoute(segments: string[]): boolean {
     return false;
   }
 
-  if (main === 'payments' && sub === 'manual' && sub2 === 'create') {
-    return true;
+  if (main === 'payments') {
+    if (sub === 'manual' && sub2 === 'create') return true;
+    if (sub === 'user-tournaments-status') return true;
   }
 
   return false;

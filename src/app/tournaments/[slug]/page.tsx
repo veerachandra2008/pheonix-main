@@ -34,6 +34,7 @@ import {
 import { tournaments as defaultTournaments } from '../data';
 import { 
   getUserRegistrations, 
+  getUserTournamentStatuses,
   extractPrizeTiers, 
   cleanDescriptionText, 
   extractOrganizerData,
@@ -133,6 +134,8 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
   const [loading, setLoading] = useState(() => (tournament ? false : true));
   const [sessionUser, setSessionUser] = useState<any>(null);
   const [alreadyRegistered, setAlreadyRegistered] = useState(false);
+  const [isPendingReview, setIsPendingReview] = useState(false);
+  const [pendingOrderInfo, setPendingOrderInfo] = useState<any>(null);
   const [userPassId, setUserPassId] = useState<string | null>(null);
   const [registeredTeamsList, setRegisteredTeamsList] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'prizes' | 'schedule' | 'teams' | 'rules'>('overview');
@@ -156,22 +159,26 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
       if (!activeSlug) return;
 
       let userEmail: string | undefined = undefined;
+      let userId: string | undefined = undefined;
       try {
         const user = getXenovaSession();
         if (user) {
           setSessionUser(user);
           userEmail = (user.email || '').trim().toLowerCase();
+          userId = user.id;
         }
       } catch {}
 
       // High-Speed Single-Burst Parallel Dispatch (<50ms)
       try {
-        const [sbTournamentRes, userRegs, teamRegsRes] = await Promise.all([
+        const [sbTournamentRes, statusData, teamRegsRes] = await Promise.all([
           supabase
             .from('tournaments')
             .select('*')
             .ilike('slug', activeSlug),
-          userEmail ? getUserRegistrations(userEmail) : Promise.resolve([]),
+          (userEmail || userId)
+            ? getUserTournamentStatuses(userEmail, userId)
+            : Promise.resolve(null),
           supabase
             .from('registrations')
             .select('*')
@@ -207,12 +214,21 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
         const resolvedOrg = await fetchOrganizerProfileFromDB(found);
         setOrganizerInfo(resolvedOrg);
 
-        // Check user registration status
-        if (Array.isArray(userRegs)) {
-          const matchedReg = userRegs.find((r) => r.tournamentSlug?.toLowerCase() === activeSlug.toLowerCase());
-          if (matchedReg) {
+        // Check user registration and pending status
+        const normSlug = activeSlug.toLowerCase();
+        if (statusData) {
+          if (statusData.registeredSlugs.has(normSlug)) {
             setAlreadyRegistered(true);
-            setUserPassId(matchedReg.passId);
+            setIsPendingReview(false);
+            setUserPassId(statusData.registeredPasses.get(normSlug) || null);
+          } else if (statusData.pendingSlugs.has(normSlug)) {
+            setAlreadyRegistered(false);
+            setIsPendingReview(true);
+            setPendingOrderInfo(statusData.pendingOrders.get(normSlug) || null);
+          } else {
+            setAlreadyRegistered(false);
+            setIsPendingReview(false);
+            setPendingOrderInfo(null);
           }
         }
 
@@ -893,6 +909,35 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
                     <Ticket className="h-4 w-4" />
                     View 4-Player Entry Pass
                   </Link>
+                </div>
+              ) : isPendingReview ? (
+                <div className="p-5 rounded-2xl bg-amber-950/30 border border-amber-500/30 text-center space-y-4">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/15 text-amber-400 flex items-center justify-center mx-auto border border-amber-500/30 shadow-lg shadow-amber-500/10">
+                    <Clock className="h-6 w-6 animate-pulse" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-white uppercase tracking-wider">Payment Under Review</h4>
+                    <p className="text-xs text-amber-300/80 mt-1">
+                      Your manual UPI payment screenshot and transaction details are being reviewed by the tournament organizer.
+                    </p>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-black/50 border border-amber-500/20 text-left text-xs space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <span className="text-zinc-400 font-medium">Status:</span>
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 font-black text-[10px] tracking-wider uppercase border border-amber-500/20">
+                        Pending Verification ⏳
+                      </span>
+                    </div>
+                    {pendingOrderInfo?.utrId && (
+                      <div className="flex justify-between items-center pt-1 border-t border-white/[0.06]">
+                        <span className="text-zinc-400 font-medium">Submitted UTR:</span>
+                        <span className="font-mono font-bold text-white text-[11px]">{pendingOrderInfo.utrId}</span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Duplicate registration is locked until verification completes. Once accepted, your pass will appear here automatically.
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-4">

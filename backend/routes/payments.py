@@ -947,3 +947,111 @@ def create_manual_upi_order():
     except Exception as e:
         print(f"[ERROR] Unexpected error in create_manual_upi_order: {e}")
         return jsonify({'success': False, 'message': 'An unexpected error occurred. Please try again.'}), 500
+
+
+@payments_bp.route('/user-tournaments-status', methods=['GET'])
+def get_user_tournaments_status():
+    """
+    Returns user payment & registration statuses for all tournaments.
+    Identifies:
+      - registered: completed registrations with pass_id (can view pass)
+      - pending: manual UPI submissions waiting for organizer review (cannot register again)
+      - rejected: rejected payment orders (can register again)
+    """
+    try:
+        supabase = get_supabase_client()
+        user = get_authenticated_user()
+
+        email = (request.args.get('email') or '').strip().lower()
+        user_id = (request.args.get('user_id') or '').strip()
+
+        if user:
+            if not user_id and user.get('id'):
+                user_id = user.get('id')
+            if not email and user.get('email'):
+                email = user.get('email').strip().lower()
+
+        if not email and not user_id:
+            return jsonify({
+                'success': True,
+                'registered': [],
+                'pending': [],
+                'rejected': []
+            }), 200
+
+        # 1. Query registrations for completed passes
+        regs_data = []
+        try:
+            if user_id and email:
+                reg_res = supabase.table('registrations').select('*').or_(f"user_id.eq.{user_id},email.eq.{email}").execute()
+            elif user_id:
+                reg_res = supabase.table('registrations').select('*').eq('user_id', user_id).execute()
+            else:
+                reg_res = supabase.table('registrations').select('*').eq('email', email).execute()
+            regs_data = reg_res.data if (reg_res and reg_res.data) else []
+        except Exception as e:
+            print(f"[WARN] Registrations query failed: {e}")
+
+        registered = []
+        registered_slugs = set()
+        for r in regs_data:
+            slug = (r.get('tournament_slug') or '').strip().lower()
+            if slug:
+                registered_slugs.add(slug)
+                registered.append({
+                    'tournamentSlug': r.get('tournament_slug'),
+                    'passId': r.get('pass_id'),
+                    'teamName': r.get('team_name'),
+                    'registeredAt': r.get('registered_at')
+                })
+
+        # 2. Query payment_orders for PENDING / REJECTED
+        orders_data = []
+        try:
+            if user_id and email:
+                ord_res = supabase.table('payment_orders').select('*').or_(f"user_id.eq.{user_id},email.eq.{email}").order('created_at', desc=True).execute()
+            elif user_id:
+                ord_res = supabase.table('payment_orders').select('*').eq('user_id', user_id).order('created_at', desc=True).execute()
+            else:
+                ord_res = supabase.table('payment_orders').select('*').eq('email', email).order('created_at', desc=True).execute()
+            orders_data = ord_res.data if (ord_res and ord_res.data) else []
+        except Exception as e:
+            print(f"[WARN] Payment orders query failed: {e}")
+
+        pending_map = {}
+        rejected_map = {}
+
+        for o in orders_data:
+            slug = (o.get('tournament_slug') or '').strip().lower()
+            if not slug or slug in registered_slugs:
+                continue
+
+            st = (o.get('status') or '').strip().upper()
+            if st in ('PENDING', 'DUPLICATE_REVIEW'):
+                if slug not in pending_map:
+                    pending_map[slug] = {
+                        'tournamentSlug': o.get('tournament_slug'),
+                        'orderId': o.get('order_id'),
+                        'status': o.get('status'),
+                        'createdAt': o.get('created_at'),
+                        'utrId': o.get('utr_id')
+                    }
+            elif st == 'REJECTED':
+                if slug not in pending_map and slug not in rejected_map:
+                    rejected_map[slug] = {
+                        'tournamentSlug': o.get('tournament_slug'),
+                        'orderId': o.get('order_id'),
+                        'status': o.get('status'),
+                        'createdAt': o.get('created_at')
+                    }
+
+        return jsonify({
+            'success': True,
+            'registered': registered,
+            'pending': list(pending_map.values()),
+            'rejected': list(rejected_map.values())
+        }), 200
+
+    except Exception as err:
+        print(f"[ERROR] get_user_tournaments_status: {err}")
+        return jsonify({'success': False, 'message': 'Internal server error'}), 500

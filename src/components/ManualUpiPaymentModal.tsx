@@ -165,6 +165,11 @@ export default function ManualUpiPaymentModal({
         setSubmittedOrderId(data.order_id || '');
         setSubmittedUtr(cleanUtr);
         setStep('pending_success');
+        try {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('xenova-tournaments-updated'));
+          }
+        } catch {}
       } else {
         // User-friendly error message based on status code
         if (response.status === 401) {

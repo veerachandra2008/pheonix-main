@@ -649,3 +649,114 @@ function mapSupabaseTournament(item: any): Tournament {
     fee: item.fee || 'Free',
   };
 }
+
+export interface UserTournamentStatus {
+  registeredSlugs: Set<string>;
+  registeredPasses: Map<string, string>;
+  pendingSlugs: Set<string>;
+  pendingOrders: Map<string, any>;
+  rejectedSlugs: Set<string>;
+}
+
+export async function getUserTournamentStatuses(email?: string, userId?: string): Promise<UserTournamentStatus> {
+  const result: UserTournamentStatus = {
+    registeredSlugs: new Set<string>(),
+    registeredPasses: new Map<string, string>(),
+    pendingSlugs: new Set<string>(),
+    pendingOrders: new Map<string, any>(),
+    rejectedSlugs: new Set<string>(),
+  };
+
+  const cleanEmail = (email || '').trim().toLowerCase();
+  const cleanUserId = (userId || '').trim();
+  if (!cleanEmail && !cleanUserId) return result;
+
+  // 1. Try API route first (<50ms on Next.js)
+  try {
+    const apiBase = getApiBaseUrl();
+    const queryParam = new URLSearchParams();
+    if (cleanEmail) queryParam.set('email', cleanEmail);
+    if (cleanUserId) queryParam.set('user_id', cleanUserId);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1200);
+
+    const res = await fetch(`${apiBase}/payments/user-tournaments-status?${queryParam.toString()}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success) {
+        for (const r of data.registered || []) {
+          const s = (r.tournamentSlug || '').toLowerCase();
+          if (s) {
+            result.registeredSlugs.add(s);
+            if (r.passId) result.registeredPasses.set(s, r.passId);
+          }
+        }
+        for (const p of data.pending || []) {
+          const s = (p.tournamentSlug || '').toLowerCase();
+          if (s && !result.registeredSlugs.has(s)) {
+            result.pendingSlugs.add(s);
+            result.pendingOrders.set(s, p);
+          }
+        }
+        for (const rj of data.rejected || []) {
+          const s = (rj.tournamentSlug || '').toLowerCase();
+          if (s && !result.registeredSlugs.has(s) && !result.pendingSlugs.has(s)) {
+            result.rejectedSlugs.add(s);
+          }
+        }
+        return result;
+      }
+    }
+  } catch {}
+
+  // 2. Direct Supabase Query Fallback
+  try {
+    const regs = await getUserRegistrations(cleanEmail, cleanUserId);
+    for (const r of regs) {
+      const s = (r.tournamentSlug || '').toLowerCase();
+      if (s) {
+        result.registeredSlugs.add(s);
+        if (r.passId) result.registeredPasses.set(s, r.passId);
+      }
+    }
+
+    let ordQuery = supabase
+      .from('payment_orders')
+      .select('order_id, tournament_slug, status, created_at, utr_id')
+      .order('created_at', { ascending: false });
+
+    if (cleanUserId && cleanEmail) {
+      ordQuery = ordQuery.or(`user_id.eq.${cleanUserId},email.eq.${cleanEmail}`);
+    } else if (cleanUserId) {
+      ordQuery = ordQuery.eq('user_id', cleanUserId);
+    } else {
+      ordQuery = ordQuery.eq('email', cleanEmail);
+    }
+
+    const { data: orders } = await ordQuery;
+    for (const o of orders || []) {
+      const s = (o.tournament_slug || '').toLowerCase();
+      if (!s || result.registeredSlugs.has(s)) continue;
+
+      const st = (o.status || '').toUpperCase();
+      if (st === 'PENDING' || st === 'DUPLICATE_REVIEW') {
+        if (!result.pendingSlugs.has(s)) {
+          result.pendingSlugs.add(s);
+          result.pendingOrders.set(s, o);
+        }
+      } else if (st === 'REJECTED') {
+        if (!result.pendingSlugs.has(s) && !result.rejectedSlugs.has(s)) {
+          result.rejectedSlugs.add(s);
+        }
+      }
+    }
+  } catch {}
+
+  return result;
+}

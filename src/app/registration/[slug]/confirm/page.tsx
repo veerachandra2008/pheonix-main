@@ -14,7 +14,7 @@ import {
   Loader2,
   CreditCard,
 } from 'lucide-react';
-import { saveRegistration } from '@/lib/tournaments-db';
+import { saveRegistration, getUserTournamentStatuses } from '@/lib/tournaments-db';
 import { tournaments } from '@/app/tournaments/data';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
@@ -256,6 +256,21 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
     }
 
     // ─── CASE B: PAID TOURNAMENT (Amount > 0) ───
+    // Check if user already has pending payment verification or completed pass
+    try {
+      const statusData = await getUserTournamentStatuses(email);
+      const normSlug = slug.toLowerCase();
+      if (statusData.registeredSlugs.has(normSlug)) {
+        const pId = statusData.registeredPasses.get(normSlug);
+        router.push(`/registration/${slug}/pass${pId ? `?passId=${pId}` : ''}`);
+        return;
+      }
+      if (statusData.pendingSlugs.has(normSlug)) {
+        setErrorMessage('You already have a manual UPI payment under review for this tournament. Duplicate registration is locked.');
+        return;
+      }
+    } catch {}
+
     // Launch Manual UPI Payment Modal (Phase 3)
     setIsUpiModalOpen(true);
     return;

@@ -21,11 +21,13 @@ import {
   Phone,
   Sparkles,
   ChevronRight,
-  School
+  School,
+  Clock,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { getXenovaSession } from '@/lib/auth-session';
+import { getUserTournamentStatuses } from '@/lib/tournaments-db';
 import { tournaments } from '../../tournaments/data';
 
 interface PlayerSlot {
@@ -59,6 +61,9 @@ export default function RegistrationStepOne() {
   ]);
 
   const [errorMsg, setErrorMsg] = useState('');
+  const [regLockStatus, setRegLockStatus] = useState<'checking' | 'allowed' | 'registered' | 'pending'>('checking');
+  const [existingPassId, setExistingPassId] = useState<string>('');
+  const [pendingOrder, setPendingOrder] = useState<any>(null);
 
   useEffect(() => {
     const user = getXenovaSession();
@@ -111,7 +116,28 @@ export default function RegistrationStepOne() {
       if (found) setTournament(found);
     }
 
+    async function checkExistingStatus() {
+      try {
+        const email = user ? (user.email || '').trim().toLowerCase() : undefined;
+        const userId = user?.id;
+        const statusData = await getUserTournamentStatuses(email, userId);
+        const normSlug = slug.toLowerCase();
+        if (statusData.registeredSlugs.has(normSlug)) {
+          setRegLockStatus('registered');
+          setExistingPassId(statusData.registeredPasses.get(normSlug) || '');
+        } else if (statusData.pendingSlugs.has(normSlug)) {
+          setRegLockStatus('pending');
+          setPendingOrder(statusData.pendingOrders.get(normSlug) || null);
+        } else {
+          setRegLockStatus('allowed');
+        }
+      } catch {
+        setRegLockStatus('allowed');
+      }
+    }
+
     loadTournamentData();
+    checkExistingStatus();
   }, [slug, router]);
 
   const handlePlayerChange = (slotIndex: number, field: keyof PlayerSlot, value: string) => {
@@ -203,12 +229,100 @@ export default function RegistrationStepOne() {
     router.push(`/registration/${slug}/confirm`);
   };
 
-  if (!tournament) {
+  if (!tournament || regLockStatus === 'checking') {
     return (
       <main className="min-h-screen bg-[#070B14] flex items-center justify-center text-white">
         <div className="text-center space-y-4">
           <div className="w-12 h-12 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin mx-auto" />
-          <p className="text-slate-400 text-sm font-bold uppercase tracking-wider">Loading Tournament Details...</p>
+          <p className="text-slate-400 text-sm font-bold uppercase tracking-wider">Verifying Entry Eligibility...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (regLockStatus === 'registered') {
+    return (
+      <main className="min-h-screen bg-[#070B14] flex items-center justify-center p-4 text-white">
+        <div className="w-full max-w-md p-6 sm:p-8 rounded-3xl bg-[#0B0F1C] border border-emerald-500/30 text-center space-y-5 shadow-2xl shadow-emerald-500/10 animate-in fade-in duration-200">
+          <div className="w-16 h-16 rounded-3xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto">
+            <CheckCircle2 className="w-8 h-8" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-black uppercase tracking-wider text-white">Squad Already Registered</h2>
+            <p className="text-xs text-zinc-400">
+              You are already registered for <strong className="text-white">{tournament?.title || slug}</strong>.
+            </p>
+          </div>
+          <p className="text-xs text-zinc-500 leading-relaxed">
+            Your 4-player squad roster has been verified. You cannot submit a duplicate registration.
+          </p>
+          <div className="pt-2 space-y-2.5">
+            <Link
+              href={`/registration/${slug}/pass${existingPassId ? `?passId=${existingPassId}` : ''}`}
+              className="block w-full py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs uppercase tracking-wider transition text-center shadow-lg shadow-emerald-500/20"
+            >
+              View 4-Player Entry Pass
+            </Link>
+            <Link
+              href="/tournaments"
+              className="block w-full py-3 rounded-2xl bg-white/5 hover:bg-white/10 text-zinc-300 font-bold text-xs uppercase tracking-wider transition text-center border border-white/10"
+            >
+              Explore Other Tournaments
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (regLockStatus === 'pending') {
+    return (
+      <main className="min-h-screen bg-[#070B14] flex items-center justify-center p-4 text-white">
+        <div className="w-full max-w-md p-6 sm:p-8 rounded-3xl bg-[#0B0F1C] border border-amber-500/30 text-center space-y-5 shadow-2xl shadow-amber-500/10 animate-in fade-in duration-200">
+          <div className="w-16 h-16 rounded-3xl bg-amber-500/15 border-2 border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/10">
+            <Clock className="w-8 h-8 animate-pulse" />
+          </div>
+          <div className="space-y-1.5">
+            <h2 className="text-xl font-black uppercase tracking-wider text-white">Registration Locked</h2>
+            <p className="text-xs text-amber-400/90 font-semibold">
+              Payment Verification In Progress ⏳
+            </p>
+          </div>
+          <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.08] text-xs space-y-2 text-left text-zinc-300">
+            <div className="flex justify-between items-center">
+              <span className="text-zinc-500">Tournament:</span>
+              <span className="font-bold text-white truncate max-w-[200px]">{tournament?.title || slug}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-zinc-500">Verification Status:</span>
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 font-black text-[10px] tracking-wider uppercase">
+                PENDING REVIEW
+              </span>
+            </div>
+            {pendingOrder?.utrId && (
+              <div className="flex justify-between items-center pt-1 border-t border-white/[0.06]">
+                <span className="text-zinc-500">Submitted UTR:</span>
+                <span className="font-mono text-white font-bold">{pendingOrder.utrId}</span>
+              </div>
+            )}
+          </div>
+          <p className="text-xs text-zinc-400 leading-relaxed">
+            Your manual UPI payment screenshot and details have been received and are awaiting organizer verification. You cannot register again while this payment is under review.
+          </p>
+          <div className="pt-2 space-y-2.5">
+            <Link
+              href="/tournaments"
+              className="block w-full py-3.5 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-black text-xs uppercase tracking-wider transition text-center"
+            >
+              Back to Tournaments
+            </Link>
+            <Link
+              href="/dashboard"
+              className="block w-full py-3 rounded-2xl bg-transparent text-zinc-400 hover:text-white font-bold text-xs uppercase tracking-wider transition text-center"
+            >
+              Go to Player Dashboard
+            </Link>
+          </div>
         </div>
       </main>
     );

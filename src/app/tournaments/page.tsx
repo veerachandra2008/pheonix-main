@@ -4,9 +4,9 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { CalendarDays, MapPin, Search, SlidersHorizontal, Trophy, Users, Zap, Flame, ShieldCheck, ArrowRight } from 'lucide-react';
+import { CalendarDays, MapPin, Search, SlidersHorizontal, Trophy, Users, Zap, Flame, ShieldCheck, ArrowRight, Clock, X } from 'lucide-react';
 import { gameFilters, statusFilters, tournaments as defaultTournaments } from './data';
-import { getAllTournaments, getUserRegistrations } from '@/lib/tournaments-db';
+import { getAllTournaments, getUserTournamentStatuses } from '@/lib/tournaments-db';
 import { getXenovaSession } from '@/lib/auth-session';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
@@ -14,6 +14,7 @@ import FinalCTA from '@/components/xenova/FinalCTA';
 let cachedTournamentsMemory: any[] | null = null;
 let cachedRegisteredSlugsMemory: Set<string> | null = null;
 let cachedRegisteredPassesMemory: Map<string, string> | null = null;
+let cachedPendingSlugsMemory: Set<string> | null = null;
 
 function TournamentsContent() {
   const router = useRouter();
@@ -40,6 +41,13 @@ function TournamentsContent() {
     return new Map();
   });
 
+  const [pendingSlugs, setPendingSlugs] = useState<Set<string>>(() => {
+    if (cachedPendingSlugsMemory) return cachedPendingSlugsMemory;
+    return new Set();
+  });
+
+  const [pendingInfoModal, setPendingInfoModal] = useState<{ slug: string; title: string } | null>(null);
+
   useEffect(() => {
     if (gameParam) {
       const matched = gameFilters.find((g) => g.toLowerCase() === gameParam.toLowerCase());
@@ -55,18 +63,28 @@ function TournamentsContent() {
     let isMounted = true;
     async function loadData() {
       let email: string | undefined = undefined;
+      let userId: string | undefined = undefined;
       try {
         const session = getXenovaSession();
         if (session) {
           email = (session.email || '').trim().toLowerCase();
+          userId = session.id;
         }
       } catch {}
 
       // High-Speed Single-Burst Parallel Dispatch (<50ms)
       try {
-        const [allTournaments, regs] = await Promise.all([
+        const [allTournaments, statusData] = await Promise.all([
           getAllTournaments(),
-          email ? getUserRegistrations(email) : Promise.resolve([])
+          (email || userId)
+            ? getUserTournamentStatuses(email, userId)
+            : Promise.resolve({
+                registeredSlugs: new Set<string>(),
+                registeredPasses: new Map<string, string>(),
+                pendingSlugs: new Set<string>(),
+                pendingOrders: new Map<string, any>(),
+                rejectedSlugs: new Set<string>(),
+              })
         ]);
 
         if (!isMounted) return;
@@ -76,19 +94,12 @@ function TournamentsContent() {
           cachedTournamentsMemory = allTournaments;
         }
 
-        if (Array.isArray(regs)) {
-          const slugs = new Set(regs.map((r) => r.tournamentSlug));
-          const passMap = new Map<string, string>();
-          for (const r of regs) {
-            if (r.tournamentSlug && r.passId) {
-              passMap.set(r.tournamentSlug, r.passId);
-            }
-          }
-          setRegisteredSlugs(slugs);
-          setRegisteredPasses(passMap);
-          cachedRegisteredSlugsMemory = slugs;
-          cachedRegisteredPassesMemory = passMap;
-        }
+        setRegisteredSlugs(statusData.registeredSlugs);
+        setRegisteredPasses(statusData.registeredPasses);
+        setPendingSlugs(statusData.pendingSlugs);
+        cachedRegisteredSlugsMemory = statusData.registeredSlugs;
+        cachedRegisteredPassesMemory = statusData.registeredPasses;
+        cachedPendingSlugsMemory = statusData.pendingSlugs;
       } catch (err) {
         console.warn('Tournaments parallel load notice:', err);
       }
@@ -397,14 +408,22 @@ function TournamentsContent() {
                     >
                       Details
                     </Link>
-                    {registeredSlugs.has(tournament.slug) ? (
+                    {(registeredSlugs.has(tournament.slug) || registeredSlugs.has(tournament.slug?.toLowerCase())) ? (
                       <Link
-                        href={`/registration/${tournament.slug}/pass${registeredPasses.get(tournament.slug) ? `?passId=${registeredPasses.get(tournament.slug)}` : ''}`}
+                        href={`/registration/${tournament.slug}/pass${(registeredPasses.get(tournament.slug) || registeredPasses.get(tournament.slug?.toLowerCase())) ? `?passId=${registeredPasses.get(tournament.slug) || registeredPasses.get(tournament.slug?.toLowerCase())}` : ''}`}
                         prefetch={true}
                         className="flex-1 inline-flex items-center justify-center rounded-xl bg-emerald-500 text-black border border-emerald-400 px-4 py-3 text-xs font-black uppercase tracking-wider transition shadow-lg shadow-emerald-500/25 hover:bg-emerald-400 cursor-pointer active:scale-95"
                       >
                         View Pass ✓
                       </Link>
+                    ) : (pendingSlugs.has(tournament.slug) || pendingSlugs.has(tournament.slug?.toLowerCase())) ? (
+                      <button
+                        type="button"
+                        onClick={() => setPendingInfoModal({ slug: tournament.slug, title: tournament.title })}
+                        className="flex-1 inline-flex items-center justify-center rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/40 px-3 py-3 text-xs font-black uppercase tracking-wider transition shadow-lg shadow-amber-500/10 hover:bg-amber-500/25 cursor-pointer active:scale-95"
+                      >
+                        Pending Review ⏳
+                      </button>
                     ) : (
                       <Link
                         href={`/registration/${tournament.slug}`}
@@ -444,6 +463,58 @@ function TournamentsContent() {
       </section>
 
       <FinalCTA />
+
+      {/* ═══════════════ PENDING PAYMENT VERIFICATION MODAL ═══════════════ */}
+      {pendingInfoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md rounded-3xl bg-[#0B0F1C] border border-amber-500/30 p-6 sm:p-8 shadow-2xl shadow-amber-500/10 text-white space-y-5">
+            <button
+              onClick={() => setPendingInfoModal(null)}
+              className="absolute top-5 right-5 p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-white/10 transition"
+              aria-label="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-16 h-16 rounded-3xl bg-amber-500/10 border-2 border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/10">
+              <Clock className="w-8 h-8 animate-pulse" />
+            </div>
+
+            <div className="text-center space-y-1.5">
+              <h3 className="text-xl font-black uppercase tracking-wider text-white">Payment Under Review</h3>
+              <p className="text-xs text-amber-400/90 font-semibold truncate px-2">
+                {pendingInfoModal.title}
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.08] text-xs space-y-2.5 text-zinc-300">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Current Status:</span>
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 font-black text-[11px] tracking-wider uppercase">
+                  Pending Verification ⏳
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-400 leading-relaxed pt-2 border-t border-white/[0.06]">
+                Your manual UPI payment screenshot and transaction details are currently being reviewed by the tournament organizer. Duplicate registration is locked until verification completes.
+              </p>
+            </div>
+
+            <p className="text-[11px] text-zinc-500 text-center">
+              Once verified and accepted by the organizer, your button will update to <strong className="text-emerald-400">VIEW PASS ✓</strong>.
+            </p>
+
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setPendingInfoModal(null)}
+                className="w-full py-3.5 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs uppercase tracking-wider transition text-center cursor-pointer"
+              >
+                Understood, Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
