@@ -902,6 +902,217 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     }
   }
 
+  // 10. Manual UPI Payment Endpoint (Native Next.js / Supabase Handler)
+  if (mainSegment === 'payments' && subSegment === 'manual' && segments[2] === 'create' && method === 'POST') {
+    try {
+      // 1. Authenticate user from Bearer token
+      const authHeader = req.headers.get('authorization') || '';
+      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+      if (!token) {
+        return NextResponse.json({ success: false, message: 'Authentication required. Missing token.' }, { status: 401 });
+      }
+
+      const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+      if (authError || !user) {
+        return NextResponse.json({ success: false, message: 'Authentication session expired or invalid.' }, { status: 401 });
+      }
+
+      const userId = user.id;
+      const userEmail = user.email || '';
+
+      // 2. Parse Multipart Form Data
+      const formData = await req.formData();
+      const tournamentSlug = ((formData.get('tournamentSlug') as string) || (formData.get('tournament_slug') as string) || '').trim();
+      const rawPhone = ((formData.get('paymentPhoneNumber') as string) || (formData.get('payment_phone_number') as string) || '').trim();
+      const rawUtr = ((formData.get('utrId') as string) || (formData.get('utr_id') as string) || '').trim();
+      const rawRegData = (formData.get('registrationData') as string) || (formData.get('registration_data') as string) || '{}';
+      const screenshotFile = formData.get('screenshot') as File | null;
+
+      if (!tournamentSlug) {
+        return NextResponse.json({ success: false, message: 'Tournament slug is required.' }, { status: 400 });
+      }
+
+      // 3. Authoritative Tournament Fee from DB
+      const { data: tournament, error: tournError } = await supabaseAdmin
+        .from('tournaments')
+        .select('*')
+        .eq('slug', tournamentSlug)
+        .maybeSingle();
+
+      if (tournError || !tournament) {
+        return NextResponse.json({ success: false, message: `Tournament '${tournamentSlug}' not found.` }, { status: 404 });
+      }
+
+      const rawFee = tournament.fee || 'Free';
+      const feeClean = String(rawFee).trim().toLowerCase();
+      if (feeClean.includes('free') || feeClean === '0') {
+        return NextResponse.json({ success: false, message: 'This is a free tournament. Payment is not required; use free registration.' }, { status: 400 });
+      }
+
+      const feeMatches = rawFee.match(/\d+(?:\.\d+)?/);
+      const amountRupees = feeMatches ? parseFloat(feeMatches[0]) : 0;
+      if (amountRupees <= 0) {
+        return NextResponse.json({ success: false, message: 'Invalid tournament fee configuration.' }, { status: 400 });
+      }
+      const amountPaise = Math.round(amountRupees * 100);
+
+      // 4. Validate Phone Number (10-15 digits)
+      const phoneDigits = rawPhone.replace(/[^\d]/g, '');
+      if (!phoneDigits || phoneDigits.length < 10 || phoneDigits.length > 15) {
+        return NextResponse.json({ success: false, message: 'UPI payment phone number must be 10 to 15 digits.' }, { status: 400 });
+      }
+
+      // 5. Validate UTR (6-30 alphanumeric characters)
+      const normalizedUtr = rawUtr.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (!normalizedUtr || normalizedUtr.length < 6 || normalizedUtr.length > 30) {
+        return NextResponse.json({ success: false, message: 'UTR / Transaction ID must be between 6 and 30 characters.' }, { status: 400 });
+      }
+
+      // 6. Check for duplicate pending payment orders for this user & tournament
+      const { data: existingPending } = await supabaseAdmin
+        .from('payment_orders')
+        .select('order_id, status')
+        .eq('user_id', userId)
+        .eq('tournament_slug', tournamentSlug)
+        .eq('status', 'PENDING');
+
+      if (existingPending && existingPending.length > 0) {
+        return NextResponse.json({
+          success: false,
+          message: 'You already have a pending payment verification for this tournament. Please wait for the organizer to review it.'
+        }, { status: 409 });
+      }
+
+      // 7. Check for duplicate UTR
+      const { data: existingUtr } = await supabaseAdmin
+        .from('payment_orders')
+        .select('order_id, status')
+        .eq('utr_id', normalizedUtr)
+        .in('status', ['PENDING', 'SUCCESS', 'VERIFIED']);
+
+      if (existingUtr && existingUtr.length > 0) {
+        return NextResponse.json({
+          success: false,
+          message: `UTR ${normalizedUtr} has already been submitted and is currently pending verification.`
+        }, { status: 400 });
+      }
+
+      // 8. Validate Screenshot File
+      if (!screenshotFile || !(screenshotFile instanceof Blob)) {
+        return NextResponse.json({ success: false, message: 'Payment screenshot is required.' }, { status: 400 });
+      }
+
+      const MAX_FILE_SIZE = 5 * 1024 * 1024;
+      if (screenshotFile.size > MAX_FILE_SIZE) {
+        return NextResponse.json({ success: false, message: 'Screenshot file size exceeds 5MB limit.' }, { status: 400 });
+      }
+
+      const fileBuffer = Buffer.from(await screenshotFile.arrayBuffer());
+      if (fileBuffer.length === 0) {
+        return NextResponse.json({ success: false, message: 'Payment screenshot file is empty.' }, { status: 400 });
+      }
+
+      // Check magic bytes
+      let detectedExt = 'png';
+      let contentType = 'image/png';
+      if (fileBuffer[0] === 0xff && fileBuffer[1] === 0xd8 && fileBuffer[2] === 0xff) {
+        detectedExt = 'jpg';
+        contentType = 'image/jpeg';
+      } else if (fileBuffer[0] === 0x89 && fileBuffer[1] === 0x50 && fileBuffer[2] === 0x4e && fileBuffer[3] === 0x47) {
+        detectedExt = 'png';
+        contentType = 'image/png';
+      } else if (fileBuffer.toString('utf8', 0, 4) === 'RIFF' && fileBuffer.toString('utf8', 8, 12) === 'WEBP') {
+        detectedExt = 'webp';
+        contentType = 'image/webp';
+      } else {
+        return NextResponse.json({
+          success: false,
+          message: 'Invalid screenshot image format. Allowed formats: PNG, JPEG, WEBP.'
+        }, { status: 400 });
+      }
+
+      // 9. Parse registration payload
+      let parsedRegData: any = {};
+      try {
+        parsedRegData = typeof rawRegData === 'string' ? JSON.parse(rawRegData) : rawRegData;
+      } catch {
+        parsedRegData = {};
+      }
+
+      const fullRegPayload = {
+        team_name: parsedRegData.team_name || parsedRegData.teamName || 'Squad Entry',
+        college: parsedRegData.college || 'Collegiate Campus',
+        captain_name: parsedRegData.captain_name || parsedRegData.captainName || user.user_metadata?.name || 'Captain',
+        players: parsedRegData.players || [],
+        tournament_slug: tournamentSlug,
+        captain_email: userEmail,
+        captain_id: userId,
+      };
+
+      // 10. Upload Screenshot to Private Supabase Storage Bucket
+      const randomSuffix = Math.random().toString(36).substring(2, 10);
+      const storageFilename = `${userId}_${Date.now()}_${randomSuffix}.${detectedExt}`;
+      const storagePath = `orders/${tournamentSlug}/${storageFilename}`;
+
+      const { error: uploadError } = await supabaseAdmin.storage
+        .from('payment-screenshots')
+        .upload(storagePath, fileBuffer, {
+          contentType,
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error('[Supabase Storage Upload Error]', uploadError);
+        return NextResponse.json({
+          success: false,
+          message: 'Failed to securely store payment screenshot. Please try again.'
+        }, { status: 500 });
+      }
+
+      // 11. Insert Pending Payment Order
+      const orderId = `UPI_${Math.random().toString(36).substring(2, 10).toUpperCase()}_${Math.floor(Date.now() / 1000)}`;
+      const orderRecord = {
+        order_id: orderId,
+        tournament_slug: tournamentSlug,
+        user_id: userId,
+        email: userEmail,
+        amount_paise: amountPaise,
+        currency: 'INR',
+        status: 'PENDING',
+        payment_method: 'MANUAL_UPI',
+        payment_phone_number: phoneDigits,
+        utr_id: normalizedUtr,
+        screenshot_path: storagePath,
+        registration_payload: fullRegPayload,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error: insertError } = await supabaseAdmin
+        .from('payment_orders')
+        .insert([orderRecord]);
+
+      if (insertError) {
+        console.error('[DB Insert Error in payment_orders]', insertError);
+        await supabaseAdmin.storage.from('payment-screenshots').remove([storagePath]).catch(() => {});
+        return NextResponse.json({
+          success: false,
+          message: 'Failed to record payment submission. Please try again.'
+        }, { status: 500 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        order_id: orderId,
+        status: 'PENDING',
+        message: 'Payment submitted successfully and is pending organizer verification.'
+      }, { status: 201 });
+    } catch (err: any) {
+      console.error('[Manual UPI Exception]', err);
+      return NextResponse.json({ success: false, message: err?.message || 'Server error processing payment.' }, { status: 500 });
+    }
+  }
+
   // Default fallback response: strict 404 instead of fake 200 OK
   return NextResponse.json({
     success: false,
@@ -912,6 +1123,7 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
 function isNextJsNativeRoute(segments: string[]): boolean {
   const main = segments[0] || '';
   const sub = segments[1] || '';
+  const sub2 = segments[2] || '';
 
   if (main === 'health') return true;
 
@@ -932,6 +1144,10 @@ function isNextJsNativeRoute(segments: string[]): boolean {
   if (main === 'registrations') {
     // All registration endpoints should be proxied to Flask backend
     return false;
+  }
+
+  if (main === 'payments' && sub === 'manual' && sub2 === 'create') {
+    return true;
   }
 
   return false;

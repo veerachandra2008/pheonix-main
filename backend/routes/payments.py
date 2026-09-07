@@ -838,35 +838,36 @@ def create_manual_upi_order():
                 'message': 'Invalid screenshot image format. Allowed formats: PNG, JPEG, WEBP.'
             }), 400
 
-        # Optimize image with Pillow
-        try:
-            image = Image.open(io.BytesIO(file_bytes))
-            image.verify()
-            image = Image.open(io.BytesIO(file_bytes))
+        # Optional: Optimize image with Pillow if available without blocking submission
+        if Image is not None:
+            try:
+                image = Image.open(io.BytesIO(file_bytes))
+                resample_filter = getattr(getattr(Image, 'Resampling', Image), 'LANCZOS', getattr(Image, 'ANTIALIAS', None))
+                max_dim = 1600
+                if image.width > max_dim or image.height > max_dim:
+                    if resample_filter is not None:
+                        image.thumbnail((max_dim, max_dim), resample_filter)
+                    else:
+                        image.thumbnail((max_dim, max_dim))
 
-            if image.mode in ('RGBA', 'LA', 'P') and detected_format == 'JPEG':
-                image = image.convert('RGB')
+                if image.mode in ('RGBA', 'LA', 'P') and detected_format == 'JPEG':
+                    image = image.convert('RGB')
 
-            max_dim = 1600
-            if image.width > max_dim or image.height > max_dim:
-                image.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                out_buf = io.BytesIO()
+                if detected_format == 'PNG':
+                    image.save(out_buf, format='PNG', optimize=True)
+                elif detected_format == 'WEBP':
+                    image.save(out_buf, format='WEBP', quality=82)
+                else:
+                    image.save(out_buf, format='JPEG', quality=82, optimize=True)
+                    detected_format = 'JPEG'
+                    content_type = 'image/jpeg'
 
-            out_buf = io.BytesIO()
-            if detected_format == 'PNG':
-                image.save(out_buf, format='PNG', optimize=True)
-            elif detected_format == 'WEBP':
-                image.save(out_buf, format='WEBP', quality=82)
-            else:
-                image.save(out_buf, format='JPEG', quality=82, optimize=True)
-                detected_format = 'JPEG'
-                content_type = 'image/jpeg'
-
-            opt_bytes = out_buf.getvalue()
-            if 0 < len(opt_bytes) < len(file_bytes):
-                file_bytes = opt_bytes
-        except Exception as img_err:
-            print(f"[ERROR] Pillow image processing error: {img_err}")
-            return jsonify({'success': False, 'message': 'Corrupted or unreadable image file.'}), 400
+                opt_bytes = out_buf.getvalue()
+                if 0 < len(opt_bytes) < len(file_bytes):
+                    file_bytes = opt_bytes
+            except Exception as img_err:
+                print(f"[WARN] Pillow image optimization bypassed safely: {img_err}")
 
         # 8. UPLOAD SCREENSHOT TO PRIVATE SUPABASE STORAGE
         ext = 'jpg' if detected_format == 'JPEG' else (detected_format.lower() if detected_format else 'png')

@@ -193,13 +193,13 @@ export default function ManualUpiPaymentModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md overflow-y-auto">
       <div
-        className="relative w-full max-w-lg my-auto rounded-3xl bg-[#0B0F1C] border border-white/10 shadow-2xl shadow-emerald-500/10 overflow-hidden text-white animate-in fade-in zoom-in-95 duration-200"
+        className="relative w-full max-w-lg max-h-[92vh] flex flex-col my-auto rounded-3xl bg-[#0B0F1C] border border-white/10 shadow-2xl shadow-emerald-500/10 overflow-hidden text-white animate-in fade-in zoom-in-95 duration-200"
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
       >
         {/* Top Header Bar */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08] bg-white/[0.02]">
+        <div className="shrink-0 flex items-center justify-between px-5 sm:px-6 py-3.5 sm:py-4 border-b border-white/[0.08] bg-white/[0.02]">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
               <CreditCard className="w-4 h-4" />
@@ -225,8 +225,8 @@ export default function ManualUpiPaymentModal({
           )}
         </div>
 
-        {/* Modal Body Content */}
-        <div className="p-6">
+        {/* Modal Body Content (Scrollable) */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
           {/* ═══════════════════════════════════════════════════════════════ */}
           {/* STEP 1: QR DISPLAY                                            */}
           {/* ═══════════════════════════════════════════════════════════════ */}
@@ -247,7 +247,7 @@ export default function ManualUpiPaymentModal({
 
               {/* Department UPI QR Code Image */}
               <div className="flex flex-col items-center justify-center">
-                <div className="p-3 bg-white rounded-2xl shadow-xl border-4 border-emerald-500/30 w-64 sm:w-72 aspect-[3/4] relative flex items-center justify-center overflow-hidden">
+                <div className="p-2.5 bg-white rounded-2xl shadow-xl border-4 border-emerald-500/30 w-52 sm:w-60 max-h-[250px] aspect-[3/4] relative flex items-center justify-center overflow-hidden">
                   {!qrLoadError ? (
                     <img
                       src={MANUAL_UPI_CONFIG.qrImagePath}
@@ -394,22 +394,27 @@ export default function ManualUpiPaymentModal({
                       </span>
                     </label>
                   ) : (
-                    <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 overflow-hidden">
+                    <div className="p-2.5 sm:p-3 rounded-2xl bg-white/[0.03] border border-emerald-500/30 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 overflow-hidden min-w-0">
                         {screenshotPreview && (
                           <img
                             src={screenshotPreview}
                             alt="Screenshot preview"
-                            className="w-12 h-12 rounded-xl object-cover border border-white/10 shrink-0"
+                            className="w-11 h-11 rounded-xl object-cover border border-white/10 shrink-0"
                           />
                         )}
-                        <div className="truncate text-left">
-                          <p className="text-xs font-bold text-white truncate max-w-[180px]">
+                        <div className="truncate text-left min-w-0">
+                          <p className="text-xs font-bold text-white truncate">
                             {screenshotFile.name}
                           </p>
-                          <p className="text-[11px] text-zinc-400 font-mono">
-                            {formatFileSize(screenshotFile.size)}
-                          </p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[10px] text-zinc-400 font-mono">
+                              {formatFileSize(screenshotFile.size)}
+                            </span>
+                            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                              Attached
+                            </span>
+                          </div>
                         </div>
                       </div>
 
@@ -417,7 +422,7 @@ export default function ManualUpiPaymentModal({
                         <button
                           type="button"
                           onClick={handleRemoveFile}
-                          className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition"
+                          className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition shrink-0"
                           title="Remove screenshot"
                         >
                           <X className="w-4 h-4" />
@@ -450,7 +455,7 @@ export default function ManualUpiPaymentModal({
                   !screenshotFile
                 }
                 onClick={handleSubmitPayment}
-                className="w-full py-3.5 rounded-2xl bg-emerald-500 text-zinc-950 font-black text-sm uppercase tracking-wider hover:bg-emerald-400 active:scale-[0.99] transition shadow-lg shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="w-full py-3.5 rounded-2xl bg-emerald-500 text-zinc-950 font-black text-sm uppercase tracking-wider hover:bg-emerald-400 active:scale-[0.99] transition shadow-lg shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-2"
               >
                 {step === 'submitting' ? (
                   <>
