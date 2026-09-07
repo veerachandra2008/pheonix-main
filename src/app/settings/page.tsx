@@ -204,6 +204,35 @@ export default function SettingsPage() {
     setErrorMsg('');
     setSavedMsg('');
 
+    let finalAvatar = avatar;
+    if (avatar && avatar.startsWith('data:image/')) {
+      try {
+        const base64Part = avatar.split(',')[1];
+        const mimeType = avatar.split(';')[0].replace('data:', '');
+        const byteCharacters = atob(base64Part);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: mimeType });
+        const filename = `${sessionUser.id}.jpg`;
+
+        const { error: upErr } = await supabase.storage.from('avatars').upload(filename, blob, {
+          contentType: mimeType,
+          upsert: true,
+        });
+
+        if (!upErr) {
+          const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filename);
+          finalAvatar = urlData.publicUrl;
+          setAvatar(finalAvatar);
+        }
+      } catch (uploadErr) {
+        console.warn('Avatar upload to Supabase storage notice:', uploadErr);
+      }
+    }
+
     const payload = {
       email: sessionUser.email,
       name: name.trim(),
@@ -211,8 +240,8 @@ export default function SettingsPage() {
       college: college.trim(),
       team: team.trim(),
       bio: bio.trim(),
-      avatar_url: avatar,
-      avatar: avatar,
+      avatar_url: finalAvatar,
+      avatar: finalAvatar,
     };
 
     // 1. INSTANT OPTIMISTIC LOCAL UPDATE with sanitized minimal state

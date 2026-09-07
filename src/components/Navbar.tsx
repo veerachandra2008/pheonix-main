@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 import { supabase } from '@/lib/supabase';
-import { getXenovaSession, clearXenovaSession } from '@/lib/auth-session';
+import { getXenovaSession, setXenovaSession, clearXenovaSession } from '@/lib/auth-session';
 
 const navLinks = [
   { href: '/tournaments', label: 'Tournaments' },
@@ -78,7 +78,7 @@ export const Navbar = () => {
     }
   };
 
-  const syncSession = () => {
+  const syncSession = async () => {
     try {
       const parsed = getXenovaSession();
       if (parsed) {
@@ -89,6 +89,23 @@ export const Navbar = () => {
           return prev;
         });
         checkTicketsStatus(parsed.email);
+
+        // If session avatar is default, sync custom hosted avatar from Supabase
+        if (parsed.avatar === '/valorant.jpg' || !parsed.avatar) {
+          try {
+            const { data: u } = await supabase
+              .from('users')
+              .select('avatar_url')
+              .eq('email', parsed.email.toLowerCase())
+              .maybeSingle();
+
+            if (u?.avatar_url && u.avatar_url !== '/valorant.jpg' && !u.avatar_url.startsWith('data:')) {
+              const updated = { ...parsed, avatar: u.avatar_url };
+              setSession(updated);
+              setXenovaSession(updated);
+            }
+          } catch {}
+        }
       } else {
         setSession(null);
         checkTicketsStatus();
