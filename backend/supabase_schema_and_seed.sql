@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
+    phone TEXT,
     college TEXT,
     role TEXT DEFAULT 'PLAYER',
     bio TEXT,
@@ -20,6 +21,9 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure phone column exists on existing deployments
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
 
 -- 0.1 USER FOLLOWS TABLE
 CREATE TABLE IF NOT EXISTS user_follows (

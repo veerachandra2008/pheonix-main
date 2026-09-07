@@ -179,31 +179,29 @@ export async function fetchOrganizerProfileFromDB(tournament: any): Promise<{
 
   // 2. Query users table
   try {
-    if ((!resolved.phone || !resolved.college || !resolved.email || resolved.email === 'desk@xenova.gg') && (email || host)) {
+    if ((!resolved.college || !resolved.email || resolved.email === 'desk@xenova.gg' || !resolved.name || resolved.name === 'Xenova Esports') && (email || host)) {
       if (email && email !== 'desk@xenova.gg') {
         const { data: uData } = await supabase
           .from('users')
-          .select('name, email, phone, college')
+          .select('name, email, college')
           .ilike('email', email);
 
         if (uData && uData.length > 0) {
           const u = uData[0];
           if (u.name && (resolved.name === 'Xenova Esports' || !resolved.name)) resolved.name = u.name;
           if (u.email) resolved.email = u.email;
-          if (u.phone && !resolved.phone) resolved.phone = u.phone;
           if (u.college && !resolved.college) resolved.college = u.college;
         }
       } else if (host) {
         const { data: uHostData } = await supabase
           .from('users')
-          .select('name, email, phone, college')
+          .select('name, email, college')
           .ilike('name', `%${host}%`);
 
         if (uHostData && uHostData.length > 0) {
           const u = uHostData[0];
           if (u.name && (resolved.name === 'Xenova Esports' || !resolved.name)) resolved.name = u.name;
           if (u.email) resolved.email = u.email;
-          if (u.phone && !resolved.phone) resolved.phone = u.phone;
           if (u.college && !resolved.college) resolved.college = u.college;
         }
       }
