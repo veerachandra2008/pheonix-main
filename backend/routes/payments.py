@@ -1778,3 +1778,95 @@ def reject_manual_upi_payment(payment_id):
         'rejected_at': server_time,
         'rejection_reason': sanitized_reason
     }), 200
+
+
+@payments_bp.route('/manual/<payment_id>/screenshot', methods=['GET'])
+def get_manual_upi_screenshot(payment_id):
+    """
+    PHASE 4C: Secure Screenshot Access for Manual UPI Payments
+    Endpoint: GET /api/payments/manual/<payment_id>/screenshot
+
+    Requirements:
+      - Authenticate using get_authenticated_user(). Unauthenticated -> 401.
+      - Role check: Only ORGANIZER and ADMIN can access. PLAYER / other -> 403.
+      - Look up payment server-side by payment_id. Non-existent -> 404. Never accept path from client.
+      - Require payment_method == 'MANUAL_UPI'. Non-manual (e.g. Razorpay) -> 400.
+      - Reuse authoritative organizer tournament-ownership check (is_user_authorized_for_tournament).
+        Organizer for another tournament -> 403.
+      - Check screenshot_path in payment_orders. Missing/empty -> 404.
+      - Private bucket: payment-screenshots.
+      - Generate a short-lived signed URL (300 seconds / 5 minutes).
+      - Do not make the bucket public or expose raw storage paths unnecessarily.
+      - Return signed URL in JSON response.
+    """
+    user = get_authenticated_user()
+    if not user:
+        return jsonify({'success': False, 'message': 'Authentication required.'}), 401
+
+    role = (user.get('role') or 'PLAYER').strip().upper()
+    if role not in ('ORGANIZER', 'ADMIN'):
+        return jsonify({'success': False, 'message': 'Access forbidden: Organizer or Admin role required.'}), 403
+
+    payment = load_payment_order(payment_id)
+    if not payment:
+        return jsonify({'success': False, 'message': 'Payment order not found.'}), 404
+
+    # Require payment_method == 'MANUAL_UPI'
+    method = (payment.get('payment_method') or '').strip().upper()
+    if method != 'MANUAL_UPI':
+        return jsonify({
+            'success': False,
+            'message': 'Only Manual UPI payments have screenshot verification.'
+        }), 400
+
+    # Verify tournament ownership/authorization
+    tournament_slug = payment.get('tournament_slug') or ''
+    tournament = load_tournament_for_payment(tournament_slug)
+    if not tournament:
+        return jsonify({'success': False, 'message': 'Associated tournament not found.'}), 404
+
+    if not is_user_authorized_for_tournament(user, tournament):
+        return jsonify({
+            'success': False,
+            'message': 'You are not authorized to view payment screenshots for this tournament.'
+        }), 403
+
+    # Check screenshot path
+    screenshot_path = payment.get('screenshot_path')
+    if not screenshot_path or not str(screenshot_path).strip():
+        return jsonify({
+            'success': False,
+            'message': 'Payment screenshot not found.'
+        }), 404
+
+    clean_path = str(screenshot_path).strip().lstrip('/')
+    expires_in = 300  # 5 minutes
+
+    try:
+        supabase = get_supabase_client()
+        sign_res = supabase.storage.from_('payment-screenshots').create_signed_url(clean_path, expires_in)
+
+        signed_url = None
+        if isinstance(sign_res, dict):
+            signed_url = sign_res.get('signedURL') or sign_res.get('signedUrl') or sign_res.get('signed_url')
+        elif hasattr(sign_res, 'get'):
+            signed_url = sign_res.get('signedURL') or sign_res.get('signedUrl')
+
+        if not signed_url:
+            raise Exception("Storage provider returned empty signed URL")
+
+        return jsonify({
+            'success': True,
+            'payment_id': payment.get('payment_id') or payment.get('order_id') or payment_id,
+            'signedUrl': signed_url,
+            'expiresIn': expires_in,
+            'message': 'Signed screenshot URL generated successfully.'
+        }), 200
+
+    except Exception as e:
+        print(f"[ERROR] Failed generating signed URL for screenshot {clean_path}: {e}")
+        err_msg = str(e)
+        if 'not found' in err_msg.lower() or 'nosuchkey' in err_msg.lower():
+            return jsonify({'success': False, 'message': 'Payment screenshot not found in storage.'}), 404
+        return jsonify({'success': False, 'message': 'Failed to generate secure screenshot URL.'}), 500
+

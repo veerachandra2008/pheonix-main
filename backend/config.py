@@ -1,6 +1,7 @@
 import os
 import base64
 import json
+import time
 from dotenv import load_dotenv
 
 # Load environment variables from backend/.env, root .env, and root .env.local
@@ -291,6 +292,26 @@ class SupabaseStorageBucket:
         url = f"{self.base_url}/storage/v1/object/{self.bucket_id}"
         r = _HTTP_SESSION.delete(url, headers=self.headers, json={"prefixes": paths}, timeout=self.timeout)
         return r.json() if r.ok else []
+
+    def create_signed_url(self, path, expires_in=300):
+        clean_path = path.lstrip('/')
+        if os.environ.get('MOCK_STORAGE') == 'true' and os.environ.get('TEST_MODE') == 'true':
+            mock_url = f"{self.base_url}/storage/v1/object/sign/{self.bucket_id}/{clean_path}?token=mock_token_{int(time.time()) + expires_in}"
+            return {"signedURL": mock_url, "signedUrl": mock_url}
+
+        url = f"{self.base_url}/storage/v1/object/sign/{self.bucket_id}/{clean_path}"
+        headers = dict(self.headers)
+        headers["Content-Type"] = "application/json"
+        r = _HTTP_SESSION.post(url, headers=headers, json={"expiresIn": expires_in}, timeout=self.timeout)
+        if not r.ok:
+            raise Exception(f"Storage sign error ({r.status_code}): {r.text}")
+        res_json = r.json()
+        raw_signed = res_json.get("signedURL") or res_json.get("signedUrl")
+        if raw_signed and not raw_signed.startswith("http"):
+            full_url = f"{self.base_url}/storage/v1{raw_signed if raw_signed.startswith('/') else '/' + raw_signed}"
+        else:
+            full_url = raw_signed
+        return {"signedURL": full_url, "signedUrl": full_url}
 
 class SupabaseStorageClient:
     def __init__(self, base_url, key):
