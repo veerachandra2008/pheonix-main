@@ -2043,3 +2043,136 @@ def get_manual_upi_screenshot(payment_id):
             return jsonify({'success': False, 'message': 'Payment screenshot not found in storage.'}), 404
         return jsonify({'success': False, 'message': 'Failed to generate secure screenshot URL.'}), 500
 
+
+@payments_bp.route('/manual/orders', methods=['GET'])
+def list_manual_upi_orders():
+    """
+    PHASE 5: Organizer Dashboard Manual UPI Orders List
+    Endpoint: GET /api/payments/manual/orders
+    Query parameters:
+      - status: PENDING (default), VERIFIED, REJECTED, DUPLICATE_REVIEW, or ALL
+      - tournament_slug: (optional) filter by a specific tournament slug
+
+    Requirements:
+      - Authenticate with existing get_authenticated_user(). Unauthenticated -> 401.
+      - PLAYER role -> 403.
+      - ORGANIZER and ADMIN only.
+      - Reuse exact Phase 4A tournament ownership mechanism (is_user_authorized_for_tournament).
+      - ADMIN can see all Manual UPI orders across all tournaments.
+      - ORGANIZER can see only orders for tournaments they are authorized to manage.
+      - Only return payment_method == 'MANUAL_UPI'.
+      - Return stored registration_payload so the UI can display all 4 squad players.
+      - Never trust frontend organizer ID, role, tournament ownership, or amount.
+    """
+    user = get_authenticated_user()
+    if not user:
+        return jsonify({'success': False, 'message': 'Authentication required.'}), 401
+
+    role = (user.get('role') or 'PLAYER').strip().upper()
+    if role not in ('ORGANIZER', 'ADMIN'):
+        return jsonify({'success': False, 'message': 'Access forbidden: Organizer or Admin role required.'}), 403
+
+    status_filter = (request.args.get('status') or 'PENDING').strip().upper()
+    filter_slug = (request.args.get('tournament_slug') or '').strip().lower()
+
+    # Determine authorized tournament slugs
+    is_admin = (role == 'ADMIN')
+    authorized_slugs = set()
+
+    if not is_admin:
+        # Load tournaments from Supabase and IN_MEMORY_TOURNAMENTS
+        try:
+            supabase = get_supabase_client()
+            t_res = supabase.table('tournaments').select('*').execute()
+            if t_res.data:
+                for t in t_res.data:
+                    if is_user_authorized_for_tournament(user, t):
+                        s = (t.get('slug') or '').strip().lower()
+                        if s:
+                            authorized_slugs.add(s)
+        except Exception as e:
+            print(f"[WARN] Failed fetching tournaments for authorization: {e}")
+
+        try:
+            from routes.tournaments import IN_MEMORY_TOURNAMENTS
+            for t in IN_MEMORY_TOURNAMENTS:
+                if is_user_authorized_for_tournament(user, t):
+                    s = (t.get('slug') or '').strip().lower()
+                    if s:
+                        authorized_slugs.add(s)
+        except Exception:
+            pass
+
+    # Collect orders from Supabase and IN_MEMORY_PAYMENT_ORDERS
+    orders_map = {}
+
+    try:
+        supabase = get_supabase_client()
+        query = supabase.table('payment_orders').select('*').eq('payment_method', 'MANUAL_UPI')
+        if not is_admin:
+            if not authorized_slugs:
+                return jsonify({
+                    'success': True,
+                    'orders': [],
+                    'counts': {'PENDING': 0, 'DUPLICATE_REVIEW': 0, 'VERIFIED': 0, 'REJECTED': 0, 'ALL': 0}
+                }), 200
+            slug_filters = [f"tournament_slug.eq.{s}" for s in authorized_slugs if s]
+            if slug_filters:
+                query = query.or_(",".join(slug_filters))
+            else:
+                return jsonify({
+                    'success': True,
+                    'orders': [],
+                    'counts': {'PENDING': 0, 'DUPLICATE_REVIEW': 0, 'VERIFIED': 0, 'REJECTED': 0, 'ALL': 0}
+                }), 200
+
+        sb_orders = query.order('created_at', desc=True).execute()
+        if sb_orders.data:
+            for o in sb_orders.data:
+                oid = o.get('order_id')
+                if oid:
+                    orders_map[oid] = o
+    except Exception as e:
+        print(f"[WARN] Failed fetching orders from Supabase: {e}")
+
+    # Merge in-memory orders (for test environments and fallback)
+    for oid, o in IN_MEMORY_PAYMENT_ORDERS.items():
+        if (o.get('payment_method') or '').upper() == 'MANUAL_UPI':
+            slug = (o.get('tournament_slug') or '').strip().lower()
+            if is_admin or (slug in authorized_slugs):
+                if oid not in orders_map:
+                    orders_map[oid] = dict(o)
+                else:
+                    orders_map[oid].update(o)
+
+    all_orders = list(orders_map.values())
+    all_orders.sort(key=lambda x: str(x.get('created_at') or ''), reverse=True)
+
+    # Compute status counts across all authorized orders
+    counts = {
+        'PENDING': 0,
+        'DUPLICATE_REVIEW': 0,
+        'VERIFIED': 0,
+        'REJECTED': 0,
+        'ALL': len(all_orders)
+    }
+    for o in all_orders:
+        st = (o.get('status') or '').strip().upper()
+        if st in counts:
+            counts[st] += 1
+
+    # Filter by specific tournament slug if requested
+    if filter_slug:
+        all_orders = [o for o in all_orders if (o.get('tournament_slug') or '').strip().lower() == filter_slug]
+
+    # Filter by status (default is PENDING unless 'ALL' requested)
+    if status_filter and status_filter != 'ALL':
+        all_orders = [o for o in all_orders if (o.get('status') or '').strip().upper() == status_filter]
+
+    return jsonify({
+        'success': True,
+        'orders': all_orders,
+        'counts': counts
+    }), 200
+
+

@@ -24,6 +24,7 @@ import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
 import { extractOrganizerData } from '@/lib/tournaments-db';
 import { getXenovaSession, setXenovaSession } from '@/lib/auth-session';
+import OrganizerManualUpiVerification from '@/components/OrganizerManualUpiVerification';
 
 export default function OrganizerDashboard() {
   const router = useRouter();
@@ -373,6 +374,13 @@ export default function OrganizerDashboard() {
             </div>
           </Link>
         </section>
+
+        {/* Manual UPI Verification Desk */}
+        <OrganizerManualUpiVerification
+          session={session}
+          tournaments={tournaments}
+          onOrderProcessed={() => loadData(session.email, session.role, session.name)}
+        />
 
         {/* Tournaments Grid */}
         <section className="space-y-4">
