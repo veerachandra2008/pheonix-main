@@ -27,6 +27,7 @@ import {
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
 import { invalidateTournamentsCache, getTournamentBySlug, extractOrganizerData, cleanDescriptionText } from '@/lib/tournaments-db';
+import { getXenovaSession } from '@/lib/auth-session';
 
 export default function TournamentManagePage() {
   const router = useRouter();
@@ -128,16 +129,15 @@ export default function TournamentManagePage() {
 
   useEffect(() => {
     async function verifyAndLoad() {
-      const rawSession = localStorage.getItem('xenova_session');
-      if (!rawSession) {
+      const user = getXenovaSession();
+      if (!user) {
         router.replace('/login');
         return;
       }
 
       try {
-        const user = JSON.parse(rawSession);
         setSession(user);
-        loadData(user.email, user.role || 'organizer', user.hostName || user.name);
+        loadData(user.email, user.role || 'ORGANIZER', user.hostName || user.name);
       } catch {
         router.replace('/login');
       }

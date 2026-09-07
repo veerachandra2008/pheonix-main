@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import FinalCTA from '@/components/xenova/FinalCTA';
 import { supabase } from '@/lib/supabase';
+import { getXenovaSession } from '@/lib/auth-session';
 
 type Player = {
   id: string;
@@ -59,24 +60,32 @@ export const preloadPlayers = async () => {
         const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
         return timeB - timeA;
       });
-      const mapped = sorted.map((u: any, idx: number) => ({
-        id: String(u.id || idx),
-        name: u.name || 'Varsity Athlete',
-        email: (u.email || '').trim().toLowerCase(),
-        college: u.college || 'University Campus',
-        role: (u.role || 'PLAYER').toLowerCase(),
-        bio: u.bio || '',
-        tag: u.tag || `@${(u.name || 'player').toLowerCase().replace(/\s+/g, '')}`,
-        avatar: u.avatar_url || '/valorant.jpg',
-        avatar_url: u.avatar_url || '/valorant.jpg',
-        rank: u.rank || idx + 1,
-        win_rate: u.win_rate ?? 0.0,
-        trophies: u.trophies ?? 0,
-      }));
+      const mapped = sorted.map((u: any, idx: number) => {
+        const cleanAvatar = (u.avatar_url && !u.avatar_url.startsWith('data:') && u.avatar_url.length <= 256)
+          ? u.avatar_url
+          : '/valorant.jpg';
+        return {
+          id: String(u.id || idx),
+          name: u.name || 'Varsity Athlete',
+          email: (u.email || '').trim().toLowerCase(),
+          college: u.college || 'University Campus',
+          role: (u.role || 'PLAYER').toLowerCase(),
+          bio: u.bio || '',
+          tag: u.tag || `@${(u.name || 'player').toLowerCase().replace(/\s+/g, '')}`,
+          avatar: cleanAvatar,
+          avatar_url: cleanAvatar,
+          rank: u.rank || idx + 1,
+          win_rate: u.win_rate ?? 0.0,
+          trophies: u.trophies ?? 0,
+        };
+      });
       cachedPlayersMemory = mapped;
       if (typeof window !== 'undefined') {
         try {
-          localStorage.setItem(PLAYERS_CACHE_KEY, JSON.stringify(mapped));
+          const serialized = JSON.stringify(mapped);
+          if (serialized.length < 500000) {
+            localStorage.setItem(PLAYERS_CACHE_KEY, serialized);
+          }
         } catch {}
       }
       return mapped;
@@ -140,15 +149,10 @@ export default function PlayersPage() {
 
   useEffect(() => {
     let currentEmail = '';
-    const rawSession = localStorage.getItem('xenova_session');
-    if (rawSession) {
-      try {
-        const parsed = JSON.parse(rawSession);
-        setSession(parsed);
-        currentEmail = (parsed.email || '').toLowerCase().trim();
-      } catch (e) {
-        console.error(e);
-      }
+    const parsed = getXenovaSession();
+    if (parsed) {
+      setSession(parsed);
+      currentEmail = (parsed.email || '').toLowerCase().trim();
     }
 
     // High-Speed Parallel Direct Database Dispatch with SWR background update
@@ -256,13 +260,10 @@ export default function PlayersPage() {
   const handleToggleFollow = async (targetEmail: string) => {
     let currentEmail = (session?.email || '').trim().toLowerCase();
     if (!currentEmail) {
-      try {
-        const raw = localStorage.getItem('xenova_session');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          currentEmail = (parsed.email || '').trim().toLowerCase();
-        }
-      } catch { }
+      const parsed = getXenovaSession();
+      if (parsed) {
+        currentEmail = (parsed.email || '').trim().toLowerCase();
+      }
     }
 
     if (!currentEmail) {

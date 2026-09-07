@@ -21,6 +21,7 @@ import {
 import { flaskApi } from '@/lib/flask-api';
 import { supabase } from '@/lib/supabase';
 import { getApiBaseUrl } from '@/lib/api-config';
+import { setXenovaSession } from '@/lib/auth-session';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -111,8 +112,7 @@ export default function LoginPage() {
           tag: profile?.tag || `${(formData.name.trim() || 'PLAYER').toUpperCase()}#1337`,
         };
 
-        localStorage.setItem('xenova_session', JSON.stringify(userSession));
-        window.dispatchEvent(new Event('xenova-auth-change'));
+        setXenovaSession(userSession);
 
         setStatusMsg({
           type: 'success',
@@ -161,8 +161,7 @@ export default function LoginPage() {
           bio: profile?.bio || '',
         };
 
-        localStorage.setItem('xenova_session', JSON.stringify(userSession));
-        window.dispatchEvent(new Event('xenova-auth-change'));
+        setXenovaSession(userSession);
 
         setStatusMsg({
           type: 'success',

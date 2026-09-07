@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import FinalCTA from '@/components/xenova/FinalCTA';
 import { supabase } from '@/lib/supabase';
+import { getXenovaSession } from '@/lib/auth-session';
 
 export type NotificationType = 'tournament' | 'team' | 'campus' | 'system';
 
@@ -86,15 +87,13 @@ export default function NotificationsPage() {
     let currentCollege = '';
     let accountCreated = '';
 
-    const rawSession = localStorage.getItem('xenova_session');
-    if (rawSession) {
+    const parsed = getXenovaSession();
+    if (parsed) {
       try {
-        const parsed = JSON.parse(rawSession);
         setSession(parsed);
         currentEmail = (parsed.email || '').trim().toLowerCase();
         currentName = parsed.name || 'Athlete';
         currentCollege = parsed.college || '';
-        accountCreated = parsed.created_at || '';
       } catch (e) {
         console.error(e);
       }

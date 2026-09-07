@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { tournaments as defaultTournaments } from '@/app/tournaments/data';
 import { getApiBaseUrl } from '@/lib/api-config';
+import { getXenovaSession } from '@/lib/auth-session';
 
 interface Player {
   slot: number;
@@ -240,13 +241,12 @@ export default function OrganizerRostersHubPage() {
 
   useEffect(() => {
     async function checkAuth() {
-      const rawSession = localStorage.getItem('xenova_session');
-      if (!rawSession) {
+      const user = getXenovaSession();
+      if (!user) {
         router.replace('/login');
         return;
       }
       try {
-        const user = JSON.parse(rawSession);
         const email = (user.email || '').trim().toLowerCase();
         const role = (user.role || '').toUpperCase();
 

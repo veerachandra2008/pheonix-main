@@ -29,6 +29,7 @@ import {
   ArrowUpRight
 } from 'lucide-react';
 import { flaskApi, getCached } from '@/lib/flask-api';
+import { getXenovaSession, setXenovaSession } from '@/lib/auth-session';
 
 type CategoryType = 'organizers' | 'teams' | 'colleges' | 'tournaments';
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
@@ -128,14 +129,13 @@ export default function AdminApplicationsMasterPage() {
       if (res.success || true) {
         // Sync local session if logged in as this user
         try {
-          const rawSession = localStorage.getItem('xenova_session');
-          if (rawSession) {
-            const user = JSON.parse(rawSession);
-            if (user.email?.toLowerCase() === cleanEmail) {
-              user.role = action === 'approve' ? 'organizer' : 'player';
-              localStorage.setItem('xenova_session', JSON.stringify(user));
-              window.dispatchEvent(new Event('xenova-auth-change'));
-            }
+          const user = getXenovaSession();
+          if (user && user.email?.toLowerCase() === cleanEmail) {
+            const updated = {
+              ...user,
+              role: action === 'approve' ? ('ORGANIZER' as const) : ('PLAYER' as const),
+            };
+            setXenovaSession(updated);
           }
         } catch {}
         await loadAllApplications(true);

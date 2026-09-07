@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Eye, EyeOff, Gamepad2, Lock, Mail, ShieldAlert, Loader2, CheckCircle2 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
+import { setXenovaSession } from '@/lib/auth-session';
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -44,7 +45,7 @@ export default function AdminLoginPage() {
       // Store in browser storage & cookies
       try {
         localStorage.setItem('xenova_admin_session', JSON.stringify(adminUser));
-        localStorage.setItem('xenova_session', JSON.stringify(adminUser));
+        setXenovaSession(adminUser);
         sessionStorage.setItem('xenova_admin_session', JSON.stringify(adminUser));
         document.cookie = 'xenova_admin_token=active_token; path=/; max-age=86400; SameSite=Lax';
         document.cookie = 'xenova_session=admin; path=/; max-age=86400; SameSite=Lax';

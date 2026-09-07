@@ -17,6 +17,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
+import { getXenovaSession, clearXenovaSession } from '@/lib/auth-session';
 
 export default function AdminLayout({
   children,
@@ -37,18 +38,21 @@ export default function AdminLayout({
     const checkAdminAuth = () => {
       try {
         const adminSession = localStorage.getItem('xenova_admin_session');
-        const mainSession = localStorage.getItem('xenova_session');
-        const raw = adminSession || mainSession;
-
-        if (!raw) {
-          setIsAdmin(false);
-          router.replace('/admin/login');
-          return;
+        const mainSession = getXenovaSession();
+        
+        let role = '';
+        let email = '';
+        if (adminSession) {
+          try {
+            const parsed = JSON.parse(adminSession);
+            role = (parsed?.role || '').toUpperCase();
+            email = (parsed?.email || '').toLowerCase();
+          } catch {}
         }
-
-        const parsed = JSON.parse(raw);
-        const role = (parsed?.role || '').toUpperCase();
-        const email = (parsed?.email || '').toLowerCase();
+        if (!role && mainSession) {
+          role = (mainSession.role || '').toUpperCase();
+          email = (mainSession.email || '').toLowerCase();
+        }
 
         if (role === 'ADMIN' || email === 'admin@xenova.gg') {
           setIsAdmin(true);
@@ -71,10 +75,9 @@ export default function AdminLayout({
   const handleLogout = () => {
     try {
       localStorage.removeItem('xenova_admin_session');
-      localStorage.removeItem('xenova_session');
       sessionStorage.removeItem('xenova_admin_session');
+      clearXenovaSession();
       document.cookie = 'xenova_admin_token=; path=/; max-age=0; SameSite=Lax';
-      document.cookie = 'xenova_session=; path=/; max-age=0; SameSite=Lax';
     } catch {}
     window.location.href = '/admin/login';
   };

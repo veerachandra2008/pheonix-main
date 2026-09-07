@@ -43,6 +43,7 @@ import {
 } from '@/lib/tournaments-db';
 import { flaskApi } from '@/lib/flask-api';
 import { supabase } from '@/lib/supabase';
+import { getXenovaSession } from '@/lib/auth-session';
 import { getApiBaseUrl } from '@/lib/api-config';
 
 interface TournamentPageParams {
@@ -156,9 +157,8 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
 
       let userEmail: string | undefined = undefined;
       try {
-        const rawSession = localStorage.getItem('xenova_session');
-        if (rawSession) {
-          const user = JSON.parse(rawSession);
+        const user = getXenovaSession();
+        if (user) {
           setSessionUser(user);
           userEmail = (user.email || '').trim().toLowerCase();
         }

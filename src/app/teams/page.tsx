@@ -31,6 +31,7 @@ import { slugify, type XenovaTeam } from '@/lib/xenova-data';
 import FinalCTA from '@/components/xenova/FinalCTA';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
+import { getXenovaSession } from '@/lib/auth-session';
 
 const gameFilters = ['All Games', 'BGMI', 'Valorant', 'Free Fire', 'CS2', 'FC24'];
 const sortOptions = ['Top Ranked', 'Win Rate', 'Most Trophies'];
@@ -196,13 +197,9 @@ export default function TeamsPage() {
   const [newCaptain, setNewCaptain] = useState('');
 
   useEffect(() => {
-    const rawSession = localStorage.getItem('xenova_session');
-    if (rawSession) {
-      try {
-        setCurrentUser(JSON.parse(rawSession));
-      } catch (e) {
-        console.error(e);
-      }
+    const user = getXenovaSession();
+    if (user) {
+      setCurrentUser(user);
     }
 
     const loadTeams = async () => {

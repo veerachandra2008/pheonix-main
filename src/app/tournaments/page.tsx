@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { CalendarDays, MapPin, Search, SlidersHorizontal, Trophy, Users, Zap, Flame, ShieldCheck, ArrowRight } from 'lucide-react';
 import { gameFilters, statusFilters, tournaments as defaultTournaments } from './data';
 import { getAllTournaments, getUserRegistrations } from '@/lib/tournaments-db';
+import { getXenovaSession } from '@/lib/auth-session';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
 // In-memory module cache for sub-millisecond route transitions (0.0ms)
@@ -55,9 +56,9 @@ function TournamentsContent() {
     async function loadData() {
       let email: string | undefined = undefined;
       try {
-        const rawSession = localStorage.getItem('xenova_session');
-        if (rawSession) {
-          email = (JSON.parse(rawSession).email || '').trim().toLowerCase();
+        const session = getXenovaSession();
+        if (session) {
+          email = (session.email || '').trim().toLowerCase();
         }
       } catch {}
 

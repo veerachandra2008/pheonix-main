@@ -75,6 +75,7 @@ const gameLibrary = [
 import { getUserRegistrations, TournamentRegistrationRecord } from '@/lib/tournaments-db';
 import { supabase } from '@/lib/supabase';
 import { getApiBaseUrl } from '@/lib/api-config';
+import { getXenovaSession, setXenovaSession } from '@/lib/auth-session';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -117,12 +118,7 @@ export default function DashboardPage() {
             liveData.avatar_url = dbUser.avatar_url || dbUser.avatar;
           }
           setSession((prev: any) => ({ ...(prev || {}), ...liveData }));
-          try {
-            const raw = localStorage.getItem('xenova_session');
-            const existing = raw ? JSON.parse(raw) : {};
-            localStorage.setItem('xenova_session', JSON.stringify({ ...existing, ...liveData }));
-            window.dispatchEvent(new Event('xenova-auth-change'));
-          } catch {}
+          setXenovaSession(liveData);
         }
       } catch (sbErr) {
         console.warn('Dashboard Supabase users fetch notice:', sbErr);
@@ -136,12 +132,7 @@ export default function DashboardPage() {
           const data = await res.json();
           if (data.success && data.data) {
             setSession((prev: any) => ({ ...(prev || {}), ...data.data }));
-            try {
-              const raw = localStorage.getItem('xenova_session');
-              const existing = raw ? JSON.parse(raw) : {};
-              localStorage.setItem('xenova_session', JSON.stringify({ ...existing, ...data.data }));
-              window.dispatchEvent(new Event('xenova-auth-change'));
-            } catch {}
+            setXenovaSession(data.data);
           }
         }
       } catch (apiErr) {
@@ -159,10 +150,9 @@ export default function DashboardPage() {
       }
     };
 
-    const rawSession = localStorage.getItem('xenova_session');
-    if (rawSession) {
+    const user = getXenovaSession();
+    if (user) {
       try {
-        const user = JSON.parse(rawSession);
         setSession(user);
 
         // Instant optimistic passes render from local cache (0ms)
@@ -201,7 +191,7 @@ export default function DashboardPage() {
             role: 'player',
           };
           setSession(initialUser);
-          localStorage.setItem('xenova_session', JSON.stringify(initialUser));
+          setXenovaSession(initialUser);
 
           getUserRegistrations(email, authSession.user.id).then((regs) => {
             if (regs && Array.isArray(regs)) setUserRegistrations(regs);

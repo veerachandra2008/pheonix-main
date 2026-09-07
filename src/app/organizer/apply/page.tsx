@@ -33,6 +33,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
+import { getXenovaSession, setXenovaSession } from '@/lib/auth-session';
 
 const gameOptions = [
   { name: 'Valorant', image: '/valorant.jpg', defaultFormat: '5v5 Double Elimination', tag: 'PC FPS' },
@@ -71,19 +72,19 @@ export default function HostEventPage() {
   const [publishedEvent, setPublishedEvent] = useState<any>(null);
 
   useEffect(() => {
-    const rawSession = localStorage.getItem('xenova_session');
-    if (rawSession) {
+    const user = getXenovaSession();
+    if (user) {
+      const currentUser = user;
       try {
-        const user = JSON.parse(rawSession);
-        setSession(user);
+        setSession(currentUser);
         setFormData((prev) => ({
           ...prev,
-          organizerEmail: prev.organizerEmail || user.email || '',
-          organizerName: prev.organizerName || (user.name ? `${user.name} Esports Club` : ''),
+          organizerEmail: prev.organizerEmail || currentUser.email || '',
+          organizerName: prev.organizerName || (currentUser.name ? `${currentUser.name} Esports Club` : ''),
         }));
 
         async function checkStatus() {
-          const cleanEmail = (user.email || '').toLowerCase().trim();
+          const cleanEmail = (currentUser.email || '').toLowerCase().trim();
           if (!cleanEmail) return;
 
           try {
@@ -92,24 +93,21 @@ export default function HostEventPage() {
             if (data && data.length > 0) {
               const status = (data[0].status || '').toUpperCase();
               if (status === 'APPROVED') {
-                const updated = { ...user, role: 'organizer', hostName: data[0].host_name || user.name };
-                localStorage.setItem('xenova_session', JSON.stringify(updated));
+                const updated = { ...currentUser, role: 'ORGANIZER' as const, hostName: data[0].host_name || currentUser.name };
+                setXenovaSession(updated);
                 setSession(updated);
-                window.dispatchEvent(new Event('xenova-auth-change'));
               } else {
-                const updated = { ...user, role: 'player' };
-                delete updated.hostName;
-                localStorage.setItem('xenova_session', JSON.stringify(updated));
+                const updated = { ...currentUser, role: 'PLAYER' as const };
+                delete (updated as any).hostName;
+                setXenovaSession(updated);
                 setSession(updated);
-                window.dispatchEvent(new Event('xenova-auth-change'));
               }
             } else {
-              if (user.role !== 'admin') {
-                const updated = { ...user, role: 'player' };
-                delete updated.hostName;
-                localStorage.setItem('xenova_session', JSON.stringify(updated));
+              if (currentUser.role !== 'ADMIN') {
+                const updated = { ...currentUser, role: 'PLAYER' as const };
+                delete (updated as any).hostName;
+                setXenovaSession(updated);
                 setSession(updated);
-                window.dispatchEvent(new Event('xenova-auth-change'));
               }
             }
           } catch {}

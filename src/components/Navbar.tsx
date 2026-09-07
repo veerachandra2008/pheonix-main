@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 import { supabase } from '@/lib/supabase';
+import { getXenovaSession, clearXenovaSession } from '@/lib/auth-session';
 
 const navLinks = [
   { href: '/tournaments', label: 'Tournaments' },
@@ -78,11 +79,10 @@ export const Navbar = () => {
 
   const syncSession = () => {
     try {
-      const rawSession = localStorage.getItem('xenova_session');
-      if (rawSession) {
-        const parsed = JSON.parse(rawSession);
+      const parsed = getXenovaSession();
+      if (parsed) {
         setSession((prev: any) => {
-          if (!prev || prev.avatar !== parsed.avatar || prev.avatar_url !== parsed.avatar_url || prev.name !== parsed.name) {
+          if (!prev || prev.avatar !== parsed.avatar || prev.name !== parsed.name || prev.role !== parsed.role || prev.email !== parsed.email) {
             return parsed;
           }
           return prev;
@@ -106,10 +106,9 @@ export const Navbar = () => {
       checkTicketsStatus();
     };
 
-    // Single source of truth: Listen directly to Supabase Auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, sbSession) => {
       if (event === 'SIGNED_OUT' || !sbSession) {
-        localStorage.removeItem('xenova_session');
+        clearXenovaSession();
         setSession(null);
       } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
         syncSession();
@@ -157,9 +156,8 @@ export const Navbar = () => {
     try {
       await supabase.auth.signOut();
     } catch {}
-    localStorage.removeItem('xenova_session');
+    clearXenovaSession();
     setSession(null);
-    window.dispatchEvent(new Event('xenova-auth-change'));
     router.push('/');
   };
 

@@ -24,6 +24,7 @@ import {
 import FinalCTA from '@/components/xenova/FinalCTA';
 import { supabase } from '@/lib/supabase';
 import { getApiBaseUrl } from '@/lib/api-config';
+import { getXenovaSession, setXenovaSession } from '@/lib/auth-session';
 
 const PRESET_AVATARS = [
   { label: 'Valorant Phoenix', src: '/valorant.jpg' },
@@ -86,21 +87,20 @@ export default function SettingsPage() {
   const [avatar, setAvatar] = useState('/valorant.jpg');
 
   useEffect(() => {
-    const raw = localStorage.getItem('xenova_session');
-    if (!raw) {
+    const user = getXenovaSession();
+    if (!user) {
       router.replace('/login');
       return;
     }
 
     try {
-      const user = JSON.parse(raw);
       setSessionUser(user);
       setName(user.name || '');
       setTag(user.tag || '');
       setCollege(user.college || '');
       setTeam(user.team || '');
       setBio(user.bio || '');
-      setAvatar(user.avatar || user.avatar_url || '/valorant.jpg');
+      setAvatar(user.avatar || '/valorant.jpg');
 
       // Fetch live fresh profile from Database (/api/auth/profile + Supabase)
       const fetchLiveProfile = async () => {
@@ -123,8 +123,7 @@ export default function SettingsPage() {
                 setAvatar(sbData.avatar_url || sbData.avatar);
               }
               const updatedSession = { ...user, ...sbData, avatar: sbData.avatar_url || sbData.avatar || user.avatar };
-              localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
-              window.dispatchEvent(new Event('xenova-auth-change'));
+              setXenovaSession(updatedSession);
             }
           } catch {}
 
@@ -145,8 +144,7 @@ export default function SettingsPage() {
               }
               // Update local session
               const updatedSession = { ...user, ...live, avatar: live.avatar || live.avatar_url || user.avatar };
-              localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
-              window.dispatchEvent(new Event('xenova-auth-change'));
+              setXenovaSession(updatedSession);
             }
           }
         } catch (err) {
@@ -172,16 +170,7 @@ export default function SettingsPage() {
       const compressedDataUrl = await compressImageToDataUrl(file, 512, 0.85);
       setAvatar(compressedDataUrl);
 
-      // Instant optimistic local session update (0ms Navbar photo update)
-      if (sessionUser) {
-        const nextSession = {
-          ...sessionUser,
-          avatar: compressedDataUrl,
-          avatar_url: compressedDataUrl,
-        };
-        localStorage.setItem('xenova_session', JSON.stringify(nextSession));
-        window.dispatchEvent(new Event('xenova-auth-change'));
-      }
+      // Preview base64 image in component state only - never bloat localStorage with base64 data
     } catch (err) {
       setErrorMsg('Could not process this image. Please select another image.');
     }
@@ -191,13 +180,10 @@ export default function SettingsPage() {
     setAvatar(src);
     // Instant optimistic local session update (0ms Navbar photo update)
     if (sessionUser) {
-      const nextSession = {
+      setXenovaSession({
         ...sessionUser,
         avatar: src,
-        avatar_url: src,
-      };
-      localStorage.setItem('xenova_session', JSON.stringify(nextSession));
-      window.dispatchEvent(new Event('xenova-auth-change'));
+      });
     }
   };
 
@@ -220,13 +206,11 @@ export default function SettingsPage() {
       avatar: avatar,
     };
 
-    // 1. INSTANT OPTIMISTIC LOCAL UPDATE (0ms instant update across Navbar & App)
-    const nextSession = {
+    // 1. INSTANT OPTIMISTIC LOCAL UPDATE with sanitized minimal state
+    setXenovaSession({
       ...sessionUser,
       ...payload,
-    };
-    localStorage.setItem('xenova_session', JSON.stringify(nextSession));
-    window.dispatchEvent(new Event('xenova-auth-change'));
+    });
     setSavedMsg('Profile and photo updated!');
 
     // 2. PARALLEL BACKGROUND PERSISTENCE (Supabase + Backend API concurrently)

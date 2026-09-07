@@ -20,6 +20,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
+import { getXenovaSession } from '@/lib/auth-session';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
 interface Ticket {
@@ -60,13 +61,12 @@ export default function MyTicketsPage() {
 
     try {
       let email = '';
-      const rawSession = localStorage.getItem('xenova_session');
-      if (rawSession) {
-        try {
-          const parsed = JSON.parse(rawSession);
-          email = (parsed.email || '').trim().toLowerCase();
-        } catch {}
-      }
+      try {
+        const session = getXenovaSession();
+        if (session) {
+          email = (session.email || '').trim().toLowerCase();
+        }
+      } catch {}
 
       // Also check last submitted contact email in localStorage
       const lastContactEmail = (localStorage.getItem('xenova_last_contact_email') || '').trim().toLowerCase();

@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { getApiBaseUrl } from '@/lib/api-config';
+import { getXenovaSession } from '@/lib/auth-session';
 import { tournaments } from '../../tournaments/data';
 
 interface PlayerSlot {
@@ -60,12 +61,11 @@ export default function RegistrationStepOne() {
   const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
-    const rawSession = localStorage.getItem('xenova_session');
-    if (!rawSession) {
+    const user = getXenovaSession();
+    if (!user) {
       router.replace('/login');
       return;
     }
-    const user = JSON.parse(rawSession);
     setSession(user);
 
     // Prefill Captain (Player 1) & Team from session if available

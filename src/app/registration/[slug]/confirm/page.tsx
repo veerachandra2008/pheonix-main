@@ -13,11 +13,14 @@ import {
   Lock,
   Loader2,
   CreditCard,
+  Clock,
+  RefreshCw,
 } from 'lucide-react';
 import { saveRegistration } from '@/lib/tournaments-db';
 import { tournaments } from '@/app/tournaments/data';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
+import { getXenovaSession } from '@/lib/auth-session';
 
 interface PageProps {
   params?: Promise<{ slug: string }>;
@@ -26,6 +29,7 @@ interface PageProps {
 declare global {
   interface Window {
     Razorpay?: any;
+    Paytm?: any;
   }
 }
 
@@ -40,9 +44,12 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
   const [confirmed, setConfirmed] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [paymentStep, setPaymentStep] = useState<
-    'idle' | 'creating_order' | 'opening_razorpay' | 'verifying_payment' | 'generating_pass'
+    'idle' | 'creating_order' | 'opening_gateway' | 'opening_razorpay' | 'verifying_payment' | 'generating_pass'
   >('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
+  const [pendingMessage, setPendingMessage] = useState<string>('');
+  const [isReconciling, setIsReconciling] = useState(false);
 
   useEffect(() => {
     let resolvedSlug = rawSlug;
@@ -53,6 +60,18 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
           setSlug(p.slug);
         }
       }).catch(() => {});
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        const searchParams = new URLSearchParams(window.location.search);
+        const urlOrderId = searchParams.get('order_id');
+        const urlStatus = searchParams.get('status');
+        if (urlOrderId && (urlStatus === 'pending' || searchParams.get('pending') === 'true')) {
+          setPendingOrderId(urlOrderId);
+          setPendingMessage("Your payment is being confirmed by your bank/Paytm. Please don't pay again. We are checking the transaction.");
+        }
+      } catch {}
     }
 
     const raw = sessionStorage.getItem('reg_selection');
@@ -76,8 +95,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
 
         let sessionUser: any = null;
         try {
-          const rawSession = localStorage.getItem('xenova_session');
-          if (rawSession) sessionUser = JSON.parse(rawSession);
+          sessionUser = getXenovaSession();
         } catch {}
 
         if (found) {
@@ -117,6 +135,38 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
       }
     }
   }, [rawSlug, paramsPromise, router]);
+
+  const loadPaytmScript = (paytmHost: string, mid: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (typeof window === 'undefined') {
+        resolve(false);
+        return;
+      }
+      if (window.Paytm && window.Paytm.CheckoutJS) {
+        resolve(true);
+        return;
+      }
+      const host = (paytmHost || 'https://securestage.paytmpayments.com').replace(/\/$/, '');
+      const scriptSrc = `${host}/merchantpgpui/checkoutjs/merchants/${mid}.js`;
+      const existingScript = document.querySelector(`script[src="${scriptSrc}"]`) as HTMLScriptElement;
+      if (existingScript) {
+        if (window.Paytm?.CheckoutJS) {
+          resolve(true);
+          return;
+        }
+        existingScript.addEventListener('load', () => resolve(true));
+        existingScript.addEventListener('error', () => resolve(false));
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = scriptSrc;
+      script.async = true;
+      script.crossOrigin = 'anonymous';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
 
   const loadRazorpayScript = (): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -160,6 +210,67 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
     if (!feeStr || feeStr.toLowerCase().includes('free')) return 0;
     const match = feeStr.match(/\d+/);
     return match ? parseInt(match[0], 10) : 0;
+  };
+
+  // Reconcile pending order authoritatively with backend
+  const handleCheckPaymentStatus = async (overrideOrderId?: string) => {
+    const targetOrderId = overrideOrderId || pendingOrderId;
+    if (!targetOrderId) return;
+
+    setIsReconciling(true);
+    setErrorMessage('');
+    const apiBase = getApiBaseUrl();
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session || !session.access_token) {
+        router.push(`/login?redirect=/registration/${slug}/confirm`);
+        return;
+      }
+      const token = session.access_token;
+
+      const res = await fetch(`${apiBase}/payments/reconcile`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ order_id: targetOrderId })
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (data.local_status === 'SUCCESS' || data.passId || (data.success && data.reconciled && data.pass_id)) {
+        const passId = data.passId || data.pass_id;
+        try {
+          sessionStorage.setItem(
+            'reg_selection',
+            JSON.stringify({
+              ...selection,
+              email,
+              passId: passId,
+              paymentId: targetOrderId,
+            })
+          );
+        } catch {}
+        router.push(`/registration/${slug}/pass?passId=${passId}`);
+        return;
+      }
+
+      if (data.local_status === 'PENDING' || data.pending) {
+        setPendingMessage("Your payment is still being confirmed. Please don't make another payment.");
+      } else if (data.local_status === 'FAILED' || data.local_status === 'EXPIRED') {
+        setPendingOrderId(null);
+        setPendingMessage('');
+        setErrorMessage('Payment failed. You can safely retry.');
+      } else {
+        setPendingMessage(data.message || 'Status checked. Transaction is still processing.');
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Error checking payment status.');
+    } finally {
+      setIsReconciling(false);
+    }
   };
 
   const handleContinue = async () => {
@@ -255,7 +366,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
 
     // ─── CASE B: PAID TOURNAMENT (Amount > 0) ───
     try {
-      // Step 1: Request real Razorpay order from backend (server-authoritative amount)
+      // Step 1: Request authoritative Paytm order from backend (server-authoritative amount)
       setPaymentStep('creating_order');
       let orderRes: Response;
 
@@ -273,7 +384,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
           }),
         });
       } catch (fetchErr: any) {
-        setErrorMessage('Could not connect to payment backend server. Please verify the Flask server is running.');
+        setErrorMessage('Could not connect to payment backend server. Please verify the backend server is running.');
         setPaymentStep('idle');
         return;
       }
@@ -287,123 +398,171 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
         return;
       }
 
-      if (!orderRes.ok || !orderData || !orderData.success || !orderData.order_id || !orderData.key_id) {
-        setErrorMessage(orderData?.message || 'Failed to initialize payment order on Razorpay.');
+      if (!orderRes.ok || !orderData || !orderData.success || !orderData.order_id || !orderData.txn_token) {
+        if (orderRes.status === 409 && orderData?.pending && orderData?.order_id) {
+          setPendingOrderId(orderData.order_id);
+          setPendingMessage("Your payment is being confirmed by your bank/Paytm. Please don't pay again. We are checking the transaction.");
+          setPaymentStep('idle');
+          return;
+        }
+        if (orderData?.already_completed && orderData?.passId) {
+          router.push(`/registration/${slug}/pass?passId=${orderData.passId}`);
+          return;
+        }
+        setErrorMessage(orderData?.message || 'Failed to initialize payment order on Paytm.');
         setPaymentStep('idle');
         return;
       }
 
-      // Step 2: Ensure Razorpay SDK is fully loaded before opening checkout
-      setPaymentStep('opening_razorpay');
-      const isLoaded = await loadRazorpayScript();
+      // Step 2: Ensure Paytm CheckoutJS is loaded
+      setPaymentStep('opening_gateway');
+      const paytmHost = orderData.paytm_host || 'https://securestage.paytmpayments.com';
+      const mid = orderData.mid;
+      const isLoaded = await loadPaytmScript(paytmHost, mid);
 
-      if (!isLoaded || !window.Razorpay) {
-        setErrorMessage('Razorpay SDK failed to load. Please check your internet connection and try again.');
+      if (!isLoaded || !window.Paytm?.CheckoutJS) {
+        setErrorMessage('Paytm Checkout failed to load. Please check your internet connection and try again.');
         setPaymentStep('idle');
         return;
       }
 
-      // Step 3: Launch Razorpay Checkout Modal
-      const options = {
-        key: orderData.key_id,
-        amount: orderData.amount,
-        currency: orderData.currency || 'INR',
-        name: 'Xenova Esports Platform',
-        description: `Entry Fee for ${selection.tournamentTitle}`,
-        order_id: orderData.order_id,
-        prefill: {
-          name: selection.captainName,
-          email,
+      // Step 3: Launch Paytm Checkout JS
+      const amountStr = orderData.amount_rupees || (Number(orderData.amount) / 100).toFixed(2);
+      const config = {
+        root: '',
+        flow: 'DEFAULT',
+        data: {
+          orderId: orderData.order_id,
+          token: orderData.txn_token,
+          tokenType: 'TXN_TOKEN',
+          amount: amountStr,
         },
-        theme: {
-          color: '#10B981', // Emerald 500 theme accent
-        },
-        handler: async function (response: any) {
-          if (!response.razorpay_payment_id || !response.razorpay_signature) {
-            setErrorMessage('Payment completed on gateway but verification details were missing.');
-            setPaymentStep('idle');
-            return;
-          }
-
-          // Step 4: Backend HMAC-SHA256 Payment Verification & Server-Authoritative Registration
-          setPaymentStep('verifying_payment');
-
-          try {
-            const verifyRes = await fetch(`${apiBase}/payments/verify-payment`, {
-              method: 'POST',
-              headers: authHeaders,
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id || orderData.order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-                tournamentSlug: selection.tournamentSlug,
-                tournamentTitle: selection.tournamentTitle,
-                tournamentGame: selection.tournamentGame,
-                tournamentDate: selection.tournamentDate,
-                tournamentFormat: selection.tournamentFormat,
-                tournamentRegion: selection.tournamentRegion,
-                tournamentFee: selection.tournamentFee,
-                teamName: selection.teamName,
-                college: selection.college,
-                captainName: selection.captainName,
-                email,
-                players: selection.players || [],
-                playerEmails: selection.playerEmails || [email],
-              }),
-            });
-
-            let verifyData: any = null;
-            try {
-              verifyData = await verifyRes.json();
-            } catch (err) {
-              setErrorMessage('Failed to parse payment verification response from server.');
-              setPaymentStep('idle');
-              return;
-            }
-
-            if (!verifyRes.ok || !verifyData || !verifyData.success || !verifyData.passId) {
-              setErrorMessage(
-                verifyData?.message || 'Payment signature verification failed. No pass was generated.'
-              );
-              setPaymentStep('idle');
-              return;
-            }
-
-            const verifiedPassId = verifyData.passId;
-
-            setPaymentStep('generating_pass');
-            try {
-              sessionStorage.setItem(
-                'reg_selection',
-                JSON.stringify({
-                  ...selection,
-                  email,
-                  passId: verifiedPassId,
-                  paymentId: response.razorpay_payment_id,
-                })
-              );
-            } catch {}
-
-            router.push(`/registration/${slug}/pass?passId=${verifiedPassId}`);
-          } catch (verifyErr: any) {
-            setErrorMessage(verifyErr.message || 'Error occurred while verifying payment signature.');
-            setPaymentStep('idle');
-          }
-        },
-        modal: {
-          ondismiss: function () {
-            setPaymentStep('idle');
+        handler: {
+          notifyVerifyRequest: function (orderDetails: any) {
+            console.log('[Paytm CheckoutJS] notifyVerifyRequest:', orderDetails);
           },
+          transactionStatus: async function (paymentStatus: any) {
+            console.log('[Paytm CheckoutJS] transactionStatus received:', paymentStatus);
+
+            // If pending status reported by gateway
+            if (paymentStatus && (paymentStatus.STATUS === 'PENDING' || paymentStatus.RESPCODE === '01')) {
+              setPendingOrderId(orderData.order_id);
+              setPendingMessage("Your payment is being confirmed by your bank/Paytm. Please don't pay again. We are checking the transaction.");
+              setPaymentStep('idle');
+              return;
+            }
+
+            // If explicit failure reported by gateway
+            if (
+              paymentStatus &&
+              (paymentStatus.STATUS === 'TXN_FAILURE' ||
+                paymentStatus.RESPCODE === '227' ||
+                paymentStatus.RESPCODE === '295' ||
+                paymentStatus.RESPCODE === '810')
+            ) {
+              setErrorMessage(paymentStatus.RESPMSG || 'Payment failed or was cancelled by user.');
+              setPaymentStep('idle');
+              return;
+            }
+
+            // Step 4: Authoritative Server-to-Server Payment Verification
+            // Note: Browser response is never authoritative.
+            // Backend executes Paytm Order Status API v3 query server-to-server.
+            setPaymentStep('verifying_payment');
+
+            try {
+              const verifyRes = await fetch(`${apiBase}/payments/verify-payment`, {
+                method: 'POST',
+                headers: authHeaders,
+                body: JSON.stringify({
+                  order_id: orderData.order_id,
+                  paytm_response: paymentStatus,
+                  tournamentSlug: selection.tournamentSlug,
+                  tournamentTitle: selection.tournamentTitle,
+                  tournamentGame: selection.tournamentGame,
+                  tournamentDate: selection.tournamentDate,
+                  tournamentFormat: selection.tournamentFormat,
+                  tournamentRegion: selection.tournamentRegion,
+                  tournamentFee: selection.tournamentFee,
+                  teamName: selection.teamName,
+                  college: selection.college,
+                  captainName: selection.captainName,
+                  email,
+                  players: selection.players || [],
+                  playerEmails: selection.playerEmails || [email],
+                }),
+              });
+
+              let verifyData: any = null;
+              try {
+                verifyData = await verifyRes.json();
+              } catch {
+                setErrorMessage('Failed to parse payment verification response from server.');
+                setPaymentStep('idle');
+                return;
+              }
+
+              if (verifyRes.status === 202 || verifyData?.pending) {
+                setPendingOrderId(orderData.order_id);
+                setPendingMessage("Your payment is being confirmed by your bank/Paytm. Please don't pay again. We are checking the transaction.");
+                setPaymentStep('idle');
+                return;
+              }
+
+              if (!verifyRes.ok || !verifyData || !verifyData.success || !verifyData.passId) {
+                setErrorMessage(
+                  verifyData?.message || 'Paytm payment verification failed. No pass was generated.'
+                );
+                setPaymentStep('idle');
+                return;
+              }
+
+              const verifiedPassId = verifyData.passId;
+
+              setPaymentStep('generating_pass');
+              try {
+                sessionStorage.setItem(
+                  'reg_selection',
+                  JSON.stringify({
+                    ...selection,
+                    email,
+                    passId: verifiedPassId,
+                    paymentId: paymentStatus?.TXNID || orderData.order_id,
+                  })
+                );
+              } catch {}
+
+              router.push(`/registration/${slug}/pass?passId=${verifiedPassId}`);
+            } catch (verifyErr: any) {
+              setErrorMessage(verifyErr.message || 'Error occurred while verifying payment with Paytm.');
+              setPaymentStep('idle');
+            }
+          },
+        },
+        merchant: {
+          mid: mid,
+          name: 'XENOVA Esports Platform',
+          redirect: false,
         },
       };
 
-      const rzp = new window.Razorpay(options);
-      rzp.on('payment.failed', function (response: any) {
-        const failDesc = response?.error?.description || response?.error?.reason || 'Payment failed or was cancelled.';
-        setErrorMessage(`Payment Failed: ${failDesc}`);
-        setPaymentStep('idle');
-      });
-      rzp.open();
+      const launchPaytm = () => {
+        window.Paytm.CheckoutJS.init(config)
+          .then(() => {
+            window.Paytm.CheckoutJS.invoke();
+          })
+          .catch((initErr: any) => {
+            console.error('Paytm CheckoutJS init error:', initErr);
+            setErrorMessage(initErr?.message || 'Could not open Paytm payment interface.');
+            setPaymentStep('idle');
+          });
+      };
+
+      if (typeof window.Paytm.CheckoutJS.onLoad === 'function') {
+        window.Paytm.CheckoutJS.onLoad(launchPaytm);
+      } else {
+        launchPaytm();
+      }
     } catch (err: any) {
       setErrorMessage(err.message || 'An error occurred initiating checkout.');
       setPaymentStep('idle');
@@ -430,8 +589,9 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
           </div>
           <p className="text-xl font-black text-white tracking-tight mb-2">
             {paymentStep === 'creating_order' && 'Creating Payment Order...'}
-            {paymentStep === 'opening_razorpay' && 'Opening Razorpay Secure Gateway...'}
-            {paymentStep === 'verifying_payment' && 'Verifying HMAC Payment Signature...'}
+            {paymentStep === 'opening_gateway' && 'Opening Paytm Secure Gateway...'}
+            {paymentStep === 'opening_razorpay' && 'Opening Secure Gateway...'}
+            {paymentStep === 'verifying_payment' && 'Authoritatively Verifying Payment with Paytm...'}
             {paymentStep === 'generating_pass' && 'Generating Verified Database Ticket...'}
           </p>
           <p className="text-sm text-zinc-400 max-w-sm">
@@ -511,6 +671,43 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
           <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center gap-3 text-red-400 text-sm">
             <AlertCircle className="w-5 h-5 shrink-0" />
             <p className="flex-1 font-medium">{errorMessage}</p>
+          </div>
+        )}
+
+        {/* Pending payment notification banner */}
+        {pendingOrderId && (
+          <div className="p-6 rounded-3xl bg-amber-500/10 border border-amber-500/30 space-y-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
+                <Clock className="w-5 h-5 text-amber-400" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-base font-bold text-white">Payment Confirmation in Progress</p>
+                <p className="text-sm text-amber-200/90 leading-relaxed">
+                  {pendingMessage || "Your payment is being confirmed by your bank/Paytm. Please don't pay again. We are checking the transaction."}
+                </p>
+                <p className="text-xs text-zinc-400 font-mono mt-1">Order ID: {pendingOrderId}</p>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3 pt-1">
+              <button
+                onClick={() => handleCheckPaymentStatus()}
+                disabled={isReconciling}
+                className="px-6 py-3.5 rounded-2xl bg-amber-500 text-black font-bold text-sm flex items-center justify-center gap-2 hover:bg-amber-400 transition shadow-lg shadow-amber-500/20 disabled:opacity-50"
+              >
+                {isReconciling ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Checking Status...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    Check Payment Status
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         )}
 
@@ -676,24 +873,44 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
               </div>
             ))}
           </div>
-          <div className="border-t border-white/[0.07] pt-4">
-            <button
-              onClick={handleContinue}
-              disabled={paymentStep !== 'idle'}
-              className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500 text-black font-black text-sm uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20 disabled:opacity-50"
-            >
-              {numericAmount > 0 ? (
-                <>
-                  <CreditCard className="h-4 w-4" />
-                  Pay {selection.tournamentFee} & Confirm Registration
-                </>
-              ) : (
-                <>
-                  Confirm Registration (Free Entry)
-                  <ChevronRight className="h-4 w-4" />
-                </>
-              )}
-            </button>
+          <div className="border-t border-white/[0.07] pt-4 space-y-3">
+            {pendingOrderId ? (
+              <button
+                onClick={() => handleCheckPaymentStatus()}
+                disabled={isReconciling}
+                className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-amber-500 text-black font-black text-sm uppercase tracking-wider hover:bg-amber-400 transition shadow-lg shadow-amber-500/20 disabled:opacity-50"
+              >
+                {isReconciling ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Checking Payment Status...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    Check Payment Status ({pendingOrderId})
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={handleContinue}
+                disabled={paymentStep !== 'idle'}
+                className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500 text-black font-black text-sm uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+              >
+                {numericAmount > 0 ? (
+                  <>
+                    <CreditCard className="h-4 w-4" />
+                    Pay {selection.tournamentFee} & Confirm Registration
+                  </>
+                ) : (
+                  <>
+                    Confirm Registration (Free Entry)
+                    <ChevronRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>

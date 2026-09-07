@@ -33,6 +33,7 @@ import { slugify, type XenovaCollege } from '@/lib/xenova-data';
 import FinalCTA from '@/components/xenova/FinalCTA';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
+import { getXenovaSession } from '@/lib/auth-session';
 
 const stateFilters = ['All States', 'Karnataka', 'Maharashtra', 'Delhi', 'Tamil Nadu', 'Telangana'];
 const typeFilters = ['All Types', 'Engineering', 'Design', 'Commerce', 'Sports', 'University'];
@@ -78,13 +79,9 @@ export default function CollegesPage() {
   const [newCollegeWebsite, setNewCollegeWebsite] = useState('');
 
   useEffect(() => {
-    const rawSession = localStorage.getItem('xenova_session');
-    if (rawSession) {
-      try {
-        setCurrentUser(JSON.parse(rawSession));
-      } catch (e) {
-        console.error(e);
-      }
+    const user = getXenovaSession();
+    if (user) {
+      setCurrentUser(user);
     }
 
     const loadColleges = async () => {

@@ -38,6 +38,7 @@ import { flaskApi } from '@/lib/flask-api';
 import { tournaments as defaultTournaments } from '@/app/tournaments/data';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
+import { getXenovaSession } from '@/lib/auth-session';
 
 interface RegistrationItem {
   id: string;
@@ -109,14 +110,13 @@ export default function TournamentAttendancePage() {
   // 1. Authentication & Authorization Check
   useEffect(() => {
     async function checkAuthAndLoad() {
-      const rawSession = localStorage.getItem('xenova_session');
-      if (!rawSession) {
+      const user = getXenovaSession();
+      if (!user) {
         router.replace('/login');
         return;
       }
 
       try {
-        const user = JSON.parse(rawSession);
         setSession(user);
 
         // Fetch tournament details to check organizer ownership

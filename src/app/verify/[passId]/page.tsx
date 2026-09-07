@@ -27,6 +27,7 @@ import {
 import { flaskApi } from '@/lib/flask-api';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
+import { getXenovaSession } from '@/lib/auth-session';
 
 interface PageProps {
   params?: Promise<{ passId: string }>;
@@ -86,9 +87,8 @@ export default function VerifyPassPage(props: PageProps) {
     try {
       let organizerName = 'Desk Scanner';
       try {
-        const rawSession = localStorage.getItem('xenova_session');
-        if (rawSession) {
-          const parsed = JSON.parse(rawSession);
+        const parsed = getXenovaSession();
+        if (parsed) {
           organizerName = parsed.name || parsed.email || organizerName;
         }
       } catch {}

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
+import { getXenovaSession, setXenovaSession } from '@/lib/auth-session';
 import { 
   sanitizeTournamentPayload, 
   invalidateTournamentsCache,
@@ -118,14 +119,13 @@ export default function CreateTournamentPage() {
 
   useEffect(() => {
     async function verifyOrganizer() {
-      const rawSession = localStorage.getItem('xenova_session');
-      if (!rawSession) {
+      const user = getXenovaSession();
+      if (!user) {
         router.replace('/login');
         return;
       }
 
       try {
-        const user = JSON.parse(rawSession);
         const email = (user.email || '').trim().toLowerCase();
         const role = (user.role || '').toUpperCase();
 
@@ -192,17 +192,16 @@ export default function CreateTournamentPage() {
         }
 
         if (!isApprovedOrganizer) {
-          const updatedSession = { ...user, role: 'player' };
-          delete updatedSession.hostName;
-          localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
-          window.dispatchEvent(new Event('xenova-auth-change'));
+          const updatedSession = { ...user, role: 'PLAYER' as const };
+          delete (updatedSession as any).hostName;
+          setXenovaSession(updatedSession);
           alert('You must be an approved Organizer or Host to launch a tournament.');
           router.replace('/organizer/apply');
           return;
         }
 
-        const validSession = { ...user, role: 'organizer', hostName, college: organizerCollege, phone: organizerPhone };
-        localStorage.setItem('xenova_session', JSON.stringify(validSession));
+        const validSession = { ...user, role: 'ORGANIZER' as const, hostName, college: organizerCollege, phone: organizerPhone };
+        setXenovaSession(validSession);
         setSession(validSession);
         setFormData((prev) => ({
           ...prev,

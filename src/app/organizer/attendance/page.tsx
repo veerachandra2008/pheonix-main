@@ -28,6 +28,7 @@ import { flaskApi } from '@/lib/flask-api';
 import { tournaments as defaultTournaments } from '@/app/tournaments/data';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
+import { getXenovaSession } from '@/lib/auth-session';
 
 export default function OrganizerAttendanceHubPage() {
   const router = useRouter();
@@ -40,14 +41,13 @@ export default function OrganizerAttendanceHubPage() {
 
   useEffect(() => {
     async function checkAuthAndLoad() {
-      const rawSession = localStorage.getItem('xenova_session');
-      if (!rawSession) {
+      const user = getXenovaSession();
+      if (!user) {
         router.replace('/login');
         return;
       }
 
       try {
-        const user = JSON.parse(rawSession);
         setSession(user);
         setAuthLoading(false);
 

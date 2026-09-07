@@ -32,6 +32,7 @@ import { getUserRegistrations, TournamentRegistrationRecord } from '@/lib/tourna
 import FinalCTA from '@/components/xenova/FinalCTA';
 import { supabase } from '@/lib/supabase';
 import { getApiBaseUrl } from '@/lib/api-config';
+import { getXenovaSession, setXenovaSession } from '@/lib/auth-session';
 
 type Player = {
   id?: string | number;
@@ -69,13 +70,7 @@ export default function PlayerProfilePage() {
 
   useEffect(() => {
     const getStoredSession = (): Player | null => {
-      const rawSession = typeof window !== 'undefined' ? localStorage.getItem('xenova_session') : null;
-      if (rawSession) {
-        try {
-          return JSON.parse(rawSession);
-        } catch (e) {}
-      }
-      return null;
+      return (getXenovaSession() as any) || null;
     };
 
     let sessionUser: Player | null = getStoredSession();
@@ -184,7 +179,7 @@ export default function PlayerProfilePage() {
       if (matched) {
         setProfileData(matched);
         if (matched.email && isSelf && sessionUser) {
-          localStorage.setItem('xenova_session', JSON.stringify({ ...sessionUser, ...matched }));
+          setXenovaSession({ ...sessionUser, ...matched });
         }
       }
 

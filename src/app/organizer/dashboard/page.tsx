@@ -23,6 +23,7 @@ import {
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
 import { extractOrganizerData } from '@/lib/tournaments-db';
+import { getXenovaSession, setXenovaSession } from '@/lib/auth-session';
 
 export default function OrganizerDashboard() {
   const router = useRouter();
@@ -119,14 +120,13 @@ export default function OrganizerDashboard() {
 
   useEffect(() => {
     async function verifyAndLoad() {
-      const rawSession = localStorage.getItem('xenova_session');
-      if (!rawSession) {
+      const user = getXenovaSession();
+      if (!user) {
         router.replace('/login');
         return;
       }
 
       try {
-        const user = JSON.parse(rawSession);
         const email = (user.email || '').trim().toLowerCase();
         const role = (user.role || '').toUpperCase();
 
@@ -185,16 +185,15 @@ export default function OrganizerDashboard() {
 
         if (!isApprovedOrganizer) {
           // Demote session role to player in localStorage and route to apply form
-          const updatedSession = { ...user, role: 'player' };
-          delete updatedSession.hostName;
-          localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
-          window.dispatchEvent(new Event('xenova-auth-change'));
+          const updatedSession = { ...user, role: 'PLAYER' as const };
+          delete (updatedSession as any).hostName;
+          setXenovaSession(updatedSession);
           router.replace('/organizer/apply');
           return;
         }
 
-        const validSession = { ...user, role: 'organizer', hostName };
-        localStorage.setItem('xenova_session', JSON.stringify(validSession));
+        const validSession = { ...user, role: 'ORGANIZER' as const, hostName };
+        setXenovaSession(validSession);
         setSession(validSession);
         loadData(validSession.email, 'organizer', validSession.name);
       } catch {

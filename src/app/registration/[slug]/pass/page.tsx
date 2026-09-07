@@ -19,6 +19,7 @@ import {
 import { QRCodeComponent } from '@/components/QRCodeComponent';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
+import { getXenovaSession } from '@/lib/auth-session';
 
 interface PageProps {
   params?: Promise<{ slug: string }>;
@@ -114,23 +115,20 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
       // 2. If still no passId, check logged in user session and lookup registered pass
       if (!resolvedPassId) {
         try {
-          const rawUser = localStorage.getItem('xenova_session');
-          if (rawUser) {
-            const user = JSON.parse(rawUser);
-            if (user?.email) {
-              const res = await fetch(`${apiBase}/registrations?email=${encodeURIComponent(user.email.trim().toLowerCase())}`, { cache: 'no-store' });
-              if (res.ok) {
-                const result = await res.json();
-                if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-                  // Find registration matching this tournament slug, or get latest
-                  const match = result.data.find((r: any) => {
-                    const rSlug = (r.tournament_slug || r.tournamentSlug || '').toLowerCase();
-                    return rSlug === slug.toLowerCase();
-                  }) || result.data[0];
+          const user = getXenovaSession();
+          if (user?.email) {
+            const res = await fetch(`${apiBase}/registrations?email=${encodeURIComponent(user.email.trim().toLowerCase())}`, { cache: 'no-store' });
+            if (res.ok) {
+              const result = await res.json();
+              if (result.success && Array.isArray(result.data) && result.data.length > 0) {
+                // Find registration matching this tournament slug, or get latest
+                const match = result.data.find((r: any) => {
+                  const rSlug = (r.tournament_slug || r.tournamentSlug || '').toLowerCase();
+                  return rSlug === slug.toLowerCase();
+                }) || result.data[0];
 
-                  if (match) {
-                    resolvedPassId = match.pass_id || match.passId;
-                  }
+                if (match) {
+                  resolvedPassId = match.pass_id || match.passId;
                 }
               }
             }

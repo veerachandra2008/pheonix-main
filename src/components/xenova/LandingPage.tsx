@@ -19,6 +19,7 @@ import {
 import FinalCTA from './FinalCTA';
 import SpotlightCard from './SpotlightCard';
 import { ServiceCarousel, type Service } from '@/components/ui/services-card';
+import { getXenovaSession } from '@/lib/auth-session';
 
 // New Component Imports
 import LiveMatchTicker from './LiveMatchTicker';
@@ -145,7 +146,7 @@ export default function LandingPage() {
   };
 
   const requireLogin = (target = '/dashboard') => {
-    if (typeof window !== 'undefined' && localStorage.getItem('xenova_session')) {
+    if (typeof window !== 'undefined' && getXenovaSession()) {
       router.push(target);
       return;
     }

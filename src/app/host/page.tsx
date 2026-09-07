@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { getXenovaSession, setXenovaSession } from '@/lib/auth-session';
 
 export default function HostPage() {
   const router = useRouter();
@@ -9,14 +10,13 @@ export default function HostPage() {
 
   useEffect(() => {
     async function checkOrganizerAccess() {
-      const rawSession = localStorage.getItem('xenova_session');
-      if (!rawSession) {
+      const user = getXenovaSession();
+      if (!user) {
         router.replace('/login');
         return;
       }
 
       try {
-        const user = JSON.parse(rawSession);
         const email = (user.email || '').trim().toLowerCase();
         const role = (user.role || '').toUpperCase();
 
@@ -77,16 +77,14 @@ export default function HostPage() {
 
         if (isApprovedOrganizer) {
           // Elevate session role to organizer in localStorage
-          const updatedSession = { ...user, role: 'organizer', hostName };
-          localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
-          window.dispatchEvent(new Event('xenova-auth-change'));
+          const updatedSession = { ...user, role: 'ORGANIZER' as const, hostName };
+          setXenovaSession(updatedSession);
           router.replace('/organizer/dashboard');
         } else {
           // Demote session role to player in localStorage and route to apply form
-          const updatedSession = { ...user, role: 'player' };
-          delete updatedSession.hostName;
-          localStorage.setItem('xenova_session', JSON.stringify(updatedSession));
-          window.dispatchEvent(new Event('xenova-auth-change'));
+          const updatedSession = { ...user, role: 'PLAYER' as const };
+          delete (updatedSession as any).hostName;
+          setXenovaSession(updatedSession);
           router.replace('/organizer/apply');
         }
       } catch {

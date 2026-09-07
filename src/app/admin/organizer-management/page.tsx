@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import { flaskApi, getCached } from '@/lib/flask-api';
+import { getXenovaSession, setXenovaSession } from '@/lib/auth-session';
 
 interface Organizer {
   id?: string | number;
@@ -119,14 +120,9 @@ export default function AdminOrganizerManagementPage() {
 
       // 3. Demote session if currently logged in as this user
       try {
-        const rawSession = localStorage.getItem('xenova_session');
-        if (rawSession) {
-          const session = JSON.parse(rawSession);
-          if (session.email?.toLowerCase() === cleanEmail && session.role === 'organizer') {
-            session.role = 'player';
-            localStorage.setItem('xenova_session', JSON.stringify(session));
-            window.dispatchEvent(new Event('xenova-auth-change'));
-          }
+        const session = getXenovaSession();
+        if (session && session.email?.toLowerCase() === cleanEmail && session.role === 'ORGANIZER') {
+          setXenovaSession({ ...session, role: 'PLAYER' });
         }
       } catch {}
 

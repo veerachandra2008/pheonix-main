@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { tournaments as defaultMockTournaments, Tournament } from '@/app/tournaments/data';
 import { getApiBaseUrl } from './api-config';
+import { getXenovaSession } from './auth-session';
 
 export interface TournamentRegistrationRecord {
   tournamentSlug: string;
@@ -214,9 +215,8 @@ export async function fetchOrganizerProfileFromDB(tournament: any): Promise<{
   // 3. Fallback to active session storage ONLY IF matching this tournament's host or email
   if (typeof window !== 'undefined') {
     try {
-      const rawSession = localStorage.getItem('xenova_session');
-      if (rawSession) {
-        const sess = JSON.parse(rawSession);
+      const sess = getXenovaSession();
+      if (sess) {
         const sessName = (sess.hostName || sess.name || '').trim().toLowerCase();
         const sessEmail = (sess.email || '').trim().toLowerCase();
         const cleanHost = host.toLowerCase();

@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 import { extractPassId, playScanSound, triggerScanHaptic } from '@/lib/qr-scanner-engine';
+import { getXenovaSession } from '@/lib/auth-session';
 
 // Lazy-load the heavy camera scanner component only when scanner mode is activated
 const ContinuousQRScanner = dynamic(
@@ -110,13 +111,12 @@ export default function EntranceGateVerificationPage() {
   useEffect(() => {
     async function verifyOrganizerAccess() {
       try {
-        const rawSession = localStorage.getItem('xenova_session');
-        if (!rawSession) {
+        const user = getXenovaSession();
+        if (!user) {
           setAuthStatus('unauthorized');
           return;
         }
 
-        const user = JSON.parse(rawSession);
         setSessionUser(user);
         const email = (user.email || '').trim().toLowerCase();
         const role = (user.role || '').toUpperCase();
