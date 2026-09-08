@@ -33,7 +33,7 @@ import { tournaments } from '../../tournaments/data';
 interface PlayerSlot {
   slot: number;
   name: string;
-  inGameTag: string;
+  department: string;
   email: string;
   phone?: string;
   isCaptain: boolean;
@@ -54,10 +54,10 @@ export default function RegistrationStepOne() {
   
   // Exactly 4 Players (Counting Captain as Slot 1)
   const [players, setPlayers] = useState<PlayerSlot[]>([
-    { slot: 1, name: '', inGameTag: '', email: '', phone: '', isCaptain: true },
-    { slot: 2, name: '', inGameTag: '', email: '', isCaptain: false },
-    { slot: 3, name: '', inGameTag: '', email: '', isCaptain: false },
-    { slot: 4, name: '', inGameTag: '', email: '', isCaptain: false },
+    { slot: 1, name: '', department: '', email: '', phone: '', isCaptain: true },
+    { slot: 2, name: '', department: '', email: '', isCaptain: false },
+    { slot: 3, name: '', department: '', email: '', isCaptain: false },
+    { slot: 4, name: '', department: '', email: '', isCaptain: false },
   ]);
 
   const [errorMsg, setErrorMsg] = useState('');
@@ -81,7 +81,7 @@ export default function RegistrationStepOne() {
         ...prev[0],
         name: user.name || '',
         email: user.email || '',
-        inGameTag: user.tag || '',
+        department: '',
         phone: user.phone || '',
       },
       prev[1],
@@ -176,8 +176,8 @@ export default function RegistrationStepOne() {
         setErrorMsg(`Please enter Full Name for ${roleLabel}.`);
         return;
       }
-      if (!p.inGameTag.trim()) {
-        setErrorMsg(`Please enter In-Game Tag / IGN for ${roleLabel}.`);
+      if (!p.department) {
+        setErrorMsg(`Please select a Department for ${roleLabel}.`);
         return;
       }
       if (!p.email.trim()) {
@@ -217,7 +217,7 @@ export default function RegistrationStepOne() {
       players: players.map((p) => ({
         slot: p.slot,
         name: p.name.trim(),
-        inGameTag: p.inGameTag.trim(),
+        inGameTag: p.department,
         email: p.email.trim(),
         phone: p.phone?.trim() || '',
         isCaptain: p.isCaptain,
@@ -406,7 +406,7 @@ export default function RegistrationStepOne() {
               {tournament.title || tournament.name}
             </h1>
             <p className="text-slate-400 text-xs sm:text-sm leading-relaxed">
-              Register exactly <strong className="text-emerald-400">4 players (Captain + 3 Teammates)</strong>. All 4 members must provide their full names, in-game tags, and valid student emails.
+              Register exactly <strong className="text-emerald-400">4 players (Captain + 3 Teammates)</strong>. All 4 members must provide their full names, department, and valid student emails.
             </p>
 
             {/* Quick meta badges strip for mobile & desktop */}
@@ -524,19 +524,26 @@ export default function RegistrationStepOne() {
                       />
                     </div>
 
-                    {/* In-Game Tag / IGN */}
+                    {/* Department */}
                     <div className="space-y-1">
                       <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                        <Hash className="h-3 w-3 text-emerald-400 shrink-0" /> In-Game Tag / IGN <span className="text-rose-400">*</span>
+                        <Hash className="h-3 w-3 text-emerald-400 shrink-0" /> Department <span className="text-rose-400">*</span>
                       </label>
-                      <input
-                        type="text"
-                        value={player.inGameTag}
-                        onChange={(e) => handlePlayerChange(idx, 'inGameTag', e.target.value)}
-                        placeholder="e.g. TITAN#9999 or VIPER_OP"
+                      <select
+                        value={player.department}
+                        onChange={(e) => handlePlayerChange(idx, 'department', e.target.value)}
                         required
-                        className="w-full px-3.5 py-2.5 sm:py-3 bg-black/50 border border-white/10 rounded-xl text-white text-base sm:text-xs font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 uppercase transition"
-                      />
+                        className="w-full px-3.5 py-2.5 sm:py-3 bg-black/50 border border-white/10 rounded-xl text-white text-base sm:text-xs font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition appearance-none cursor-pointer"
+                      >
+                        <option value="" disabled>Select Department</option>
+                        <option value="CSE">CSE</option>
+                        <option value="AIML">AIML</option>
+                        <option value="CS">CS</option>
+                        <option value="DS">DS</option>
+                        <option value="ECE">ECE</option>
+                        <option value="IT">IT</option>
+                        <option value="Other">Other</option>
+                      </select>
                     </div>
 
                     {/* Player Email (MANDATORY FOR ALL 4 PLAYERS) */}
