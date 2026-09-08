@@ -29,7 +29,8 @@ def save_tournament_rosters_to_db(supabase, pass_id, tournament_slug, team_name,
             p = {'name': str(p), 'slot': idx + 1}
         slot = int(p.get('slot') or (idx + 1))
         player_name = (p.get('name') or p.get('playerName') or f"Player {slot}").strip()
-        in_game_tag = (p.get('inGameTag') or p.get('in_game_tag') or p.get('ign') or f"TAG_{slot}").strip()
+        department = (p.get('dept') or p.get('department') or '').strip()
+        in_game_tag = department or (p.get('inGameTag') or p.get('in_game_tag') or p.get('ign') or f"TAG_{slot}").strip()
         email = (p.get('email') or p.get('playerEmail') or '').strip().lower()
         phone = (p.get('phone') or '').strip()
         is_captain = bool(p.get('isCaptain') or p.get('is_captain') or slot == 1)
@@ -41,6 +42,7 @@ def save_tournament_rosters_to_db(supabase, pass_id, tournament_slug, team_name,
             'slot': slot,
             'player_name': player_name,
             'in_game_tag': in_game_tag,
+            'department': department,
             'email': email,
             'phone': phone,
             'college': college,

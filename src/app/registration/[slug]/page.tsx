@@ -217,7 +217,7 @@ export default function RegistrationStepOne() {
       players: players.map((p) => ({
         slot: p.slot,
         name: p.name.trim(),
-        inGameTag: p.department,
+        dept: p.department,
         email: p.email.trim(),
         phone: p.phone?.trim() || '',
         isCaptain: p.isCaptain,

@@ -89,7 +89,7 @@ def validate_complete_squad(reg_payload):
             p_tag = f"TAG_{slot}"
         elif isinstance(p, dict):
             p_name = (p.get('name') or p.get('playerName') or '').strip()
-            p_tag = (p.get('inGameTag') or p.get('in_game_tag') or p.get('ign') or f"TAG_{slot}").strip()
+            p_tag = (p.get('dept') or p.get('inGameTag') or p.get('in_game_tag') or p.get('ign') or f"TAG_{slot}").strip()
         else:
             p_name = str(p).strip()
             p_tag = f"TAG_{slot}"
@@ -100,6 +100,7 @@ def validate_complete_squad(reg_payload):
         validated_players.append({
             'slot': slot,
             'name': p_name,
+            'dept': p_tag,
             'inGameTag': p_tag
         })
 
