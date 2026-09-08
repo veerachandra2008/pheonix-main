@@ -14,10 +14,10 @@ import {
   User,
   ChevronDown,
   Trophy,
-  ShieldCheck,
   Zap,
   MessageSquare
 } from 'lucide-react';
+
 import { flaskApi } from '@/lib/flask-api';
 import { supabase } from '@/lib/supabase';
 import { getXenovaSession, setXenovaSession, clearXenovaSession } from '@/lib/auth-session';
@@ -311,15 +311,6 @@ export const Navbar = () => {
           </Link>
         )}
 
-        {/* Admin Button beside Sign In / Profile */}
-        <Link
-          href="/admin/login"
-          className="inline-flex items-center gap-1.5 border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 backdrop-blur-2xl px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-bold uppercase tracking-wider text-amber-400 rounded-full transition shadow-lg cursor-pointer shrink-0"
-          title="Admin Portal"
-        >
-          <ShieldCheck className="h-4 w-4 text-amber-400" />
-          <span>Admin</span>
-        </Link>
 
         {isLogin ? (
           <button
