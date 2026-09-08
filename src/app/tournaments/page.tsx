@@ -202,16 +202,11 @@ function TournamentsContent() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.3 }}
-              className="flex items-center gap-6 rounded-2xl border border-white/15 bg-black/80 px-6 py-4 backdrop-blur-2xl shadow-2xl shrink-0"
+              className="flex items-center rounded-2xl border border-white/15 bg-black/80 px-6 py-4 backdrop-blur-2xl shadow-2xl shrink-0"
             >
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Live Brackets</p>
                 <p className="text-2xl font-black text-emerald-400 mt-0.5">{tournamentsList.length}</p>
-              </div>
-              <div className="h-8 w-px bg-zinc-800" />
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Total Prize</p>
-                <p className="text-2xl font-black text-amber-400 mt-0.5">₹4,50,000</p>
               </div>
             </motion.div>
 

@@ -53,7 +53,7 @@ const allEventServices: (Service & { category: string })[] = [
     mode: "VALORANT • 5v5 Tactical",
     image: "/valorant.jpg",
     category: "VALORANT",
-    actionUrl: "/tournaments/nexus-valorant-champions-cup",
+    actionUrl: "/tournaments",
   },
   {
     number: "002",
@@ -66,7 +66,7 @@ const allEventServices: (Service & { category: string })[] = [
     mode: "BGMI • Battle Royale",
     image: "/bgmi.jpg",
     category: "BGMI",
-    actionUrl: "/tournaments/bgmi-college-cup-season-4",
+    actionUrl: "/tournaments",
   },
   {
     number: "003",
@@ -79,7 +79,7 @@ const allEventServices: (Service & { category: string })[] = [
     mode: "COUNTER-STRIKE 2 • 5v5",
     image: "/cs2.jpg",
     category: "CS2",
-    actionUrl: "/tournaments/cs2-campus-clash",
+    actionUrl: "/tournaments",
   },
   {
     number: "004",
@@ -92,7 +92,7 @@ const allEventServices: (Service & { category: string })[] = [
     mode: "EA SPORTS FC24 • 1v1",
     image: "/fc.jpg",
     category: "FC24",
-    actionUrl: "/tournaments/campus-fc24-showdown",
+    actionUrl: "/tournaments",
   },
 ];
 

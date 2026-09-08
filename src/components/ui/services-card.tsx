@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion, useInView } from "framer-motion";
 import { ArrowRight, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -250,6 +251,7 @@ export interface Service {
 
 // Sub-component for individual cards - Crisp background image focus, zero emoji boxes, fully functional navigation
 export const ServiceCard = ({ service, index }: { service: Service; index: number }) => {
+  const router = useRouter();
   const cardVariants = {
     hidden: { opacity: 0, y: 50 },
     visible: {
@@ -267,6 +269,7 @@ export const ServiceCard = ({ service, index }: { service: Service; index: numbe
   return (
     <motion.div
       variants={cardVariants}
+      onClick={() => router.push(targetUrl)}
       className={cn(
         "relative flex h-[460px] w-full flex-col justify-between overflow-hidden rounded-3xl p-8 border border-white/15 shadow-2xl transition-all duration-500 hover:scale-[1.02] hover:border-emerald-500/50 group cursor-pointer bg-black",
         service.gradient
@@ -321,6 +324,10 @@ export const ServiceCard = ({ service, index }: { service: Service; index: numbe
             {/* Functional Navigation Action */}
             <Link
               href={targetUrl}
+              prefetch={true}
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-black uppercase tracking-wider transition shadow-xl shadow-emerald-500/30 hover:scale-105"
             >
               Quick Apply <ArrowRight className="w-4 h-4" />
