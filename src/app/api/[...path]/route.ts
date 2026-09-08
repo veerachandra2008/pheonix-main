@@ -372,8 +372,9 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
 
   // 3. Tournaments Endpoints
   if (mainSegment === 'tournaments') {
+    const dbClient = supabaseAdmin || supabase;
     if (method === 'GET') {
-      const { data } = await supabase.from('tournaments').select('*');
+      const { data } = await dbClient.from('tournaments').select('*');
       return NextResponse.json({ success: true, data: data || [] }, { status: 200 });
     }
     if (method === 'POST' && subSegment !== 'register') {
@@ -381,7 +382,7 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
       const cleanPayload = sanitizeTournamentPayload(body);
       const insertPayload = { slug: body.slug || cleanPayload.slug, ...cleanPayload };
       
-      const { data, error } = await supabase.from('tournaments').insert([insertPayload]).select();
+      const { data, error } = await dbClient.from('tournaments').insert([insertPayload]).select();
       return NextResponse.json({ success: !error, data: data ? data[0] : insertPayload }, { status: error ? 400 : 201 });
     }
     if (method === 'PATCH' || method === 'PUT') {
@@ -394,32 +395,34 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
           return NextResponse.json({ success: false, message: 'Tournament slug required.' }, { status: 400 });
         }
 
-        const { data: existing } = await supabase
+        const { data: existing } = await dbClient
           .from('tournaments')
           .select('id, slug')
           .eq('slug', targetSlug);
 
         let resData;
         if (existing && existing.length > 0) {
-          const { data, error } = await supabase
+          const { data, error } = await dbClient
             .from('tournaments')
             .update(cleanPayload)
             .eq('slug', targetSlug)
             .select();
 
           if (error) {
-            console.error('Supabase API route update notice:', error);
+            console.error('Supabase API route update error:', error);
+            return NextResponse.json({ success: false, message: error.message }, { status: 400 });
           }
           resData = data && data.length > 0 ? data[0] : cleanPayload;
         } else {
           const insertPayload = { slug: targetSlug, ...cleanPayload };
-          const { data, error } = await supabase
+          const { data, error } = await dbClient
             .from('tournaments')
             .insert([insertPayload])
             .select();
 
           if (error) {
-            console.error('Supabase API route insert notice:', error);
+            console.error('Supabase API route insert error:', error);
+            return NextResponse.json({ success: false, message: error.message }, { status: 400 });
           }
           resData = data && data.length > 0 ? data[0] : insertPayload;
         }
@@ -434,8 +437,8 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
       }
     }
     if (method === 'DELETE') {
-      const { error } = await supabase.from('tournaments').delete().eq('slug', idOrSlug);
-      return NextResponse.json({ success: !error, message: 'Tournament deleted.' }, { status: 200 });
+      const { error } = await dbClient.from('tournaments').delete().eq('slug', idOrSlug);
+      return NextResponse.json({ success: !error, message: error ? error.message : 'Tournament deleted.' }, { status: error ? 400 : 200 });
     }
   }
 

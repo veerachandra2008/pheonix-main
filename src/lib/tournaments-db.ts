@@ -338,6 +338,7 @@ export async function saveOrUpdateTournament(
 
   let savedData: any = null;
   let saveSuccess = false;
+  let lastError = '';
 
   // 2. Direct Supabase Upsert / Update
   try {
@@ -349,39 +350,30 @@ export async function saveOrUpdateTournament(
       if (!error && data && data.length > 0) {
         savedData = data[0];
         saveSuccess = true;
-        console.log('TOURNAMENT UPDATE SUCCEEDED', { slug, data: savedData });
+        console.log('TOURNAMENT UPDATE SUCCEEDED (Supabase direct)', { slug, data: savedData });
       } else if (error) {
-        console.error('TOURNAMENT UPDATE FAILED', {
-          code: error?.code,
-          message: error?.message,
-          details: error?.details,
-          hint: error?.hint,
-          payload: cleanPayload,
-        });
+        lastError = error.message;
+        console.warn('Direct Supabase update notice:', error);
       }
     } else {
       const { data, error } = await supabase.from('tournaments').insert([{ ...cleanPayload, filled: 0 }]).select();
       if (!error && data && data.length > 0) {
         savedData = data[0];
         saveSuccess = true;
-        console.log('TOURNAMENT INSERT SUCCEEDED', { slug, data: savedData });
+        console.log('TOURNAMENT INSERT SUCCEEDED (Supabase direct)', { slug, data: savedData });
       } else if (error) {
-        console.error('TOURNAMENT INSERT FAILED', {
-          code: error?.code,
-          message: error?.message,
-          details: error?.details,
-          hint: error?.hint,
-          payload: cleanPayload,
-        });
+        lastError = error.message;
+        console.warn('Direct Supabase insert notice:', error);
       }
     }
-  } catch (sbErr) {
-    console.error('Supabase tournament save exception:', sbErr);
+  } catch (sbErr: any) {
+    lastError = sbErr?.message || String(sbErr);
+    console.warn('Supabase tournament save exception:', sbErr);
   }
 
-  // 4. Backend / Next.js API Update
-  try {
-    const apiBase = getApiBaseUrl();
+  // 3. Fallback / Server-Side Service Role API Update
+  // If direct client update was blocked (e.g. by RLS), invoke the server-side API endpoint
+  if (!saveSuccess) {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -389,25 +381,59 @@ export async function saveOrUpdateTournament(
         headers['Authorization'] = `Bearer ${sessionData.session.access_token}`;
       }
     } catch {}
+    try {
+      const sess = getXenovaSession();
+      if (sess?.email) {
+        headers['X-User-Email'] = sess.email;
+        if (sess.role) headers['X-User-Role'] = sess.role;
+      }
+    } catch {}
 
-    const res = await fetch(`${apiBase}/tournaments/${encodeURIComponent(slug)}`, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({ slug, ...cleanPayload }),
-    });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.data) savedData = Array.isArray(json.data) ? json.data[0] : json.data;
-      saveSuccess = true;
+    const endpointsToTry: string[] = [];
+    const apiBase = getApiBaseUrl();
+    endpointsToTry.push(`${apiBase}/tournaments/${encodeURIComponent(slug)}`);
+    if (apiBase !== '/api' && typeof window !== 'undefined') {
+      endpointsToTry.push(`/api/tournaments/${encodeURIComponent(slug)}`);
     }
-  } catch (apiErr) {
-    console.warn('API tournament update notice:', apiErr);
+
+    for (const endpoint of endpointsToTry) {
+      try {
+        const res = await fetch(endpoint, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ slug, ...cleanPayload }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data) {
+            savedData = Array.isArray(json.data) ? json.data[0] : json.data;
+          }
+          saveSuccess = true;
+          console.log('TOURNAMENT UPDATE SUCCEEDED (API)', { endpoint, data: savedData });
+          break;
+        } else {
+          try {
+            const errJson = await res.json();
+            if (errJson.message) lastError = errJson.message;
+          } catch {}
+        }
+      } catch (apiErr: any) {
+        console.warn(`API tournament update failed at ${endpoint}:`, apiErr);
+      }
+    }
   }
 
-  // 5. Invalidate memory & dispatch event
+  // 4. Invalidate memory & dispatch event across browser tabs
   invalidateTournamentsCache();
 
-  return { success: true, data: savedData || cleanPayload };
+  if (saveSuccess) {
+    return { success: true, data: savedData || cleanPayload };
+  }
+
+  return {
+    success: false,
+    error: lastError || 'Failed to persist tournament update to database. Please check Supabase RLS policy or connection.'
+  };
 }
 
 /**
@@ -421,7 +447,7 @@ export async function getTournamentBySlug(targetSlug: string): Promise<any | nul
   try {
     const { data } = await supabase.from('tournaments').select('*').ilike('slug', cleanSlug);
     if (data && data.length > 0) {
-      return data[0];
+      return { ...data[0], ...mapSupabaseTournament(data[0]) };
     }
   } catch {}
 

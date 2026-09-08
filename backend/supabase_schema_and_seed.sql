@@ -285,6 +285,7 @@ CREATE POLICY "Allow public update notifications" ON notifications FOR UPDATE US
 
 CREATE POLICY "Allow public read tournaments" ON tournaments FOR SELECT USING (true);
 CREATE POLICY "Allow public insert tournaments" ON tournaments FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update tournaments" ON tournaments FOR UPDATE USING (true);
 
 CREATE POLICY "Allow public read registrations" ON registrations FOR SELECT USING (true);
 CREATE POLICY "Allow public insert registrations" ON registrations FOR INSERT WITH CHECK (true);
