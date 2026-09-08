@@ -29,7 +29,7 @@ export const CORE_TOURNAMENT_COLUMNS = new Set([
   'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
   'prize', 'date', 'region', 'format', 'teams', 'filled', 'fee',
   'description', 'rules', 'schedule', 'map_pool', 'contact_email',
-  'discord_url', 'organizer_email'
+  'discord_url', 'organizer_email', 'registration_deadline'
 ]);
 
 export const VALID_TOURNAMENT_COLUMNS = new Set([
@@ -37,7 +37,8 @@ export const VALID_TOURNAMENT_COLUMNS = new Set([
   'prize', 'prize_1st', 'prize_2nd', 'prize_3rd', 'date', 'region', 'format',
   'teams', 'filled', 'fee', 'description', 'rules', 'schedule', 'map_pool',
   'contact_email', 'discord_url', 'organizer_email',
-  'organizer_name', 'organizer_phone', 'organizer_college', 'contact_phone', 'college'
+  'organizer_name', 'organizer_phone', 'organizer_college', 'contact_phone', 'college',
+  'registration_deadline'
 ]);
 
 export interface PrizeTier {
@@ -381,9 +382,17 @@ export async function saveOrUpdateTournament(
   // 4. Backend / Next.js API Update
   try {
     const apiBase = getApiBaseUrl();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData?.session?.access_token) {
+        headers['Authorization'] = `Bearer ${sessionData.session.access_token}`;
+      }
+    } catch {}
+
     const res = await fetch(`${apiBase}/tournaments/${encodeURIComponent(slug)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ slug, ...cleanPayload }),
     });
     if (res.ok) {
@@ -645,6 +654,72 @@ function mapSupabaseTournament(item: any): Tournament {
     teams: item.teams || '64/64',
     filled: typeof item.filled === 'number' ? item.filled : 50,
     fee: item.fee || 'Free',
+    registration_deadline: item.registration_deadline || null,
+    is_registration_closed: typeof item.is_registration_closed === 'boolean'
+      ? item.is_registration_closed
+      : (item.registration_deadline ? new Date(item.registration_deadline).getTime() <= Date.now() : false),
+  };
+}
+
+export function getRegistrationCountdown(
+  deadline: string | null | undefined,
+  backendClosed: boolean | undefined,
+  nowMs: number
+): { isClosed: boolean; badgeText: string | null } {
+  // Authoritative backend closed flag
+  if (backendClosed) {
+    return {
+      isClosed: true,
+      badgeText: 'REGISTRATIONS CLOSED',
+    };
+  }
+
+  // If no deadline, no countdown badge
+  if (!deadline) {
+    return {
+      isClosed: false,
+      badgeText: null,
+    };
+  }
+
+  const deadlineMs = new Date(deadline).getTime();
+  if (isNaN(deadlineMs)) {
+    return {
+      isClosed: false,
+      badgeText: null,
+    };
+  }
+
+  const diffMs = deadlineMs - nowMs;
+  if (diffMs <= 0) {
+    return {
+      isClosed: true,
+      badgeText: 'REGISTRATIONS CLOSED',
+    };
+  }
+
+  const totalMinutes = Math.floor(diffMs / (1000 * 60));
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) {
+    return {
+      isClosed: false,
+      badgeText: `REGISTRATION CLOSES IN ${days}d ${hours}h ${minutes}m`,
+    };
+  }
+
+  if (hours > 0 || minutes > 0) {
+    return {
+      isClosed: false,
+      badgeText: `REGISTRATION CLOSES IN ${hours}h ${minutes}m`,
+    };
+  }
+
+  return {
+    isClosed: false,
+    badgeText: 'REGISTRATION CLOSES IN < 1m',
   };
 }
 

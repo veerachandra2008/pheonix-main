@@ -15,6 +15,8 @@ export interface Tournament {
   teams: string;
   filled: number;
   fee: string;
+  registration_deadline?: string | null;
+  is_registration_closed?: boolean;
 }
 
 export const gameFilters = ['All', 'Valorant', 'BGMI', 'Free Fire', 'CS2', 'FC / FIFA', 'COD Mobile', 'Apex Legends', 'Rocket League'];

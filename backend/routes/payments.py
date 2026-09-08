@@ -485,11 +485,20 @@ def create_order():
             except Exception:
                 pass
 
-        if not t_res.data or len(t_res.data) == 0:
+        tournament = t_res.data[0] if (t_res.data and len(t_res.data) > 0) else load_tournament_for_payment(tournament_slug)
+        if not tournament:
             return jsonify({'success': False, 'message': f"Tournament '{tournament_slug}' not found."}), 404
 
-        tournament = t_res.data[0]
         actual_slug = tournament.get('slug') or tournament_slug
+
+        # Enforce server-authoritative registration closing deadline
+        from routes.tournaments import compute_registration_closed
+        if compute_registration_closed(tournament):
+            return jsonify({
+                'success': False,
+                'error': 'Registrations for this tournament are now closed.',
+                'message': 'Registrations for this tournament are now closed.'
+            }), 400
 
         # Parse server-authoritative fee
         is_paid, amount_rupees, amount_in_paise = parse_tournament_fee(tournament.get('fee'))
@@ -798,10 +807,19 @@ def create_manual_upi_order():
             print(f"[ERROR] Failed to query tournament {tournament_slug}: {t_err}")
             return jsonify({'success': False, 'message': 'Failed to retrieve tournament details.'}), 500
 
-        if not t_res.data or len(t_res.data) == 0:
+        tournament = t_res.data[0] if (t_res.data and len(t_res.data) > 0) else load_tournament_for_payment(tournament_slug)
+        if not tournament:
             return jsonify({'success': False, 'message': 'Tournament not found.'}), 404
 
-        tournament = t_res.data[0]
+        # Enforce server-authoritative registration closing deadline
+        from routes.tournaments import compute_registration_closed
+        if compute_registration_closed(tournament):
+            return jsonify({
+                'success': False,
+                'error': 'Registrations for this tournament are now closed.',
+                'message': 'Registrations for this tournament are now closed.'
+            }), 400
+
         is_paid, amount_rupees, authoritative_amount_paise = parse_tournament_fee(tournament.get('fee'))
 
         if not is_paid or authoritative_amount_paise <= 0:
@@ -1203,7 +1221,9 @@ def is_user_authorized_for_tournament(user, tournament):
 
     clean_email = (user.get('email') or '').strip().lower()
     clean_name = (user.get('name') or '').strip().lower()
+    user_id = str(user.get('id') or '').strip()
 
+    org_id = str(tournament.get('organizer_id') or tournament.get('organizerId') or '').strip()
     org_email = (
         tournament.get('organizer_email') or 
         tournament.get('contact_email') or 
@@ -1216,10 +1236,11 @@ def is_user_authorized_for_tournament(user, tournament):
         tournament.get('host') or ''
     ).strip().lower()
 
+    id_match = bool(user_id and org_id and user_id == org_id)
     email_match = bool(clean_email and (org_email == clean_email or clean_email in org_name))
     name_match = bool(clean_name and (org_name == clean_name or clean_name in org_name))
 
-    return email_match or name_match
+    return id_match or email_match or name_match
 
 
 def load_payment_order(payment_id):

@@ -53,6 +53,15 @@ def create_registration():
         tournament = t_res.data[0]
         actual_slug = tournament.get('slug') or tournament_slug
 
+        # Check registration deadline
+        from routes.tournaments import compute_registration_closed
+        if compute_registration_closed(tournament.get('registration_deadline')):
+            return jsonify({
+                'success': False,
+                'error': 'Registrations for this tournament are now closed.',
+                'message': 'Registrations for this tournament are now closed.'
+            }), 400
+
         # Server-authoritative check: If tournament is PAID, direct registration is forbidden
         is_paid, amount_rupees, amount_in_paise = parse_tournament_fee(tournament.get('fee'))
         if is_paid:

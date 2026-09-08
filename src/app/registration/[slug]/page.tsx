@@ -153,6 +153,12 @@ export default function RegistrationStepOne() {
     e.preventDefault();
     setErrorMsg('');
 
+    if (isClosed) {
+      setErrorMsg('Registrations for this tournament are now closed.');
+      router.push(`/tournaments/${tournament?.slug || slug}`);
+      return;
+    }
+
     if (!teamName.trim()) {
       setErrorMsg('Please enter your Squad / Team Name.');
       return;
@@ -229,12 +235,52 @@ export default function RegistrationStepOne() {
     router.push(`/registration/${slug}/confirm`);
   };
 
+  const isClosed = Boolean(
+    tournament?.is_registration_closed ||
+    (tournament?.registration_deadline && new Date(tournament.registration_deadline) <= new Date())
+  );
+
   if (!tournament || regLockStatus === 'checking') {
     return (
       <main className="min-h-screen bg-[#070B14] flex items-center justify-center text-white">
         <div className="text-center space-y-4">
           <div className="w-12 h-12 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin mx-auto" />
           <p className="text-slate-400 text-sm font-bold uppercase tracking-wider">Verifying Entry Eligibility...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (isClosed) {
+    return (
+      <main className="min-h-screen bg-[#070B14] flex items-center justify-center p-4 text-white">
+        <div className="w-full max-w-md p-6 sm:p-8 rounded-3xl bg-[#0B0F1C] border border-red-500/30 text-center space-y-5 shadow-2xl shadow-red-500/10 animate-in fade-in duration-200">
+          <div className="w-16 h-16 rounded-3xl bg-red-500/15 border border-red-500/30 text-red-400 flex items-center justify-center mx-auto">
+            <AlertCircle className="w-8 h-8" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-black uppercase tracking-wider text-white">Registrations Closed</h2>
+            <p className="text-xs text-red-400 font-semibold">
+              Registrations for this tournament are now closed.
+            </p>
+          </div>
+          <p className="text-xs text-zinc-400 leading-relaxed">
+            The registration deadline for <strong className="text-white">{tournament?.title || slug}</strong> has passed. No new registrations or squad submissions are accepted.
+          </p>
+          <div className="pt-2 space-y-2.5">
+            <Link
+              href={`/tournaments/${tournament?.slug || slug}`}
+              className="block w-full py-3.5 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-black text-xs uppercase tracking-wider transition text-center"
+            >
+              Back to Tournament Details
+            </Link>
+            <Link
+              href="/tournaments"
+              className="block w-full py-3 rounded-2xl bg-white/5 hover:bg-white/10 text-zinc-300 font-bold text-xs uppercase tracking-wider transition text-center border border-white/10"
+            >
+              Explore Other Tournaments
+            </Link>
+          </div>
         </div>
       </main>
     );

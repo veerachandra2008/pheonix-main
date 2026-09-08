@@ -93,7 +93,36 @@ export default function EditTournamentPage() {
     map_pool: '',
     contact_email: '',
     discord_url: '',
+    registration_deadline: '',
   });
+
+  const toLocalDatetimeString = (isoString?: string | null): string => {
+    if (!isoString) return '';
+    try {
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return '';
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const YYYY = d.getFullYear();
+      const MM = pad(d.getMonth() + 1);
+      const DD = pad(d.getDate());
+      const hh = pad(d.getHours());
+      const mm = pad(d.getMinutes());
+      return `${YYYY}-${MM}-${DD}T${hh}:${mm}`;
+    } catch {
+      return '';
+    }
+  };
+
+  const toUtcIsoString = (localDatetimeString?: string | null): string | null => {
+    if (!localDatetimeString || !localDatetimeString.trim()) return null;
+    try {
+      const d = new Date(localDatetimeString);
+      if (isNaN(d.getTime())) return null;
+      return d.toISOString();
+    } catch {
+      return null;
+    }
+  };
 
   const handleAddPrizeTier = (presetLabel?: string, defaultAmount?: string) => {
     const newId = `tier-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
@@ -191,6 +220,7 @@ export default function EditTournamentPage() {
         map_pool: found.map_pool || '',
         contact_email: found.contact_email || org.email || userEmail || '',
         discord_url: found.discord_url || '',
+        registration_deadline: toLocalDatetimeString(found.registration_deadline),
       });
 
       // Populate prize tiers dynamically (from embedded metadata or columns)
@@ -297,6 +327,7 @@ export default function EditTournamentPage() {
         schedule: formData.schedule.trim(),
         map_pool: formData.map_pool.trim(),
         discord_url: formData.discord_url.trim(),
+        registration_deadline: toUtcIsoString(formData.registration_deadline),
       };
 
       // Direct Database Save
@@ -789,6 +820,41 @@ export default function EditTournamentPage() {
               placeholder="e.g. Day 1: Group Stage (10:00 AM - 04:00 PM)&#10;Day 2: Quarter Finals & Semi Finals&#10;Day 3: Grand Finals (BO5) live stream"
               className="w-full px-4 py-3 bg-black/50 border border-white/10 rounded-2xl text-white text-xs sm:text-sm leading-relaxed outline-none focus:border-indigo-500 font-mono"
             />
+          </div>
+
+          {/* ═══════════════ REGISTRATION CLOSING DEADLINE ═══════════════ */}
+          <div className="space-y-3 pt-4 border-t border-white/10">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-2">
+                <Clock className="h-4 w-4 text-amber-400" /> Registration Closing Deadline
+              </label>
+              {formData.registration_deadline && (
+                <button
+                  type="button"
+                  onClick={() => setFormData((prev) => ({ ...prev, registration_deadline: '' }))}
+                  className="text-[11px] font-bold text-rose-400 hover:text-rose-300 underline cursor-pointer w-fit"
+                >
+                  Clear Deadline (No Expiry)
+                </button>
+              )}
+            </div>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <input
+                type="datetime-local"
+                value={formData.registration_deadline}
+                onChange={(e) => setFormData((prev) => ({ ...prev, registration_deadline: e.target.value }))}
+                className="w-full sm:max-w-md px-4 py-3 bg-black/50 border border-white/10 rounded-2xl text-white text-xs sm:text-sm outline-none focus:border-amber-400 [color-scheme:dark]"
+              />
+              {formData.registration_deadline && (
+                <span className="text-xs text-amber-300 font-mono flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  Locks: {new Date(formData.registration_deadline).toLocaleString()}
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Registrations will automatically close at this date and time.
+            </p>
           </div>
 
           {/* Organizer & Marshal Profile Details */}

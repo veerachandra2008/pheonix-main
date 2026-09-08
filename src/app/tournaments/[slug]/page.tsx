@@ -40,6 +40,7 @@ import {
   extractOrganizerData,
   fetchOrganizerProfileFromDB,
   getTournamentBySlug,
+  getRegistrationCountdown,
   PrizeTier 
 } from '@/lib/tournaments-db';
 import { flaskApi } from '@/lib/flask-api';
@@ -151,6 +152,26 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
     phone: '',
     college: '',
   });
+
+  const [currentTime, setCurrentTime] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const countdown = useMemo(() => {
+    if (!tournament) return { isClosed: false, badgeText: null };
+    return getRegistrationCountdown(
+      tournament.registration_deadline,
+      tournament.is_registration_closed,
+      currentTime
+    );
+  }, [tournament, currentTime]);
+
+  const isClosed = countdown.isClosed;
 
   useEffect(() => {
     let isMounted = true;
@@ -388,10 +409,10 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
             <div className="flex flex-wrap items-center gap-3">
               <span
                 className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-black uppercase tracking-wider text-white backdrop-blur-md shadow-lg"
-                style={{ backgroundColor: tournament.status_color || '#10B981' }}
+                style={{ backgroundColor: isClosed ? '#64748B' : (tournament.status_color || '#10B981') }}
               >
                 <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
-                {tournament.status || 'Registering'}
+                {isClosed ? 'REGISTRATIONS CLOSED' : (tournament.status || 'Registering')}
               </span>
 
               <span className="inline-flex items-center gap-2 rounded-full bg-black/80 border border-white/15 px-3.5 py-1.5 text-xs font-extrabold uppercase tracking-wider text-zinc-200 backdrop-blur-md">
@@ -939,31 +960,64 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
                     Duplicate registration is locked until verification completes. Once accepted, your pass will appear here automatically.
                   </p>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 space-y-2 text-xs text-slate-300">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400">Team Structure</span>
-                      <span className="font-bold text-emerald-400">Exactly 4 Players</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400">Emails Required</span>
-                      <span className="font-bold text-white">All 4 Members</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400">Pass Type</span>
-                      <span className="font-bold text-white">Digital QR Ticket</span>
-                    </div>
+              ) : isClosed ? (
+                <div className="p-6 rounded-2xl bg-zinc-900/90 border border-zinc-700/60 text-center space-y-4 shadow-xl">
+                  <div className="w-12 h-12 rounded-2xl bg-zinc-800 border border-zinc-700 text-zinc-400 flex items-center justify-center mx-auto shadow-inner">
+                    <Clock className="h-6 w-6 text-rose-400" />
                   </div>
-
-                  <Link
-                    href={`/registration/${tournament.slug}`}
-                    className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-sm uppercase tracking-wider rounded-2xl transition shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer"
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-black text-rose-400 uppercase tracking-wider">
+                      REGISTRATIONS CLOSED
+                    </h4>
+                    <p className="text-xs text-zinc-400 leading-relaxed">
+                      The registration deadline for this tournament has passed.
+                    </p>
+                    {tournament.registration_deadline && (
+                      <p className="text-[11px] font-mono text-zinc-500 pt-1">
+                        Closed on: {new Date(tournament.registration_deadline).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    disabled
+                    aria-disabled="true"
+                    className="w-full py-3.5 bg-zinc-800/80 text-zinc-500 font-black text-xs uppercase tracking-wider rounded-xl cursor-not-allowed border border-zinc-700/50"
                   >
-                    Register 4-Player Squad
-                    <ChevronRight className="h-4 w-4" />
-                  </Link>
+                    REGISTRATIONS CLOSED
+                  </button>
                 </div>
+              ) : (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 space-y-2 text-xs text-slate-300">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Team Structure</span>
+                        <span className="font-bold text-emerald-400">Exactly 4 Players</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Emails Required</span>
+                        <span className="font-bold text-white">All 4 Members</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Pass Type</span>
+                        <span className="font-bold text-white">Digital QR Ticket</span>
+                      </div>
+                    </div>
+
+                    {countdown.badgeText && !isClosed && (
+                      <div className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-mono font-black shadow-lg">
+                        <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                        <span>{countdown.badgeText}</span>
+                      </div>
+                    )}
+
+                    <Link
+                      href={`/registration/${tournament.slug}`}
+                      className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-sm uppercase tracking-wider rounded-2xl transition shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      Register 4-Player Squad
+                      <ChevronRight className="h-4 w-4" />
+                    </Link>
+                  </div>
               )}
 
               {/* Host Support Info */}

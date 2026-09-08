@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { CalendarDays, MapPin, Search, SlidersHorizontal, Trophy, Users, Zap, Flame, ShieldCheck, ArrowRight, Clock, X } from 'lucide-react';
 import { gameFilters, statusFilters, tournaments as defaultTournaments } from './data';
-import { getAllTournaments, getUserTournamentStatuses } from '@/lib/tournaments-db';
+import { getAllTournaments, getUserTournamentStatuses, getRegistrationCountdown } from '@/lib/tournaments-db';
 import { getXenovaSession } from '@/lib/auth-session';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
@@ -47,6 +47,14 @@ function TournamentsContent() {
   });
 
   const [pendingInfoModal, setPendingInfoModal] = useState<{ slug: string; title: string } | null>(null);
+  const [currentTime, setCurrentTime] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (gameParam) {
@@ -282,7 +290,14 @@ function TournamentsContent() {
             </div>
           ) : (
             <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
-              {filteredTournaments.map((tournament, index) => (
+              {filteredTournaments.map((tournament, index) => {
+                const countdown = getRegistrationCountdown(
+                  tournament.registration_deadline,
+                  tournament.is_registration_closed,
+                  currentTime
+                );
+
+                return (
                 <motion.article
                   key={tournament.id || tournament.slug}
                   initial={{ opacity: 0, y: 20 }}
@@ -315,9 +330,15 @@ function TournamentsContent() {
                       
                       {/* Status Badges */}
                       <div className="absolute left-3 top-3 flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center gap-1.5 bg-black/90 backdrop-blur-md px-3 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-400 border border-emerald-500/40 rounded-full shadow-lg">
-                          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                          {tournament.status}
+                        <span className={`inline-flex items-center gap-1.5 bg-black/90 backdrop-blur-md px-3 py-1 text-[10px] font-black uppercase tracking-wider rounded-full shadow-lg ${
+                          countdown.isClosed
+                            ? 'text-zinc-400 border border-zinc-700/60'
+                            : 'text-emerald-400 border border-emerald-500/40'
+                        }`}>
+                          <span className={`h-2 w-2 rounded-full ${
+                            countdown.isClosed ? 'bg-zinc-500' : 'bg-emerald-400 animate-pulse'
+                          }`} />
+                          {countdown.isClosed ? 'CLOSED' : tournament.status}
                         </span>
                         <span className="bg-black/90 backdrop-blur-md px-3 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-200 border border-white/15 rounded-full">
                           {tournament.game}
@@ -339,12 +360,20 @@ function TournamentsContent() {
                       </div>
 
                       {/* Bottom Live Countdown Badge */}
-                      <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between pointer-events-none">
-                        <div className="inline-flex items-center gap-1.5 bg-black/85 backdrop-blur-md px-3 py-1 rounded-full border border-rose-500/40 text-[10px] font-mono font-black text-rose-400 shadow-lg">
-                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                          <span>REGISTRATION CLOSES IN 14h 36m</span>
+                      {countdown.badgeText && (
+                        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between pointer-events-none">
+                          <div className={`inline-flex items-center gap-1.5 bg-black/85 backdrop-blur-md px-3 py-1 rounded-full border text-[10px] font-mono font-black shadow-lg ${
+                            countdown.isClosed
+                              ? 'border-zinc-700/60 text-zinc-400'
+                              : 'border-rose-500/40 text-rose-400'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${
+                              countdown.isClosed ? 'bg-zinc-500' : 'bg-rose-500 animate-pulse'
+                            }`} />
+                            <span>{countdown.badgeText}</span>
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
 
                     {/* Card Content Details */}
@@ -419,6 +448,14 @@ function TournamentsContent() {
                       >
                         Pending Review ⏳
                       </button>
+                    ) : countdown.isClosed ? (
+                      <button
+                        type="button"
+                        disabled
+                        className="flex-1 inline-flex items-center justify-center rounded-xl bg-zinc-900 text-zinc-500 border border-zinc-800 px-4 py-3 text-xs font-black uppercase tracking-wider cursor-not-allowed select-none opacity-80"
+                      >
+                        Closed
+                      </button>
                     ) : (
                       <Link
                         href={`/registration/${tournament.slug}`}
@@ -430,7 +467,8 @@ function TournamentsContent() {
                     )}
                   </div>
                 </motion.article>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

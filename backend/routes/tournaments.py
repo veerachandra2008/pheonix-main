@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 from config import get_supabase_client
 from cache import api_cache
@@ -90,31 +91,99 @@ MOCK_TOURNAMENTS = [
 
 IN_MEMORY_TOURNAMENTS = list(MOCK_TOURNAMENTS)
 
+def compute_registration_closed(target):
+    """
+    Server-side dynamic registration closing check.
+    Accepts either a tournament dict OR a registration_deadline value (str/datetime/None).
+    Rules:
+    - If deadline is None/missing: is_registration_closed = False
+    - If current server UTC time >= registration_deadline: is_registration_closed = True
+    - Otherwise: is_registration_closed = False
+    Does NOT permanently overwrite database status.
+    """
+    if target is None:
+        return False
+    if isinstance(target, dict):
+        deadline_val = target.get('registration_deadline')
+    else:
+        deadline_val = target
+
+    if not deadline_val:
+        return False
+
+    try:
+        if isinstance(deadline_val, datetime):
+            deadline_dt = deadline_val
+        else:
+            clean_str = str(deadline_val).strip()
+            if not clean_str:
+                return False
+            clean_str = clean_str.replace('Z', '+00:00')
+            deadline_dt = datetime.fromisoformat(clean_str)
+        if deadline_dt.tzinfo is None:
+            deadline_dt = deadline_dt.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) >= deadline_dt
+    except Exception as err:
+        print(f"[WARN] Error parsing registration_deadline '{deadline_val}': {err}")
+        return False
+
+def enrich_tournament_response(tournament):
+    """Adds is_registration_closed and normalized registration_deadline to tournament dict without mutating DB."""
+    if not tournament or not isinstance(tournament, dict):
+        return tournament
+    tournament['registration_deadline'] = tournament.get('registration_deadline') or None
+    tournament['is_registration_closed'] = compute_registration_closed(tournament)
+    return tournament
+
 @tournaments_bp.route('', methods=['GET'])
 @tournaments_bp.route('/', methods=['GET'])
 def get_tournaments():
-    """Fetch all tournaments with High-Speed In-Memory Caching (serves 100+ concurrent users in <2ms)"""
+    """Fetch all tournaments with dynamic is_registration_closed evaluation"""
     cached = api_cache.get('tournaments:all')
     if cached is not None:
-        return jsonify({'success': True, 'data': cached, 'cached': True}), 200
+        enriched = [enrich_tournament_response(t) for t in cached]
+        return jsonify({'success': True, 'data': enriched, 'cached': True}), 200
 
     try:
         supabase = get_supabase_client()
         res = supabase.table('tournaments').select('*').execute()
         if res.data is not None:
             api_cache.set('tournaments:all', res.data, ttl_seconds=20)
-            return jsonify({'success': True, 'data': res.data}), 200
+            enriched = [enrich_tournament_response(t) for t in res.data]
+            return jsonify({'success': True, 'data': enriched}), 200
     except Exception as e:
         print(f"Supabase error fetching tournaments: {e}")
     
-    return jsonify({'success': True, 'data': IN_MEMORY_TOURNAMENTS, 'fallback': True}), 200
+    enriched = [enrich_tournament_response(t) for t in IN_MEMORY_TOURNAMENTS]
+    return jsonify({'success': True, 'data': enriched, 'fallback': True}), 200
+
+@tournaments_bp.route('/<slug>', methods=['GET'])
+def get_tournament_by_slug(slug):
+    """Fetch a single tournament by slug with server-calculated is_registration_closed"""
+    clean_slug = str(slug or '').strip().lower()
+    if not clean_slug:
+        return jsonify({'success': False, 'message': 'Tournament slug is required.'}), 400
+
+    try:
+        supabase = get_supabase_client()
+        res = supabase.table('tournaments').select('*').ilike('slug', clean_slug).execute()
+        if res.data and len(res.data) > 0:
+            return jsonify({'success': True, 'data': enrich_tournament_response(res.data[0])}), 200
+    except Exception as e:
+        print(f"Supabase error fetching tournament {slug}: {e}")
+
+    for t in IN_MEMORY_TOURNAMENTS:
+        if (t.get('slug') or '').strip().lower() == clean_slug:
+            return jsonify({'success': True, 'data': enrich_tournament_response(t), 'fallback': True}), 200
+
+    return jsonify({'success': False, 'message': f"Tournament '{slug}' not found."}), 404
 
 VALID_TOURNAMENT_COLUMNS = {
     'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
     'prize', 'date', 'region', 'format', 'teams', 'filled', 'fee', 'organizer_email',
     'description', 'rules', 'schedule', 'map_pool', 'contact_email', 'discord_url',
     'organizer_name', 'organizer_phone', 'organizer_college', 'contact_phone',
-    'college', 'prize_1st', 'prize_2nd', 'prize_3rd'
+    'college', 'prize_1st', 'prize_2nd', 'prize_3rd', 'registration_deadline'
 }
 
 def sanitize_tournament_payload(data):
@@ -124,6 +193,11 @@ def sanitize_tournament_payload(data):
             sanitized['status_color'] = v
         elif k == 'organizerEmail' or k == 'createdBy':
             sanitized['organizer_email'] = v
+        elif k in ('registration_deadline', 'registrationDeadline'):
+            if v is None or v == '' or str(v).lower() in ('null', 'none'):
+                sanitized['registration_deadline'] = None
+            else:
+                sanitized['registration_deadline'] = str(v).strip()
         elif k in VALID_TOURNAMENT_COLUMNS:
             sanitized[k] = v
     return sanitized
@@ -152,20 +226,46 @@ def create_tournament():
         # Try inserting with organizer_email column
         try:
             res = supabase.table('tournaments').insert(clean_data).execute()
-            return jsonify({'success': True, 'data': res.data}), 201
+            saved = res.data[0] if res.data and len(res.data) > 0 else clean_data
+            return jsonify({'success': True, 'data': enrich_tournament_response(saved)}), 201
         except Exception:
             # Fallback without organizer_email if schema cache does not have the column yet
             fallback_clean = {k: v for k, v in clean_data.items() if k != 'organizer_email'}
             res = supabase.table('tournaments').insert(fallback_clean).execute()
-            return jsonify({'success': True, 'data': res.data}), 201
+            saved = res.data[0] if res.data and len(res.data) > 0 else fallback_clean
+            return jsonify({'success': True, 'data': enrich_tournament_response(saved)}), 201
     except Exception as e:
         print(f"Supabase insert warning for tournament: {e}")
-        return jsonify({'success': True, 'data': [clean_data], 'fallback': True}), 201
+        return jsonify({'success': True, 'data': [enrich_tournament_response(clean_data)], 'fallback': True}), 201
 
 @tournaments_bp.route('/<slug>', methods=['PATCH', 'PUT'])
 def update_tournament(slug):
-    """Update tournament details or status with upsert into Supabase and memory"""
+    """Update tournament details or status with upsert into Supabase and memory with organizer authorization"""
     api_cache.clear_prefix('tournaments')
+
+    # Authorize caller
+    from routes.auth import get_authenticated_user
+    from routes.payments import is_user_authorized_for_tournament, load_tournament_for_payment
+
+    user = get_authenticated_user()
+    if not user:
+        return jsonify({'success': False, 'message': 'Authentication required.'}), 401
+
+    existing_t = load_tournament_for_payment(slug)
+    if existing_t:
+        if not is_user_authorized_for_tournament(user, existing_t):
+            return jsonify({
+                'success': False,
+                'message': 'You are not authorized to update this tournament.'
+            }), 403
+    else:
+        role = (user.get('role') or 'PLAYER').strip().upper()
+        if role not in ('ORGANIZER', 'ADMIN'):
+            return jsonify({
+                'success': False,
+                'message': 'Organizer or Admin permissions required.'
+            }), 403
+
     data = request.get_json() or {}
     clean_data = sanitize_tournament_payload(data)
     
@@ -179,18 +279,23 @@ def update_tournament(slug):
     if not found_mem:
         IN_MEMORY_TOURNAMENTS.insert(0, {'slug': slug, **clean_data})
             
+    saved_row = {'slug': slug, **clean_data}
     try:
         supabase = get_supabase_client()
         existing = supabase.table('tournaments').select('id').eq('slug', slug).execute()
         if existing.data and len(existing.data) > 0:
             res = supabase.table('tournaments').update(clean_data).eq('slug', slug).execute()
+            if res.data and len(res.data) > 0:
+                saved_row = res.data[0]
         else:
             insert_data = {'slug': slug, **clean_data}
             res = supabase.table('tournaments').insert(insert_data).execute()
-        return jsonify({'success': True, 'data': res.data}), 200
+            if res.data and len(res.data) > 0:
+                saved_row = res.data[0]
+        return jsonify({'success': True, 'data': enrich_tournament_response(saved_row)}), 200
     except Exception as e:
         print(f"Supabase update tournament warning: {e}")
-        return jsonify({'success': True, 'data': [clean_data], 'fallback': True}), 200
+        return jsonify({'success': True, 'data': [enrich_tournament_response(clean_data)], 'fallback': True}), 200
 
 @tournaments_bp.route('/<slug>', methods=['DELETE'])
 def delete_tournament(slug):
@@ -210,8 +315,19 @@ def delete_tournament(slug):
 
 @tournaments_bp.route('/register', methods=['POST'])
 def register_tournament():
-    """Save tournament registration into Supabase database & in-memory fallback"""
+    """Save tournament registration with server-authoritative deadline enforcement"""
     data = request.get_json() or {}
+    slug = (data.get('tournamentSlug') or data.get('tournament_slug') or '').strip()
+
+    # Authoritative registration deadline enforcement
+    from routes.payments import load_tournament_for_payment
+    tournament = load_tournament_for_payment(slug)
+    if tournament and compute_registration_closed(tournament):
+        return jsonify({
+            'success': False,
+            'error': 'Registrations for this tournament are now closed.',
+            'message': 'Registrations for this tournament are now closed.'
+        }), 400
     pass_id = data.get('passId') or data.get('pass_id') or f"XPH-{hash(str(data)) % 100000000:08X}"
     
     record = {

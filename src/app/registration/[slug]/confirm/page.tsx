@@ -220,7 +220,7 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          setErrorMessage(data.message || 'Registration failed.');
+          setErrorMessage(data.error || data.message || 'Registration failed.');
           setPaymentStep('idle');
           return;
         }
