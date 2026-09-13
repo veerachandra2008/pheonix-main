@@ -273,12 +273,26 @@ def get_all_registrations():
     """Fetch registrations with indexed filtering and sub-ms caching"""
     try:
         email = request.args.get('email')
+        user_id = request.args.get('user_id') or request.args.get('userId')
         tournament_slug = request.args.get('tournament_slug') or request.args.get('tournamentSlug')
 
         clean_email = (email or '').strip().lower()
+        clean_user_id = (user_id or '').strip()
         clean_slug = (tournament_slug or '').strip().lower()
 
-        cache_key = f"regs:{clean_email}:{clean_slug}"
+        # If no query filters supplied, check if caller is authenticated
+        if not clean_email and not clean_user_id and not clean_slug:
+            user = get_authenticated_user()
+            if user:
+                user_role = (user.get('role') or 'player').lower()
+                if user_role not in ['admin', 'organizer']:
+                    clean_email = (user.get('email') or '').strip().lower()
+                    clean_user_id = str(user.get('id') or '').strip()
+            else:
+                # Anonymous unauthenticated request with no filters gets empty list for privacy
+                return jsonify({'success': True, 'data': []}), 200
+
+        cache_key = f"regs:{clean_email}:{clean_user_id}:{clean_slug}"
         cached = api_cache.get(cache_key)
         if cached is not None:
             return jsonify({'success': True, 'data': cached, 'cached': True}), 200
@@ -287,8 +301,22 @@ def get_all_registrations():
         try:
             supabase = get_supabase_client()
             q = supabase.table('registrations').select('*')
-            if clean_email:
-                q = q.eq('email', clean_email)
+            
+            is_uuid = False
+            if clean_user_id:
+                try:
+                    uuid.UUID(clean_user_id)
+                    is_uuid = True
+                except Exception:
+                    is_uuid = False
+
+            if clean_email and is_uuid:
+                q = q.or_(f"email.ilike.{clean_email},user_id.eq.{clean_user_id}")
+            elif clean_email:
+                q = q.ilike('email', clean_email)
+            elif is_uuid:
+                q = q.eq('user_id', clean_user_id)
+
             if clean_slug:
                 q = q.eq('tournament_slug', clean_slug)
             
@@ -310,10 +338,17 @@ def get_all_registrations():
                 continue
             
             rec_email = (r.get('email') or '').strip().lower()
+            rec_user_id = str(r.get('user_id') or r.get('userId') or '').strip()
             rec_slug = (r.get('tournament_slug') or r.get('tournamentSlug') or '').strip().lower()
 
-            if clean_email and rec_email != clean_email:
+            if clean_email and clean_user_id:
+                if rec_email != clean_email and rec_user_id != clean_user_id:
+                    continue
+            elif clean_email and rec_email != clean_email:
                 continue
+            elif clean_user_id and rec_user_id != clean_user_id:
+                continue
+
             if clean_slug and rec_slug != clean_slug:
                 continue
 

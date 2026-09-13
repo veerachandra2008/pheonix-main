@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { CalendarDays, MapPin, Search, SlidersHorizontal, Trophy, Users, Zap, Flame, ShieldCheck, ArrowRight, Clock, X } from 'lucide-react';
-import { gameFilters, statusFilters, tournaments as defaultTournaments } from './data';
+import { gameFilters, statusFilters } from './data';
 import { getAllTournaments, getUserTournamentStatuses, getRegistrationCountdown } from '@/lib/tournaments-db';
 import { getXenovaSession } from '@/lib/auth-session';
 import FinalCTA from '@/components/xenova/FinalCTA';
@@ -25,11 +25,25 @@ function TournamentsContent() {
   const [selectedStatus, setSelectedStatus] = useState<'All' | 'Live' | 'Registering' | 'Upcoming'>('All');
   const [selectedGame, setSelectedGame] = useState('All');
 
-  // Database-driven Tournaments State
+  // Database-driven Tournaments State with sub-ms local storage cache & NO fake mock data
   const [tournamentsList, setTournamentsList] = useState<any[]>(() => {
     if (cachedTournamentsMemory && cachedTournamentsMemory.length > 0) return cachedTournamentsMemory;
-    return defaultTournaments;
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('xenova_tournaments_cache');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            cachedTournamentsMemory = parsed;
+            return parsed;
+          }
+        }
+      } catch {}
+    }
+    return [];
   });
+
+  const [isLoadingTournaments, setIsLoadingTournaments] = useState(() => tournamentsList.length === 0);
 
   const [registeredSlugs, setRegisteredSlugs] = useState<Set<string>>(() => {
     if (cachedRegisteredSlugsMemory) return cachedRegisteredSlugsMemory;
@@ -80,36 +94,37 @@ function TournamentsContent() {
         }
       } catch {}
 
-      // High-Speed Single-Burst Parallel Dispatch (<50ms)
-      try {
-        const [allTournaments, statusData] = await Promise.all([
-          getAllTournaments(),
-          (email || userId)
-            ? getUserTournamentStatuses(email, userId)
-            : Promise.resolve({
-                registeredSlugs: new Set<string>(),
-                registeredPasses: new Map<string, string>(),
-                pendingSlugs: new Set<string>(),
-                pendingOrders: new Map<string, any>(),
-                rejectedSlugs: new Set<string>(),
-              })
-        ]);
+      // Fast non-blocking fetch: Load real database tournaments immediately (<50ms)
+      getAllTournaments()
+        .then((allTournaments) => {
+          if (!isMounted) return;
+          if (Array.isArray(allTournaments)) {
+            setTournamentsList(allTournaments);
+            cachedTournamentsMemory = allTournaments;
+            try {
+              localStorage.setItem('xenova_tournaments_cache', JSON.stringify(allTournaments));
+            } catch {}
+          }
+          setIsLoadingTournaments(false);
+        })
+        .catch((err) => {
+          console.warn('getAllTournaments notice:', err);
+          if (isMounted) setIsLoadingTournaments(false);
+        });
 
-        if (!isMounted) return;
-
-        if (Array.isArray(allTournaments) && allTournaments.length > 0) {
-          setTournamentsList(allTournaments);
-          cachedTournamentsMemory = allTournaments;
-        }
-
-        setRegisteredSlugs(statusData.registeredSlugs);
-        setRegisteredPasses(statusData.registeredPasses);
-        setPendingSlugs(statusData.pendingSlugs);
-        cachedRegisteredSlugsMemory = statusData.registeredSlugs;
-        cachedRegisteredPassesMemory = statusData.registeredPasses;
-        cachedPendingSlugsMemory = statusData.pendingSlugs;
-      } catch (err) {
-        console.warn('Tournaments parallel load notice:', err);
+      // Load user registered/pending statuses in parallel without delaying tournament cards
+      if (email || userId) {
+        getUserTournamentStatuses(email, userId)
+          .then((statusData) => {
+            if (!isMounted) return;
+            setRegisteredSlugs(statusData.registeredSlugs);
+            setRegisteredPasses(statusData.registeredPasses);
+            setPendingSlugs(statusData.pendingSlugs);
+            cachedRegisteredSlugsMemory = statusData.registeredSlugs;
+            cachedRegisteredPassesMemory = statusData.registeredPasses;
+            cachedPendingSlugsMemory = statusData.pendingSlugs;
+          })
+          .catch(() => {});
       }
     }
     loadData();
@@ -214,7 +229,13 @@ function TournamentsContent() {
             >
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Live Brackets</p>
-                <p className="text-2xl font-black text-emerald-400 mt-0.5">{tournamentsList.length}</p>
+                <div className="text-2xl font-black text-emerald-400 mt-0.5">
+                  {isLoadingTournaments && tournamentsList.length === 0 ? (
+                    <span className="inline-block w-8 h-7 bg-zinc-800/80 rounded-md animate-pulse align-middle" />
+                  ) : (
+                    tournamentsList.length
+                  )}
+                </div>
               </div>
             </motion.div>
 
@@ -284,7 +305,32 @@ function TournamentsContent() {
       {/* ═══════════════ 2. TOURNAMENTS MATCH GRID WITH SLANTED BENTO CARDS ═══════════════ */}
       <section className="py-14 sm:py-20 bg-black">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          {filteredTournaments.length === 0 ? (
+          {isLoadingTournaments && tournamentsList.length === 0 ? (
+            <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+              {[1, 2, 3].map((n) => (
+                <div
+                  key={n}
+                  className="animate-pulse rounded-3xl border border-white/10 bg-[#09090b] p-6 shadow-2xl flex flex-col justify-between h-[450px]"
+                >
+                  <div>
+                    <div className="h-48 w-full rounded-2xl bg-zinc-900/80 mb-5" />
+                    <div className="h-6 w-3/4 bg-zinc-800/80 rounded-lg mb-2" />
+                    <div className="h-4 w-1/3 bg-zinc-900 rounded-lg mb-4" />
+                    <div className="grid grid-cols-2 gap-2 bg-black/50 p-3.5 rounded-2xl border border-white/5">
+                      <div className="h-4 bg-zinc-900 rounded" />
+                      <div className="h-4 bg-zinc-900 rounded" />
+                      <div className="h-4 bg-zinc-900 rounded" />
+                      <div className="h-4 bg-zinc-900 rounded" />
+                    </div>
+                  </div>
+                  <div className="flex gap-3 pt-6">
+                    <div className="h-10 flex-1 bg-zinc-900 rounded-xl" />
+                    <div className="h-10 flex-1 bg-zinc-800/60 rounded-xl" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : filteredTournaments.length === 0 ? (
             <div className="rounded-3xl border border-white/10 bg-[#09090b] p-16 text-center text-zinc-400 text-sm">
               No tournaments match your current search and filter selection.
             </div>

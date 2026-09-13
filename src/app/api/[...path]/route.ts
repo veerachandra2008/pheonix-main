@@ -500,18 +500,6 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     }
   }
 
-  // 7. Registrations Endpoints
-  if (mainSegment === 'registrations') {
-    if (method === 'GET') {
-      const { data } = await supabase.from('registrations').select('*');
-      return NextResponse.json({ success: true, data: data || [] }, { status: 200 });
-    }
-    if (method === 'DELETE') {
-      const { error } = await supabase.from('registrations').delete().eq('pass_id', idOrSlug);
-      return NextResponse.json({ success: !error, message: 'Registration deleted.' }, { status: 200 });
-    }
-  }
-
   // 8. Rosters Endpoints
   if (mainSegment === 'rosters') {
     if (method === 'GET') {
@@ -1428,6 +1416,133 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     }
   }
 
+  // 14. Native Registrations Query (Strict Filtering + Expiry Detection)
+  // Handles GET /api/registrations?email=...&user_id=...&tournament_slug=...
+  if (mainSegment === 'registrations' && !subSegment && method === 'GET') {
+    try {
+      const url = new URL(req.url);
+      const email = (url.searchParams.get('email') || '').trim().toLowerCase();
+      const userId = (url.searchParams.get('user_id') || url.searchParams.get('userId') || '').trim();
+      const slug = (url.searchParams.get('tournament_slug') || url.searchParams.get('tournamentSlug') || '').trim().toLowerCase();
+
+      // Anonymous requests with no filters return empty list to protect user privacy
+      if (!email && !userId && !slug) {
+        return NextResponse.json({ success: true, data: [] }, { status: 200 });
+      }
+
+      let q = supabaseAdmin.from('registrations').select('*');
+
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+
+      if (email && isUuid) {
+        q = q.or(`email.ilike.${email},user_id.eq.${userId}`);
+      } else if (email) {
+        q = q.ilike('email', email);
+      } else if (isUuid) {
+        q = q.eq('user_id', userId);
+      }
+
+      if (slug) {
+        q = q.eq('tournament_slug', slug);
+      }
+
+      const { data: rows, error: qErr } = await q.order('registered_at', { ascending: false });
+      if (qErr) {
+        console.error('[Registrations Query Error]', qErr);
+        return NextResponse.json({ success: false, message: qErr.message }, { status: 500 });
+      }
+
+      const rawRecords = rows || [];
+      // Strictly enforce ownership if email or userId was queried
+      const filtered = rawRecords.filter((r: any) => {
+        const rEmail = (r.email || '').trim().toLowerCase();
+        const rUserId = String(r.user_id || '').trim();
+        if (email && userId) {
+          return rEmail === email || rUserId === userId;
+        }
+        if (email) return rEmail === email;
+        if (userId) return rUserId === userId;
+        return true;
+      });
+
+      // Enrich with tournament metadata (dates, status) to calculate is_expired
+      const tournamentSlugs = Array.from(new Set(filtered.map((r: any) => r.tournament_slug).filter(Boolean)));
+      const tournamentMap: Record<string, any> = {};
+      if (tournamentSlugs.length > 0) {
+        const { data: tournaments } = await supabaseAdmin
+          .from('tournaments')
+          .select('slug, title, date, end_date, status, game, image')
+          .in('slug', tournamentSlugs);
+        if (tournaments) {
+          tournaments.forEach((t: any) => {
+            tournamentMap[(t.slug || '').toLowerCase()] = t;
+          });
+        }
+      }
+
+      const enriched = filtered.map((r: any) => {
+        const t = tournamentMap[(r.tournament_slug || '').toLowerCase()];
+        const status = (t?.status || '').toLowerCase().trim();
+        const rawDate = (t?.end_date || t?.date || '').trim();
+        let isExpired = status === 'completed' || status === 'concluded' || status === 'ended' || status === 'past';
+
+        if (!isExpired && rawDate) {
+          const lower = rawDate.toLowerCase();
+          if (!['upcoming', 'tba', 'tbd', 'live', 'registering', 'scheduled', 'soon'].includes(lower)) {
+            try {
+              let parsed = Date.parse(rawDate);
+              if (isNaN(parsed)) parsed = Date.parse(`${rawDate} ${new Date().getFullYear()}`);
+              if (!isNaN(parsed)) {
+                const dt = new Date(parsed);
+                dt.setHours(23, 59, 59, 999);
+                if (Date.now() > dt.getTime()) isExpired = true;
+              }
+            } catch {}
+          }
+        }
+
+        return {
+          ...r,
+          id: r.id || r.pass_id,
+          passId: r.pass_id,
+          pass_id: r.pass_id,
+          tournamentSlug: r.tournament_slug,
+          tournament_slug: r.tournament_slug,
+          tournamentTitle: r.tournament_title || t?.title || r.tournament_slug,
+          tournament_title: r.tournament_title || t?.title || r.tournament_slug,
+          tournamentDate: t?.date || 'Upcoming',
+          tournament_date: t?.date || 'Upcoming',
+          tournamentEndDate: t?.end_date,
+          tournament_end_date: t?.end_date,
+          tournamentStatus: t?.status || 'Registering',
+          tournament_status: t?.status || 'Registering',
+          tournamentGame: t?.game || 'Esports',
+          tournament_game: t?.game || 'Esports',
+          isExpired,
+          is_expired: isExpired,
+        };
+      });
+
+      return NextResponse.json({ success: true, data: enriched }, { status: 200 });
+    } catch (err: any) {
+      console.error('[Registrations GET Exception]', err);
+      return NextResponse.json({ success: false, message: err?.message || 'Server error' }, { status: 500 });
+    }
+  }
+
+  if (mainSegment === 'registrations' && method === 'DELETE') {
+    try {
+      const passId = segments[1] || '';
+      if (!passId) {
+        return NextResponse.json({ success: false, message: 'pass_id required for deletion' }, { status: 400 });
+      }
+      const { error } = await supabaseAdmin.from('registrations').delete().ilike('pass_id', passId);
+      return NextResponse.json({ success: !error, message: error ? error.message : 'Registration deleted.' }, { status: error ? 400 : 200 });
+    } catch (delErr: any) {
+      return NextResponse.json({ success: false, message: delErr?.message || 'Server error' }, { status: 500 });
+    }
+  }
+
   // Default fallback response: strict 404 instead of fake 200 OK
   return NextResponse.json({
     success: false,
@@ -1459,6 +1574,7 @@ function isNextJsNativeRoute(segments: string[]): boolean {
   if (main === 'registrations') {
     if (sub === 'attendance' && sub2 === 'update') return true;
     if (sub === 'verify') return true;
+    if (!sub) return true;
     return false;
   }
 

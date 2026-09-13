@@ -15,6 +15,7 @@ import {
   ExternalLink,
   Mail,
   Loader2,
+  Clock,
 } from 'lucide-react';
 import { QRCodeComponent } from '@/components/QRCodeComponent';
 import { getApiBaseUrl } from '@/lib/api-config';
@@ -144,13 +145,54 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
         return;
       }
 
+      const checkTournamentExpired = async (tournSlug: string) => {
+        try {
+          const { supabase } = await import('@/lib/supabase');
+          const { data: tData } = await supabase
+            .from('tournaments')
+            .select('date, end_date, status')
+            .eq('slug', tournSlug)
+            .maybeSingle();
+
+          if (tData) {
+            const tStatus = (tData.status || '').toLowerCase().trim();
+            if (['completed', 'concluded', 'ended', 'past'].includes(tStatus)) {
+              return { isExpired: true, message: 'This tournament has officially concluded.' };
+            }
+            const rawDate = (tData.end_date || tData.date || '').trim();
+            if (rawDate) {
+              const lower = rawDate.toLowerCase();
+              if (!['upcoming', 'tba', 'tbd', 'live', 'registering', 'scheduled', 'soon'].includes(lower)) {
+                try {
+                  let parsed = Date.parse(rawDate);
+                  if (isNaN(parsed)) parsed = Date.parse(`${rawDate} ${new Date().getFullYear()}`);
+                  if (!isNaN(parsed)) {
+                    const dt = new Date(parsed);
+                    dt.setHours(23, 59, 59, 999);
+                    if (Date.now() > dt.getTime()) {
+                      return { isExpired: true, message: `Tournament date (${rawDate}) has passed and concluded.` };
+                    }
+                  }
+                } catch {}
+              }
+            }
+          }
+        } catch {}
+        return { isExpired: false, message: '' };
+      };
+
       // 3. Fetch from Backend API (/api/registrations/:passId)
       try {
         const res = await fetch(`${apiBase}/registrations/${resolvedPassId}`, { cache: 'no-store' });
         if (res.ok) {
           const result = await res.json();
           if (result.success && result.data) {
-            setTicketData(result.data);
+            const expiry = await checkTournamentExpired(result.data.tournamentSlug || slug);
+            setTicketData({
+              ...result.data,
+              isExpired: expiry.isExpired,
+              expiryMessage: expiry.message,
+            });
             setLoading(false);
             return;
           }
@@ -192,6 +234,8 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             isCaptain: p.is_captain ?? (p.slot === 1)
           }));
 
+          const expiry = await checkTournamentExpired(item.tournament_slug || slug);
+
           setTicketData({
             passId: item.pass_id,
             pass_id: item.pass_id,
@@ -204,7 +248,9 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             bio: userBio || 'Compete with honor, dominate with strategy. Verified Collegiate Athlete.',
             paymentStatus: item.payment_status || 'SUCCESS',
             registeredAt: item.registered_at || new Date().toISOString(),
-            players
+            players,
+            isExpired: expiry.isExpired,
+            expiryMessage: expiry.message,
           });
           setLoading(false);
           return;
@@ -368,6 +414,23 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
           </div>
         </div>
 
+        {/* ─── TOURNAMENT CONCLUDED / EXPIRED BANNER ─── */}
+        {ticketData?.isExpired && (
+          <div className="rounded-2xl bg-orange-500/10 border border-orange-500/30 p-4 sm:p-5 flex items-start sm:items-center gap-3.5 text-xs text-orange-200 shadow-xl no-print">
+            <div className="w-9 h-9 rounded-xl bg-orange-500/20 border border-orange-500/30 flex items-center justify-center shrink-0">
+              <Clock className="w-5 h-5 text-orange-400" />
+            </div>
+            <div className="space-y-0.5 min-w-0 flex-1">
+              <p className="text-orange-400 font-bold uppercase tracking-wider text-xs flex items-center gap-1.5">
+                Tournament Concluded — Pass Expired
+              </p>
+              <p className="text-zinc-300 text-[11px] leading-relaxed">
+                {ticketData.expiryMessage || 'This tournament has concluded. This entry pass is archived for official match record history and can no longer be used for match check-in.'}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ══ ENTRY PASS TICKET CARD (REF FOR HTML2CANVAS) ══ */}
         <div
           ref={ticketRef}
@@ -411,8 +474,12 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
                 <p className="text-xs text-zinc-400 mt-0.5 truncate">{ticketData?.college}</p>
               </div>
               <div className="shrink-0 text-right">
-                <div className="px-2.5 sm:px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] sm:text-xs font-bold uppercase tracking-wider inline-block">
-                  {ticketData?.paymentStatus || 'VERIFIED'}
+                <div className={`px-2.5 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold uppercase tracking-wider inline-block ${
+                  ticketData?.isExpired
+                    ? 'bg-orange-500/15 border border-orange-500/30 text-orange-400'
+                    : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
+                }`}>
+                  {ticketData?.isExpired ? 'EXPIRED' : (ticketData?.paymentStatus || 'VERIFIED')}
                 </div>
               </div>
             </div>

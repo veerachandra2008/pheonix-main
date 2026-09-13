@@ -128,6 +128,18 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
   // Instant 0ms Synchronous State Hydration
   const [tournament, setTournament] = useState<any>(() => {
     if (!targetSlug) return null;
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('xenova_tournaments_cache');
+        if (cached) {
+          const list = JSON.parse(cached);
+          if (Array.isArray(list)) {
+            const foundCache = list.find((t: any) => t.slug?.toLowerCase() === targetSlug.toLowerCase() || String(t.id) === targetSlug);
+            if (foundCache) return foundCache;
+          }
+        }
+      } catch {}
+    }
     const found = defaultTournaments.find((t) => t.slug?.toLowerCase() === targetSlug.toLowerCase());
     return found || null;
   });

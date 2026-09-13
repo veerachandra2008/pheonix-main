@@ -13,6 +13,8 @@ export interface TournamentRegistrationRecord {
   tournamentRegion: string;
   tournamentFee: string;
   tournamentImage?: string;
+  tournamentEndDate?: string;
+  tournamentStatus?: string;
   teamId: string;
   teamName: string;
   college: string;
@@ -21,6 +23,7 @@ export interface TournamentRegistrationRecord {
   passId: string;
   registeredAt: string;
   userId?: string;
+  isExpired?: boolean;
 }
 
 let memoryTournamentsCache: Tournament[] | null = null;
@@ -469,13 +472,32 @@ export async function getTournamentBySlug(targetSlug: string): Promise<any | nul
 }
 
 /**
- * Fetch all tournaments directly from Supabase (<50ms) with in-memory caching and non-blocking API fallback
+ * Fetch all tournaments directly from Supabase (<50ms) with instant client caching and non-blocking API fallback
  */
 export async function getAllTournaments(): Promise<Tournament[]> {
   if (memoryTournamentsCache && memoryTournamentsCache.length > 0) {
     return memoryTournamentsCache;
   }
 
+  // Check client localStorage cache for instant sub-ms initial load
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('xenova_tournaments_cache');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          memoryTournamentsCache = parsed;
+          fetchFreshTournaments().catch(() => {});
+          return parsed;
+        }
+      }
+    } catch {}
+  }
+
+  return await fetchFreshTournaments();
+}
+
+export async function fetchFreshTournaments(): Promise<Tournament[]> {
   // 1. Direct Supabase Query First (<50ms direct cloud query)
   try {
     const { data, error } = await supabase
@@ -483,9 +505,14 @@ export async function getAllTournaments(): Promise<Tournament[]> {
       .select('*')
       .order('id', { ascending: true });
 
-    if (!error && data && Array.isArray(data) && data.length > 0) {
+    if (!error && data && Array.isArray(data)) {
       const mapped = data.map(mapSupabaseTournament);
       memoryTournamentsCache = mapped;
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('xenova_tournaments_cache', JSON.stringify(mapped));
+        } catch {}
+      }
       return mapped;
     }
   } catch (err) {
@@ -505,15 +532,20 @@ export async function getAllTournaments(): Promise<Tournament[]> {
 
     if (res.ok) {
       const json = await res.json();
-      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+      if (json.success && Array.isArray(json.data)) {
         const mapped = json.data.map(mapSupabaseTournament);
         memoryTournamentsCache = mapped;
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('xenova_tournaments_cache', JSON.stringify(mapped));
+          } catch {}
+        }
         return mapped;
       }
     }
   } catch {}
 
-  return defaultMockTournaments;
+  return memoryTournamentsCache || [];
 }
 
 /**
@@ -569,33 +601,92 @@ export async function saveRegistration(record: TournamentRegistrationRecord): Pr
 const REG_CACHE = new Map<string, { data: TournamentRegistrationRecord[]; expires: number }>();
 
 /**
- * Get all registrations stored for the current user strictly from Supabase / Backend with instant client caching
+ * Evaluates whether a tournament is concluded or expired based on status and dates.
+ */
+export function isTournamentExpired(
+  tournament?: { date?: string; end_date?: string; status?: string } | null,
+  fallbackDateStr?: string
+): boolean {
+  const status = (tournament?.status || '').toLowerCase().trim();
+  if (status === 'completed' || status === 'concluded' || status === 'ended' || status === 'past') {
+    return true;
+  }
+
+  const rawDate = (tournament?.end_date || tournament?.date || fallbackDateStr || '').trim();
+  if (!rawDate) return false;
+
+  const lower = rawDate.toLowerCase();
+  if (['upcoming', 'tba', 'tbd', 'live', 'registering', 'scheduled', 'soon'].includes(lower)) {
+    return false;
+  }
+
+  try {
+    let parsed = Date.parse(rawDate);
+    if (isNaN(parsed)) {
+      parsed = Date.parse(`${rawDate} ${new Date().getFullYear()}`);
+    }
+    if (!isNaN(parsed)) {
+      const dt = new Date(parsed);
+      // End of event day
+      dt.setHours(23, 59, 59, 999);
+      return Date.now() > dt.getTime();
+    }
+  } catch {}
+
+  return false;
+}
+
+/**
+ * Get all registrations stored for the current user strictly from Supabase / Backend with instant client caching.
+ * Guaranteed to NEVER leak other users' registrations.
  */
 export async function getUserRegistrations(email?: string, userId?: string): Promise<TournamentRegistrationRecord[]> {
   const records: TournamentRegistrationRecord[] = [];
   if (!email && !userId) return records;
 
   const cleanEmail = email ? email.trim().toLowerCase() : '';
-  const cacheKey = userId || cleanEmail;
+  const cleanUserId = userId ? String(userId).trim() : '';
+  if (!cleanEmail && !cleanUserId) return records;
 
+  const cacheKey = `${cleanEmail}:${cleanUserId}`;
   const cached = REG_CACHE.get(cacheKey);
   if (cached && Date.now() < cached.expires) {
     return cached.data;
   }
 
+  const seenPassIds = new Set<string>();
+
+  // Helper to strictly ensure a record belongs to the user
+  const recordBelongsToUser = (itemEmail?: string, itemUserId?: string | number) => {
+    const normEmail = (itemEmail || '').trim().toLowerCase();
+    const normUserId = itemUserId ? String(itemUserId).trim() : '';
+    if (cleanEmail && normEmail && normEmail === cleanEmail) return true;
+    if (cleanUserId && normUserId && normUserId === cleanUserId) return true;
+    return false;
+  };
+
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanUserId);
+
   // 1. Direct Supabase Query First (<50ms)
   try {
     let query = supabase.from('registrations').select('*');
-    if (userId) {
-      query = query.eq('user_id', userId);
+    if (cleanEmail && isUuid) {
+      query = query.or(`email.ilike.${cleanEmail},user_id.eq.${cleanUserId}`);
     } else if (cleanEmail) {
-      query = query.eq('email', cleanEmail);
+      query = query.ilike('email', cleanEmail);
+    } else if (isUuid) {
+      query = query.eq('user_id', cleanUserId);
     }
 
     const { data, error } = await query;
 
-    if (!error && data && Array.isArray(data) && data.length > 0) {
+    if (!error && data && Array.isArray(data)) {
       for (const item of data) {
+        if (!recordBelongsToUser(item.email, item.user_id)) continue;
+        const pid = item.pass_id;
+        if (!pid || seenPassIds.has(pid)) continue;
+        seenPassIds.add(pid);
+
         records.push({
           tournamentSlug: item.tournament_slug,
           tournamentTitle: item.tournament_title || item.tournament_slug,
@@ -610,57 +701,114 @@ export async function getUserRegistrations(email?: string, userId?: string): Pro
           college: item.college,
           captainName: item.captain_name,
           email: item.email,
-          passId: item.pass_id,
+          passId: pid,
           registeredAt: item.registered_at || new Date().toISOString(),
           userId: item.user_id,
         });
       }
-      REG_CACHE.set(cacheKey, { data: records, expires: Date.now() + 60000 });
-      return records;
     }
   } catch (err) {
-    console.warn('Direct Supabase registrations query error:', err);
+    console.warn('Direct Supabase registrations query notice:', err);
   }
 
-  // 2. Non-blocking Backend API fallback (600ms timeout)
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 600);
-    const apiBase = getApiBaseUrl();
-    const queryParam = userId ? `user_id=${encodeURIComponent(userId)}` : `email=${encodeURIComponent(cleanEmail)}`;
-    const res = await fetch(`${apiBase}/registrations?${queryParam}`, {
-      cache: 'no-store',
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+  // 2. Non-blocking Backend API fallback (if records empty or supplemental)
+  if (records.length === 0) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 800);
+      const apiBase = getApiBaseUrl();
+      const queryParams = new URLSearchParams();
+      if (cleanEmail) queryParams.set('email', cleanEmail);
+      if (cleanUserId) queryParams.set('user_id', cleanUserId);
 
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        for (const item of json.data) {
-          records.push({
-            tournamentSlug: item.tournament_slug || item.tournamentSlug,
-            tournamentTitle: item.tournament_title || item.tournamentTitle || item.tournament_slug,
-            tournamentGame: item.tournament_game || item.tournamentGame || 'Esports',
-            tournamentPrize: item.tournament_prize || item.tournamentPrize || 'Verified Entry',
-            tournamentDate: item.tournament_date || item.tournamentDate || 'Upcoming',
-            tournamentFormat: item.tournament_format || item.tournamentFormat || 'Tournament',
-            tournamentRegion: item.tournament_region || item.tournamentRegion || 'Pan India',
-            tournamentFee: item.tournament_fee || item.tournamentFee || 'Free',
-            teamId: item.team_id || item.teamId || 'team-1',
-            teamName: item.team_name || item.teamName,
-            college: item.college,
-            captainName: item.captain_name || item.captainName,
-            email: item.email,
-            passId: item.pass_id || item.passId,
-            registeredAt: item.registered_at || item.registeredAt || new Date().toISOString(),
-          });
+      const res = await fetch(`${apiBase}/registrations?${queryParams.toString()}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          for (const item of json.data) {
+            const itemEmail = item.email || item.captain_email;
+            const itemUserId = item.user_id || item.userId;
+            if (!recordBelongsToUser(itemEmail, itemUserId)) continue;
+
+            const pid = item.pass_id || item.passId;
+            if (!pid || seenPassIds.has(pid)) continue;
+            seenPassIds.add(pid);
+
+            records.push({
+              tournamentSlug: item.tournament_slug || item.tournamentSlug,
+              tournamentTitle: item.tournament_title || item.tournamentTitle || item.tournament_slug,
+              tournamentGame: item.tournament_game || item.tournamentGame || 'Esports',
+              tournamentPrize: item.tournament_prize || item.tournamentPrize || 'Verified Entry',
+              tournamentDate: item.tournament_date || item.tournamentDate || 'Upcoming',
+              tournamentEndDate: item.tournament_end_date || item.tournamentEndDate,
+              tournamentStatus: item.tournament_status || item.tournamentStatus,
+              tournamentFormat: item.tournament_format || item.tournamentFormat || 'Tournament',
+              tournamentRegion: item.tournament_region || item.tournamentRegion || 'Pan India',
+              tournamentFee: item.tournament_fee || item.tournamentFee || 'Free',
+              teamId: item.team_id || item.teamId || 'team-1',
+              teamName: item.team_name || item.teamName,
+              college: item.college,
+              captainName: item.captain_name || item.captainName,
+              email: item.email,
+              passId: pid,
+              registeredAt: item.registered_at || item.registeredAt || new Date().toISOString(),
+              userId: item.user_id || item.userId,
+              isExpired: typeof item.is_expired === 'boolean' ? item.is_expired : item.isExpired,
+            });
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Enrich tournament details (status, date, end_date) and evaluate isExpired
+  if (records.length > 0) {
+    try {
+      const slugs = Array.from(new Set(records.map((r) => r.tournamentSlug).filter(Boolean)));
+      if (slugs.length > 0) {
+        const { data: tournamentsData } = await supabase
+          .from('tournaments')
+          .select('slug, title, date, end_date, status, game, image, fee')
+          .in('slug', slugs);
+
+        if (tournamentsData && Array.isArray(tournamentsData)) {
+          const tMap = new Map(tournamentsData.map((t) => [(t.slug || '').toLowerCase(), t]));
+          for (const rec of records) {
+            const t = tMap.get((rec.tournamentSlug || '').toLowerCase());
+            if (t) {
+              rec.tournamentTitle = rec.tournamentTitle || t.title;
+              rec.tournamentDate = t.date || rec.tournamentDate;
+              rec.tournamentEndDate = t.end_date;
+              rec.tournamentStatus = t.status;
+              rec.tournamentGame = rec.tournamentGame || t.game;
+              rec.tournamentImage = t.image || rec.tournamentImage;
+              rec.isExpired = isTournamentExpired(t, rec.tournamentDate);
+            } else {
+              rec.isExpired = isTournamentExpired(null, rec.tournamentDate);
+            }
+          }
+        } else {
+          for (const rec of records) {
+            rec.isExpired = isTournamentExpired(null, rec.tournamentDate);
+          }
+        }
+      }
+    } catch (enrichErr) {
+      console.warn('Tournament metadata enrichment notice:', enrichErr);
+      for (const rec of records) {
+        if (rec.isExpired === undefined) {
+          rec.isExpired = isTournamentExpired(null, rec.tournamentDate);
         }
       }
     }
-  } catch {}
+  }
 
-  REG_CACHE.set(cleanEmail, { data: records, expires: Date.now() + 60000 });
+  REG_CACHE.set(cacheKey, { data: records, expires: Date.now() + 60000 });
   return records;
 }
 

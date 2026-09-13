@@ -25,7 +25,9 @@ import {
   CheckCircle2,
   UserCheck,
   ChevronRight,
-  Bell
+  Bell,
+  Clock,
+  Ticket
 } from 'lucide-react';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
@@ -152,20 +154,41 @@ export default function DashboardPage() {
       try {
         setSession(user);
 
-        // Instant optimistic passes render from local cache (0ms)
+        const cleanUserEmail = (user.email || '').trim().toLowerCase();
+        const cleanUserId = String(user.id || '').trim();
+
+        // Instant optimistic passes render from local cache with strict sanitation
         try {
           const cachedPasses = localStorage.getItem(`xenova_passes_${user.email}`);
           if (cachedPasses) {
-            setUserRegistrations(JSON.parse(cachedPasses));
+            const parsed = JSON.parse(cachedPasses);
+            if (Array.isArray(parsed)) {
+              const valid = parsed.filter((r: any) => {
+                const rEmail = (r.email || '').trim().toLowerCase();
+                const rUserId = String(r.userId || r.user_id || '').trim();
+                return (cleanUserEmail && rEmail === cleanUserEmail) ||
+                       (cleanUserId && rUserId && rUserId === cleanUserId);
+              });
+              setUserRegistrations(valid);
+              if (valid.length !== parsed.length) {
+                localStorage.setItem(`xenova_passes_${user.email}`, JSON.stringify(valid));
+              }
+            }
           }
         } catch {}
 
         // Load user registrations strictly from Backend / Supabase
         getUserRegistrations(user.email, user.id).then((regs) => {
           if (regs && Array.isArray(regs)) {
-            setUserRegistrations(regs);
+            const valid = regs.filter((r: any) => {
+              const rEmail = (r.email || '').trim().toLowerCase();
+              const rUserId = String(r.userId || r.user_id || '').trim();
+              return (cleanUserEmail && rEmail === cleanUserEmail) ||
+                     (cleanUserId && rUserId && rUserId === cleanUserId);
+            });
+            setUserRegistrations(valid);
             try {
-              localStorage.setItem(`xenova_passes_${user.email}`, JSON.stringify(regs));
+              localStorage.setItem(`xenova_passes_${user.email}`, JSON.stringify(valid));
             } catch {}
           }
         });
@@ -190,8 +213,19 @@ export default function DashboardPage() {
           setSession(initialUser);
           setXenovaSession(initialUser);
 
+          const cleanUserEmail = email.trim().toLowerCase();
+          const cleanUserId = String(authSession.user.id).trim();
+
           getUserRegistrations(email, authSession.user.id).then((regs) => {
-            if (regs && Array.isArray(regs)) setUserRegistrations(regs);
+            if (regs && Array.isArray(regs)) {
+              const valid = regs.filter((r: any) => {
+                const rEmail = (r.email || '').trim().toLowerCase();
+                const rUserId = String(r.userId || r.user_id || '').trim();
+                return (cleanUserEmail && rEmail === cleanUserEmail) ||
+                       (cleanUserId && rUserId && rUserId === cleanUserId);
+              });
+              setUserRegistrations(valid);
+            }
           });
           loadProfileData(email, initialUser);
         } else {
@@ -370,47 +404,123 @@ export default function DashboardPage() {
           </div>
 
           {/* ═══════════════ REGISTERED TOURNAMENTS SECTION ═══════════════ */}
-          {userRegistrations.length > 0 && (
-            <div className="space-y-6 pt-6 border-t border-zinc-900">
+          <div className="space-y-6 pt-6 border-t border-zinc-900">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Database Verified</span>
                 <h2 className="text-2xl font-black uppercase tracking-tight text-white mt-0.5">My Registered Tournaments</h2>
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {userRegistrations.map((reg, idx) => (
-                  <div
-                    key={reg.passId ? `${reg.passId}-${idx}` : `reg-${reg.tournamentSlug || idx}-${idx}`}
-                    className="p-5 rounded-3xl bg-[#09090b] border border-emerald-500/30 hover:border-emerald-500/60 transition space-y-4 shadow-xl"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-[10px] font-mono font-bold tracking-wider">
-                        {reg.passId}
-                      </span>
-                      <span className="text-[10px] font-bold text-zinc-500 uppercase">
-                        {new Date(reg.registeredAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-                      </span>
-                    </div>
-
-                    <div>
-                      <h4 className="text-base font-black text-white truncate">{reg.tournamentTitle}</h4>
-                      <p className="text-xs text-zinc-400 mt-0.5 truncate">Team: <span className="text-emerald-400 font-bold">{reg.teamName}</span> • {reg.college}</p>
-                    </div>
-
-                    <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between">
-                      <span className="text-[11px] text-zinc-400">Captain: <strong className="text-white">{reg.captainName}</strong></span>
-                      <Link
-                        href={`/registration/${reg.tournamentSlug}/pass?passId=${reg.passId}`}
-                        className="inline-flex items-center gap-1 text-xs font-black text-emerald-400 hover:underline"
-                      >
-                        View Pass →
-                      </Link>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              {userRegistrations.length > 0 && (
+                <span className="self-start sm:self-auto px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-xs font-mono font-bold">
+                  {userRegistrations.length} {userRegistrations.length === 1 ? 'Pass' : 'Passes'} Registered
+                </span>
+              )}
             </div>
-          )}
+
+            {userRegistrations.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {userRegistrations.map((reg, idx) => {
+                  const isExpired = Boolean(
+                    reg.isExpired ||
+                    ['completed', 'concluded', 'ended', 'past'].includes((reg.tournamentStatus || '').toLowerCase())
+                  );
+
+                  return (
+                    <div
+                      key={reg.passId ? `${reg.passId}-${idx}` : `reg-${reg.tournamentSlug || idx}-${idx}`}
+                      className={`p-5 rounded-3xl transition space-y-4 shadow-xl relative overflow-hidden border ${
+                        isExpired
+                          ? 'border-zinc-800/80 hover:border-zinc-700 bg-[#0c0c0e]/90 opacity-85 hover:opacity-100'
+                          : 'border-emerald-500/30 hover:border-emerald-500/60 bg-[#09090b] shadow-[0_0_25px_rgba(16,185,129,0.06)]'
+                      }`}
+                    >
+                      {/* Top Bar with Pass ID and Active/Expired status */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold tracking-wider border ${
+                            isExpired
+                              ? 'bg-zinc-800/80 border-zinc-700 text-zinc-400'
+                              : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
+                          }`}>
+                            {reg.passId}
+                          </span>
+
+                          {isExpired ? (
+                            <span className="px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-400 text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                              <Clock className="w-2.5 h-2.5" /> EXPIRED
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> ACTIVE ENTRY
+                            </span>
+                          )}
+                        </div>
+
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase">
+                          {new Date(reg.registeredAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                        </span>
+                      </div>
+
+                      {/* Tournament title & squad details */}
+                      <div>
+                        <h4 className={`text-base font-black truncate ${isExpired ? 'text-zinc-300' : 'text-white'}`}>
+                          {reg.tournamentTitle}
+                        </h4>
+                        <p className="text-xs text-zinc-400 mt-0.5 truncate">
+                          Team: <span className={isExpired ? 'text-zinc-200 font-bold' : 'text-emerald-400 font-bold'}>{reg.teamName}</span> • {reg.college}
+                        </p>
+                      </div>
+
+                      {/* Event schedule & status summary */}
+                      <div className="flex items-center justify-between text-[11px] pt-1">
+                        <span className="text-zinc-500">
+                          Date: <strong className="text-zinc-300">{reg.tournamentDate || 'Upcoming'}</strong>
+                        </span>
+                        <span className={`font-bold uppercase text-[10px] ${isExpired ? 'text-orange-400/90' : 'text-emerald-400'}`}>
+                          {isExpired ? 'Tournament Concluded' : (reg.tournamentStatus || 'Confirmed Entry')}
+                        </span>
+                      </div>
+
+                      {/* Footer Actions */}
+                      <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between">
+                        <span className="text-[11px] text-zinc-400">
+                          Captain: <strong className="text-white">{reg.captainName}</strong>
+                        </span>
+                        <Link
+                          href={`/registration/${reg.tournamentSlug}/pass?passId=${reg.passId}`}
+                          className={`inline-flex items-center gap-1 text-xs font-black transition hover:underline ${
+                            isExpired ? 'text-zinc-400 hover:text-white' : 'text-emerald-400 hover:text-emerald-300'
+                          }`}
+                        >
+                          {isExpired ? 'View Archived Pass →' : 'View Pass →'}
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-8 rounded-3xl bg-[#09090b] border border-white/10 text-center space-y-4 max-w-xl mx-auto my-4">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
+                  <Ticket className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white uppercase tracking-tight">No Registered Tournaments Yet</h3>
+                  <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                    You haven&apos;t registered for any tournaments on this account yet. Join upcoming collegiate esports leagues to earn your official digital verified entry passes.
+                  </p>
+                </div>
+                <div>
+                  <Link
+                    href="/tournaments"
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-emerald-500 text-zinc-950 font-black text-xs uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20"
+                  >
+                    Explore Live Tournaments →
+                  </Link>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* ═══════════════ 3. ESPORTS GAME LIBRARY GRID ═══════════════ */}
           <div className="space-y-6 pt-4">

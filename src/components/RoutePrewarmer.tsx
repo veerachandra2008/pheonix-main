@@ -2,7 +2,6 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { tournaments } from '@/app/tournaments/data';
 
 /**
  * RoutePrewarmer: Pre-compiles and warms up all platform routes into memory
