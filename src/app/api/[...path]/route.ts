@@ -1222,6 +1222,212 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     }
   }
 
+  // 12. Attendance Update Endpoints (Native Next.js / Supabase Admin Handler)
+  // Handles POST /api/registrations/attendance/update and POST /api/attendance/update / POST /api/attendance/:passId
+  const isAttendanceUpdate =
+    method === 'POST' &&
+    ((mainSegment === 'registrations' && subSegment === 'attendance' && segments[2] === 'update') ||
+     (mainSegment === 'attendance' && (subSegment === 'update' || segments.length === 2)));
+
+  if (isAttendanceUpdate) {
+    try {
+      const body = await req.json().catch(() => ({}));
+      const passId = (body.pass_id || body.passId || (mainSegment === 'attendance' && subSegment !== 'update' ? subSegment : '') || '').trim();
+      const attendanceStatus = (body.attendance_status || body.attendanceStatus || 'PRESENT').toUpperCase();
+      const attendedBy = body.attended_by || body.attendedBy || 'Desk Scanner';
+      const nowIso = body.attended_at || body.attendedAt || new Date().toISOString();
+
+      if (!passId) {
+        return NextResponse.json({ success: false, message: 'pass_id is required.' }, { status: 400 });
+      }
+
+      // 1. Fetch registration from DB using supabaseAdmin
+      const { data: reg } = await supabaseAdmin
+        .from('registrations')
+        .select('*')
+        .ilike('pass_id', passId)
+        .maybeSingle();
+
+      const tournamentSlug = body.tournament_slug || body.tournamentSlug || reg?.tournament_slug || 'tournament';
+      const teamName = body.team_name || body.teamName || reg?.team_name || 'Squad';
+      const captainName = body.captain_name || body.captainName || reg?.captain_name || '';
+      const college = body.college || reg?.college || '';
+      const email = body.email || reg?.email || '';
+
+      // 2. Check if event_attendance row exists
+      const { data: existingAtt } = await supabaseAdmin
+        .from('event_attendance')
+        .select('id, pass_id')
+        .ilike('pass_id', passId)
+        .maybeSingle();
+
+      if (existingAtt) {
+        await supabaseAdmin
+          .from('event_attendance')
+          .update({
+            attendance_status: attendanceStatus,
+            attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
+            attended_by: attendanceStatus === 'NOT_MARKED' ? null : attendedBy,
+            updated_at: nowIso,
+          })
+          .eq('id', existingAtt.id);
+      } else {
+        await supabaseAdmin
+          .from('event_attendance')
+          .insert([{
+            pass_id: passId,
+            tournament_slug: tournamentSlug,
+            team_name: teamName,
+            captain_name: captainName,
+            college: college,
+            email: email,
+            attendance_status: attendanceStatus,
+            attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
+            attended_by: attendanceStatus === 'NOT_MARKED' ? null : attendedBy,
+            updated_at: nowIso,
+          }]);
+      }
+
+      // 3. Also update registrations table
+      await supabaseAdmin
+        .from('registrations')
+        .update({
+          attendance_status: attendanceStatus,
+          attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
+          attended_by: attendanceStatus === 'NOT_MARKED' ? null : attendedBy,
+        })
+        .ilike('pass_id', passId);
+
+      return NextResponse.json({
+        success: true,
+        message: `Attendance updated to ${attendanceStatus}`,
+        pass_id: passId,
+        attendance_status: attendanceStatus,
+        attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
+        attended_by: attendanceStatus === 'NOT_MARKED' ? null : attendedBy,
+      }, { status: 200 });
+    } catch (attErr: any) {
+      console.error('[Attendance Update Exception]', attErr);
+      return NextResponse.json({ success: false, message: attErr?.message || 'Server error' }, { status: 500 });
+    }
+  }
+
+  // 13. Entrance Gate Pass Verification (Native Next.js / Supabase Admin Handler)
+  // GET or POST /api/registrations/verify/:passId
+  if (mainSegment === 'registrations' && subSegment === 'verify') {
+    try {
+      const passId = (segments[2] || '').trim();
+      const url = new URL(req.url);
+      const autoCheckIn = url.searchParams.get('auto_check_in') === 'true';
+      const attendedBy = url.searchParams.get('attended_by') || 'Entrance Gate Scanner';
+      const nowIso = new Date().toISOString();
+
+      if (!passId) {
+        return NextResponse.json({ valid: false, status: 'INVALID', message: 'Empty pass ID provided' }, { status: 200 });
+      }
+
+      const [regRes, attRes] = await Promise.all([
+        supabaseAdmin.from('registrations').select('*').ilike('pass_id', passId).maybeSingle(),
+        supabaseAdmin.from('event_attendance').select('*').ilike('pass_id', passId).maybeSingle(),
+      ]);
+
+      if (!regRes.data) {
+        return NextResponse.json({ valid: false, status: 'INVALID', passId, message: 'Pass ID not found on server' }, { status: 200 });
+      }
+
+      const item = regRes.data;
+      const existingAtt = attRes.data;
+      const currentAttStatus = (existingAtt?.attendance_status || item.attendance_status || 'NOT_MARKED').toUpperCase();
+
+      // Check if tournament date concluded
+      let isExpired = false;
+      let expDate = '';
+      if (item.tournament_slug) {
+        const { data: tData } = await supabaseAdmin.from('tournaments').select('*').eq('slug', item.tournament_slug).maybeSingle();
+        if (tData) {
+          const rawDate = tData.end_date || tData.date || '';
+          const tStatus = (tData.status || '').toLowerCase();
+          if (tStatus === 'completed' || tStatus === 'concluded' || tStatus === 'ended') {
+            isExpired = true;
+            expDate = rawDate || 'Concluded';
+          }
+        }
+      }
+
+      if (isExpired) {
+        return NextResponse.json({
+          valid: false,
+          status: 'EXPIRED',
+          is_expired: true,
+          passId,
+          message: `This ticket pass has expired. Tournament concluded on ${expDate}.`,
+          data: item,
+        }, { status: 200 });
+      }
+
+      if (currentAttStatus === 'PRESENT') {
+        return NextResponse.json({
+          valid: true,
+          status: 'ALREADY_CHECKED_IN',
+          already_checked_in: true,
+          passId,
+          message: 'Participant is already checked in.',
+          data: { ...item, attendance_status: 'PRESENT', attended_at: existingAtt?.attended_at || item.attended_at },
+        }, { status: 200 });
+      }
+
+      if (autoCheckIn) {
+        await Promise.allSettled([
+          supabaseAdmin.from('registrations').update({
+            attendance_status: 'PRESENT',
+            attended_at: nowIso,
+            attended_by: attendedBy,
+          }).ilike('pass_id', passId),
+          existingAtt
+            ? supabaseAdmin.from('event_attendance').update({
+                attendance_status: 'PRESENT',
+                attended_at: nowIso,
+                attended_by: attendedBy,
+                updated_at: nowIso,
+              }).eq('id', existingAtt.id)
+            : supabaseAdmin.from('event_attendance').insert([{
+                pass_id: passId,
+                tournament_slug: item.tournament_slug || 'tournament',
+                team_name: item.team_name || 'Squad',
+                captain_name: item.captain_name || '',
+                college: item.college || '',
+                email: item.email || '',
+                attendance_status: 'PRESENT',
+                attended_at: nowIso,
+                attended_by: attendedBy,
+                updated_at: nowIso,
+              }]),
+        ]);
+
+        return NextResponse.json({
+          valid: true,
+          status: 'VERIFIED',
+          already_checked_in: false,
+          passId,
+          message: 'Participant verified and checked in as PRESENT.',
+          data: { ...item, attendance_status: 'PRESENT', attended_at: nowIso, attended_by: attendedBy },
+        }, { status: 200 });
+      }
+
+      return NextResponse.json({
+        valid: true,
+        status: 'VERIFIED',
+        already_checked_in: false,
+        passId,
+        message: 'Pass verified successfully.',
+        data: { ...item, attendance_status: currentAttStatus },
+      }, { status: 200 });
+    } catch (verErr: any) {
+      console.error('[Verify Pass Exception]', verErr);
+      return NextResponse.json({ valid: false, status: 'INVALID', message: verErr?.message || 'Server error' }, { status: 500 });
+    }
+  }
+
   // Default fallback response: strict 404 instead of fake 200 OK
   return NextResponse.json({
     success: false,
@@ -1251,8 +1457,13 @@ function isNextJsNativeRoute(segments: string[]): boolean {
   }
 
   if (main === 'registrations') {
-    // All registration endpoints should be proxied to Flask backend
+    if (sub === 'attendance' && sub2 === 'update') return true;
+    if (sub === 'verify') return true;
     return false;
+  }
+
+  if (main === 'attendance') {
+    return true;
   }
 
   if (main === 'payments') {

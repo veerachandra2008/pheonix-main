@@ -233,11 +233,13 @@ def get_attendance_by_pass_id(pass_id):
 
 
 @attendance_bp.route('/<pass_id>', methods=['PATCH', 'POST'])
-def update_single_attendance(pass_id):
+@attendance_bp.route('/update', methods=['POST'])
+def update_single_attendance(pass_id=None):
     """
     Update or Upsert attendance status in dedicated 'event_attendance' table.
     Payload:
       {
+        "pass_id": "XPH-...",
         "attendance_status": "PRESENT" | "ABSENT" | "NOT_MARKED",
         "attended_by": "Organizer Name",
         "attended_at": "ISO string (optional)",
@@ -246,6 +248,12 @@ def update_single_attendance(pass_id):
     """
     try:
         data = request.get_json(silent=True) or {}
+        if not pass_id:
+            pass_id = data.get('pass_id') or data.get('passId')
+        if not pass_id:
+            return jsonify({'success': False, 'message': 'pass_id is required.'}), 400
+        clean_pass_id = str(pass_id).strip()
+        pass_id = clean_pass_id
         new_status = (data.get('attendance_status') or data.get('attendanceStatus') or '').strip().upper()
         attended_by = data.get('attended_by') or data.get('attendedBy') or 'Organizer'
         attended_at = data.get('attended_at') or data.get('attendedAt')
@@ -369,7 +377,7 @@ def update_single_attendance(pass_id):
                 supabase.table('event_attendance').update(db_payload).eq('pass_id', pass_id).execute()
             else:
                 supabase.table('event_attendance').insert(db_payload).execute()
-            print(f"✅ Supabase event_attendance saved successfully for {pass_id} -> {new_status}")
+            print(f"[SUCCESS] Supabase event_attendance saved successfully for {pass_id} -> {new_status}")
 
             # Also update registrations table for sync
             try:
@@ -378,11 +386,11 @@ def update_single_attendance(pass_id):
                     'attended_at': attended_at,
                     'attended_by': attended_by
                 }).eq('pass_id', pass_id).execute()
-                print(f"✅ Supabase registrations synchronized for {pass_id} -> {new_status}")
+                print(f"[SUCCESS] Supabase registrations synchronized for {pass_id} -> {new_status}")
             except Exception as reg_up_err:
-                print(f"ℹ️ registrations table update note: {reg_up_err}")
+                print(f"[INFO] registrations table update note: {reg_up_err}")
         except Exception as sb_err:
-            print(f"❌ Supabase event_attendance error: {sb_err}")
+            print(f"[WARN] Supabase event_attendance notice: {sb_err}")
 
         return jsonify({
             'success': True,

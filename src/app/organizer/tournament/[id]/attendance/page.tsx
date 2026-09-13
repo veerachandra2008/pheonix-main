@@ -125,11 +125,10 @@ export default function TournamentAttendancePage() {
 
         // 1. Direct Supabase Query
         try {
-          const { data: sbTourn } = await supabase
-            .from('tournaments')
-            .select('*')
-            .or(`slug.eq.${rawId},id.eq.${rawId}`)
-            .maybeSingle();
+          const isNumeric = /^\d+$/.test(rawId);
+          const { data: sbTourn } = await (isNumeric
+            ? supabase.from('tournaments').select('*').or(`slug.eq.${rawId},id.eq.${rawId}`).maybeSingle()
+            : supabase.from('tournaments').select('*').eq('slug', rawId).maybeSingle());
           if (sbTourn) foundTournament = sbTourn;
         } catch {}
 
@@ -382,7 +381,13 @@ export default function TournamentAttendancePage() {
         item.pass_id,
         newStatus,
         organizerName,
-        { tournament_slug: tournament?.slug || rawId }
+        {
+          tournament_slug: tournament?.slug || rawId,
+          team_name: item.team_name,
+          captain_name: item.captain_name,
+          college: item.college,
+          email: item.email,
+        }
       );
 
       setToastMessage({

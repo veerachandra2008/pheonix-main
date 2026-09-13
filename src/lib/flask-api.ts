@@ -884,10 +884,10 @@ export const flaskApi = {
     const nowIso = new Date().toISOString();
     const organizerName = attendedBy || 'Organizer Desk';
 
-    // 1. Sync to Flask Backend API so in-memory store is updated immediately
+    // 1. Sync to Backend API (Next.js serverless route or Flask)
     try {
       const apiBase = getApiBaseUrl();
-      await fetchWithTimeout(
+      const res = await fetchWithTimeout(
         `${apiBase}/registrations/attendance/update`,
         {
           method: 'POST',
@@ -897,33 +897,76 @@ export const flaskApi = {
             attendance_status: attendanceStatus,
             attended_by: attendanceStatus === 'NOT_MARKED' ? null : organizerName,
             attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
+            ...additionalData,
           }),
         },
-        2000
+        3000
       );
+      if (res.ok) {
+        const json = await res.json().catch(() => ({}));
+        if (json.success) {
+          return { success: true, message: `Updated attendance to ${attendanceStatus}`, status: attendanceStatus };
+        }
+      }
     } catch (apiErr) {
       console.warn('Backend attendance update API notice:', apiErr);
     }
 
-    // 2. Sync to Supabase (event_attendance + registrations tables)
+    // 2. Resilient Direct Supabase Fallback (Check then Update or Insert, avoiding onConflict constraint issues)
     try {
-      const payload = {
-        pass_id: cleanId,
-        attendance_status: attendanceStatus,
-        attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
-        attended_by: attendanceStatus === 'NOT_MARKED' ? null : organizerName,
-        updated_at: nowIso,
-        ...additionalData,
-      };
+      const { data: reg } = await supabase
+        .from('registrations')
+        .select('*')
+        .ilike('pass_id', cleanId)
+        .maybeSingle();
 
-      await Promise.allSettled([
-        supabase.from('event_attendance').upsert(payload, { onConflict: 'pass_id' }),
-        supabase.from('registrations').update({
+      const tournamentSlug = additionalData?.tournament_slug || reg?.tournament_slug || 'tournament';
+      const teamName = additionalData?.team_name || reg?.team_name || 'Team';
+      const captainName = additionalData?.captain_name || reg?.captain_name || '';
+      const college = additionalData?.college || reg?.college || '';
+      const email = additionalData?.email || reg?.email || '';
+
+      const { data: existingAtt } = await supabase
+        .from('event_attendance')
+        .select('id, pass_id')
+        .ilike('pass_id', cleanId)
+        .maybeSingle();
+
+      if (existingAtt) {
+        await supabase
+          .from('event_attendance')
+          .update({
+            attendance_status: attendanceStatus,
+            attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
+            attended_by: attendanceStatus === 'NOT_MARKED' ? null : organizerName,
+            updated_at: nowIso,
+          })
+          .eq('id', existingAtt.id);
+      } else {
+        await supabase
+          .from('event_attendance')
+          .insert([{
+            pass_id: cleanId,
+            tournament_slug: tournamentSlug,
+            team_name: teamName,
+            captain_name: captainName,
+            college: college,
+            email: email,
+            attendance_status: attendanceStatus,
+            attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
+            attended_by: attendanceStatus === 'NOT_MARKED' ? null : organizerName,
+            updated_at: nowIso,
+          }]);
+      }
+
+      await supabase
+        .from('registrations')
+        .update({
           attendance_status: attendanceStatus,
           attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
           attended_by: attendanceStatus === 'NOT_MARKED' ? null : organizerName,
-        }).ilike('pass_id', cleanId),
-      ]);
+        })
+        .ilike('pass_id', cleanId);
     } catch (sbErr) {
       console.warn('Supabase attendance update notice:', sbErr);
     }
@@ -1146,24 +1189,31 @@ export const flaskApi = {
         // If Auto-Check-In, update Supabase atomically
         if (autoCheckIn) {
           try {
-            await Promise.all([
+            await Promise.allSettled([
               supabase.from('registrations').update({
                 attendance_status: 'PRESENT',
                 attended_at: nowIso,
                 attended_by: attendedBy,
-              }).eq('pass_id', pId),
-              supabase.from('event_attendance').upsert({
-                pass_id: pId,
-                tournament_slug: tournamentSlug,
-                team_name: teamName,
-                captain_name: captainName,
-                college,
-                email,
-                attendance_status: 'PRESENT',
-                attended_at: nowIso,
-                attended_by: attendedBy,
-                updated_at: nowIso,
-              }, { onConflict: 'pass_id' }),
+              }).ilike('pass_id', pId),
+              existingAtt
+                ? supabase.from('event_attendance').update({
+                    attendance_status: 'PRESENT',
+                    attended_at: nowIso,
+                    attended_by: attendedBy,
+                    updated_at: nowIso,
+                  }).eq('id', existingAtt.id)
+                : supabase.from('event_attendance').insert([{
+                    pass_id: pId,
+                    tournament_slug: tournamentSlug,
+                    team_name: teamName,
+                    captain_name: captainName,
+                    college,
+                    email,
+                    attendance_status: 'PRESENT',
+                    attended_at: nowIso,
+                    attended_by: attendedBy,
+                    updated_at: nowIso,
+                  }]),
             ]);
           } catch (updateErr) {
             console.warn('Supabase attendance update error:', updateErr);

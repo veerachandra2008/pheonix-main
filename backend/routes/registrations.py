@@ -1093,3 +1093,18 @@ def delete_registration(pass_id):
     except Exception as e:
         print(f"Supabase delete registration warning: {e}")
         return jsonify({'success': True, 'message': f'Registration {pass_id} removed from memory.'}), 200
+
+@registrations_bp.route('/attendance/update', methods=['POST'])
+def update_registration_attendance():
+    """
+    Endpoint for frontend attendance update sync:
+    POST /api/registrations/attendance/update
+    Proxies to attendance route logic.
+    """
+    try:
+        from routes.attendance import update_single_attendance
+        return update_single_attendance()
+    except Exception as e:
+        print(f"Registration attendance update forwarding error: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+

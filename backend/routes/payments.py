@@ -164,8 +164,16 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
 
     # ─── RETRIEVE ORDER METADATA ───
     order_record = IN_MEMORY_PAYMENT_ORDERS.get(order_id) or {}
+    if not order_record and order_id:
+        try:
+            ord_db = supabase.table('payment_orders').select('*').eq('order_id', order_id).execute()
+            if ord_db.data and len(ord_db.data) > 0:
+                order_record = ord_db.data[0]
+        except Exception:
+            pass
+
     tournament_slug = registration_data.get('tournamentSlug') or registration_data.get('tournament_slug') or order_record.get('tournament_slug') or ''
-    if not tournament_slug:
+    if not tournament_slug and order_id and not order_record:
         try:
             ord_db = supabase.table('payment_orders').select('*').eq('order_id', order_id).execute()
             if ord_db.data and len(ord_db.data) > 0:
@@ -190,7 +198,12 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
             print(f"[WARN] Failed to fetch tournament {tournament_slug}: {t_err}")
 
     # ─── FETCH PAYMENT FROM RAZORPAY & VERIFY CAPTURE (RAZORPAY ONLY) ───
-    is_manual_order = (order_record.get('payment_method') or '').upper() == 'MANUAL_UPI'
+    is_manual_order = (
+        (order_record.get('payment_method') or '').upper() == 'MANUAL_UPI' or
+        (registration_data.get('payment_method') or '').upper() == 'MANUAL_UPI' or
+        str(order_id).startswith('UPI_') or
+        str(payment_id).startswith('UPI_')
+    )
     if not bypass_razorpay_fetch and not is_manual_order:
         try:
             razorpay_client = get_razorpay_client()
@@ -400,7 +413,12 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
             print(f"[WARN] Rosters insert warning: {ros_err}")
 
         # Update payment_orders table status if table exists
-        is_manual = (order_record.get('payment_method') or '').upper() == 'MANUAL_UPI'
+        is_manual = (
+            (order_record.get('payment_method') or '').upper() == 'MANUAL_UPI' or
+            (registration_data.get('payment_method') or '').upper() == 'MANUAL_UPI' or
+            str(order_id).startswith('UPI_') or
+            str(payment_id).startswith('UPI_')
+        )
         target_status = 'VERIFIED' if is_manual else 'PAID'
         server_now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
@@ -422,7 +440,12 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
         print(f"[WARN] Supabase registration persistence warning: {sb_err}")
 
     # Mark memory order as paid / verified
-    is_manual = (order_record.get('payment_method') or '').upper() == 'MANUAL_UPI'
+    is_manual = (
+        (order_record.get('payment_method') or '').upper() == 'MANUAL_UPI' or
+        (registration_data.get('payment_method') or '').upper() == 'MANUAL_UPI' or
+        str(order_id).startswith('UPI_') or
+        str(payment_id).startswith('UPI_')
+    )
     target_status = 'VERIFIED' if is_manual else 'PAID'
     server_now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
@@ -1354,8 +1377,9 @@ def verify_manual_upi_payment(payment_id):
             'status': 'DUPLICATE_REVIEW'
         }), 409
 
-    # Idempotent safe already-verified
-    if current_status == 'VERIFIED':
+    allow_paid_recovery = False
+    # Idempotent safe already-verified or already-paid
+    if current_status in ('VERIFIED', 'PAID'):
         existing_pass = None
         try:
             supabase = get_supabase_client()
@@ -1369,14 +1393,32 @@ def verify_manual_upi_payment(payment_id):
                 if rec.get('order_id') == order_id or rec.get('payment_id') == order_id:
                     existing_pass = pk
                     break
-        return jsonify({
-            'success': True,
-            'already_verified': True,
-            'message': 'Payment is already verified.',
-            'order_id': order_id,
-            'status': 'VERIFIED',
-            'passId': existing_pass
-        }), 200
+        if existing_pass:
+            # Payment order is verified and registration exists -> return idempotent 200 OK
+            try:
+                supabase = get_supabase_client()
+                supabase.table('payment_orders').update({
+                    'status': 'VERIFIED',
+                    'updated_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+                }).eq('order_id', order_id).execute()
+            except Exception:
+                pass
+            if order_id in IN_MEMORY_PAYMENT_ORDERS:
+                IN_MEMORY_PAYMENT_ORDERS[order_id]['status'] = 'VERIFIED'
+            return jsonify({
+                'success': True,
+                'already_verified': True,
+                'message': 'Payment is already verified.',
+                'order_id': order_id,
+                'status': 'VERIFIED',
+                'passId': existing_pass
+            }), 200
+        else:
+            # Order was marked PAID or VERIFIED, but registration was never finalized (stranded)
+            # Allow recovery finalization
+            print(f"[RECOVERY] Payment {order_id} has status '{current_status}' without registration. Allowing finalization recovery.")
+            allow_paid_recovery = True
+            current_status = 'PENDING'
 
     allow_processing_recovery = False
     # If currently processing by another concurrent request, check registration and wait for completion
@@ -1545,14 +1587,27 @@ def verify_manual_upi_payment(payment_id):
         verifier_id = str(user.get('id') or user.get('email'))
         supabase = get_supabase_client()
 
-        # 1. Atomic claim in Supabase: PENDING -> PROCESSING (or recover stranded PROCESSING)
+        # 1. Atomic claim in Supabase: PENDING -> PROCESSING (or recover stranded PROCESSING/PAID)
         claimed_db = False
         try:
-            claim_res = supabase.table('payment_orders').update({
-                'status': 'PROCESSING',
-                'verified_by': verifier_id,
-                'updated_at': server_time
-            }).eq('order_id', order_id).eq('status', 'PENDING').execute()
+            if allow_paid_recovery:
+                claim_res = supabase.table('payment_orders').update({
+                    'status': 'PROCESSING',
+                    'verified_by': verifier_id,
+                    'updated_at': server_time
+                }).eq('order_id', order_id).eq('status', 'PENDING').execute()
+                if not (claim_res.data and len(claim_res.data) > 0):
+                    claim_res = supabase.table('payment_orders').update({
+                        'status': 'PROCESSING',
+                        'verified_by': verifier_id,
+                        'updated_at': server_time
+                    }).eq('order_id', order_id).eq('status', 'PAID').execute()
+            else:
+                claim_res = supabase.table('payment_orders').update({
+                    'status': 'PROCESSING',
+                    'verified_by': verifier_id,
+                    'updated_at': server_time
+                }).eq('order_id', order_id).eq('status', 'PENDING').execute()
 
             if claim_res.data and len(claim_res.data) > 0:
                 claimed_db = True
@@ -1570,7 +1625,7 @@ def verify_manual_upi_payment(payment_id):
                 fresh = supabase.table('payment_orders').select('*').eq('order_id', order_id).execute()
                 if fresh.data and len(fresh.data) > 0:
                     fresh_status = (fresh.data[0].get('status') or '').upper()
-                    if fresh_status == 'VERIFIED':
+                    if fresh_status in ('VERIFIED', 'PAID'):
                         existing_pass = None
                         try:
                             r_chk = supabase.table('registrations').select('pass_id').or_(f"order_id.eq.{order_id},payment_id.eq.{order_id}").execute()
@@ -1583,14 +1638,15 @@ def verify_manual_upi_payment(payment_id):
                                 if rec.get('order_id') == order_id or rec.get('payment_id') == order_id:
                                     existing_pass = pk
                                     break
-                        return jsonify({
-                            'success': True,
-                            'already_verified': True,
-                            'message': 'Payment is already verified.',
-                            'order_id': order_id,
-                            'status': 'VERIFIED',
-                            'passId': existing_pass
-                        }), 200
+                        if existing_pass:
+                            return jsonify({
+                                'success': True,
+                                'already_verified': True,
+                                'message': 'Payment is already verified.',
+                                'order_id': order_id,
+                                'status': 'VERIFIED',
+                                'passId': existing_pass
+                            }), 200
                     elif fresh_status == 'REJECTED':
                         return jsonify({
                             'success': False,
@@ -2165,7 +2221,9 @@ def list_manual_upi_orders():
                 if oid not in orders_map:
                     orders_map[oid] = dict(o)
                 else:
-                    orders_map[oid].update(o)
+                    for k, v in o.items():
+                        if k not in orders_map[oid]:
+                            orders_map[oid][k] = v
 
     all_orders = list(orders_map.values())
     all_orders.sort(key=lambda x: str(x.get('created_at') or ''), reverse=True)
