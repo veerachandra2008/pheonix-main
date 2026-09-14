@@ -533,9 +533,14 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
                   <div className="rounded-2xl border border-white/10 bg-[#09090b] p-5 space-y-1">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Slots Cap</span>
-                      {typeof tournament.remainingSlots === 'number' && (
+                      {!countdown.isClosed && typeof tournament.remainingSlots === 'number' && (
                         <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${tournament.remainingSlots <= 10 ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
                           {tournament.remainingSlots > 0 ? `${tournament.remainingSlots} Left` : 'Full'}
+                        </span>
+                      )}
+                      {countdown.isClosed && (
+                        <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                          Closed
                         </span>
                       )}
                     </div>

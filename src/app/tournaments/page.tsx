@@ -482,36 +482,46 @@ function TournamentsContent() {
                               </span>
                             </div>
 
-                            {/* Filled Seats & Remaining Slots HUD */}
-                            <div className="space-y-1.5 pt-1">
-                              <div className="flex items-center justify-between text-[11px] font-semibold">
-                                <span className="text-zinc-300 flex items-center gap-1">
-                                  <span className="text-emerald-400 font-black">{registeredCount}</span>
-                                  <span className="text-zinc-400">/{totalSlots} Teams Registered</span>
-                                </span>
-                                <span className={`font-black text-[10px] px-2 py-0.5 rounded-md uppercase tracking-wider ${
-                                  remainingSlots === 0
-                                    ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                                    : remainingSlots <= 10
-                                      ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                                      : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                                }`}>
-                                  {remainingSlots > 0 ? `${remainingSlots} Slots Left` : 'Slots Full'}
-                                </span>
-                              </div>
+                            {/* Filled Seats & Remaining Slots HUD - Hidden if registrations are closed */}
+                            {!countdown.isClosed && !tournament.is_registration_closed && tournament.status?.toLowerCase() !== 'closed' ? (
+                              <div className="space-y-1.5 pt-1">
+                                <div className="flex items-center justify-between text-[11px] font-semibold">
+                                  <span className="text-zinc-300 flex items-center gap-1">
+                                    <span className="text-emerald-400 font-black">{registeredCount}</span>
+                                    <span className="text-zinc-400">/{totalSlots} Teams Registered</span>
+                                  </span>
+                                  <span className={`font-black text-[10px] px-2 py-0.5 rounded-md uppercase tracking-wider ${
+                                    remainingSlots === 0
+                                      ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                                      : remainingSlots <= 10
+                                        ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                                        : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                  }`}>
+                                    {remainingSlots > 0 ? `${remainingSlots} Slots Left` : 'Slots Full'}
+                                  </span>
+                                </div>
 
-                              <div className="h-2 overflow-hidden bg-zinc-900 rounded-full border border-white/10">
-                                <div
-                                  className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 rounded-full transition-all duration-500"
-                                  style={{ width: `${filledPct}%` }}
-                                />
-                              </div>
+                                <div className="h-2 overflow-hidden bg-zinc-900 rounded-full border border-white/10">
+                                  <div
+                                    className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 rounded-full transition-all duration-500"
+                                    style={{ width: `${filledPct}%` }}
+                                  />
+                                </div>
 
-                              <div className="flex items-center justify-between text-[10px] font-black uppercase text-zinc-400">
-                                <span>{filledPct}% Slots Reserved</span>
-                                <span className="text-emerald-400 font-bold">{tournament.fee}</span>
+                                <div className="flex items-center justify-between text-[10px] font-black uppercase text-zinc-400">
+                                  <span>{filledPct}% Slots Reserved</span>
+                                  <span className="text-emerald-400 font-bold">{tournament.fee}</span>
+                                </div>
                               </div>
-                            </div>
+                            ) : (
+                              <div className="flex items-center justify-between text-[11px] font-bold text-zinc-500 pt-1">
+                                <span className="inline-flex items-center gap-1.5 text-zinc-500 text-[10px] uppercase font-mono tracking-wider">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                                  Registrations Closed
+                                </span>
+                                <span className="text-zinc-400 font-bold">{tournament.fee}</span>
+                              </div>
+                            )}
                           </>
                         );
                       })()}
