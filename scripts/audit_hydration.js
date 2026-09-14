@@ -45,8 +45,13 @@ async function checkRoutes() {
   // Check if server is already running
   const alreadyRunning = await waitForServer(`${baseUrl}/`, 2);
   if (!alreadyRunning) {
-    const serverPath = path.resolve(__dirname, '..', '.next', 'standalone', 'pheonix-main', 'server.js');
-    if (fs.existsSync(serverPath)) {
+    const candidatePaths = [
+      path.resolve(__dirname, '..', '.next', 'standalone', 'xenova', 'server.js'),
+      path.resolve(__dirname, '..', '.next', 'standalone', 'pheonix-main', 'server.js'),
+      path.resolve(__dirname, '..', '.next', 'standalone', 'server.js'),
+    ];
+    const serverPath = candidatePaths.find(p => fs.existsSync(p));
+    if (serverPath) {
       serverProcess = spawn(process.execPath, [serverPath], {
         cwd: path.resolve(__dirname, '..'),
         stdio: 'ignore',
