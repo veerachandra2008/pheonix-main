@@ -135,10 +135,32 @@ def enrich_tournament_response(tournament):
     tournament['is_registration_closed'] = compute_registration_closed(tournament)
     return tournament
 
+def parse_total_slots(teams_val):
+    teams_str = str(teams_val or '64')
+    if '/' in teams_str:
+        try:
+            return int(teams_str.split('/')[1])
+        except Exception:
+            return 64
+    import re
+    digits = re.findall(r'\d+', teams_str)
+    return int(digits[0]) if digits else 64
+
+def enrich_slots_data(tournament, reg_count):
+    total = parse_total_slots(tournament.get('teams'))
+    rem = max(0, total - reg_count)
+    pct = min(100, max(0, round((reg_count / total) * 100))) if total > 0 else (tournament.get('filled') or 0)
+    tournament['registered_count'] = reg_count
+    tournament['remaining_slots'] = rem
+    tournament['total_slots'] = total
+    if reg_count > 0 or not tournament.get('filled'):
+        tournament['filled'] = pct
+    return tournament
+
 @tournaments_bp.route('', methods=['GET'])
 @tournaments_bp.route('/', methods=['GET'])
 def get_tournaments():
-    """Fetch all tournaments with dynamic is_registration_closed evaluation"""
+    """Fetch all tournaments with dynamic is_registration_closed evaluation and live slots counts"""
     cached = api_cache.get('tournaments:all')
     if cached is not None:
         enriched = [enrich_tournament_response(t) for t in cached]
@@ -148,6 +170,21 @@ def get_tournaments():
         supabase = get_supabase_client()
         res = supabase.table('tournaments').select('*').execute()
         if res.data is not None:
+            reg_counts = {}
+            try:
+                reg_res = supabase.table('registrations').select('tournament_slug').execute()
+                if reg_res.data:
+                    for r in reg_res.data:
+                        s = (r.get('tournament_slug') or '').strip().lower()
+                        if s:
+                            reg_counts[s] = reg_counts.get(s, 0) + 1
+            except Exception as reg_err:
+                print(f"Notice querying registration counts: {reg_err}")
+
+            for t in res.data:
+                slug = (t.get('slug') or '').strip().lower()
+                enrich_slots_data(t, reg_counts.get(slug, 0))
+
             api_cache.set('tournaments:all', res.data, ttl_seconds=20)
             enriched = [enrich_tournament_response(t) for t in res.data]
             return jsonify({'success': True, 'data': enriched}), 200
@@ -159,7 +196,7 @@ def get_tournaments():
 
 @tournaments_bp.route('/<slug>', methods=['GET'])
 def get_tournament_by_slug(slug):
-    """Fetch a single tournament by slug with server-calculated is_registration_closed"""
+    """Fetch a single tournament by slug with server-calculated is_registration_closed and live slots"""
     clean_slug = str(slug or '').strip().lower()
     if not clean_slug:
         return jsonify({'success': False, 'message': 'Tournament slug is required.'}), 400
@@ -168,7 +205,15 @@ def get_tournament_by_slug(slug):
         supabase = get_supabase_client()
         res = supabase.table('tournaments').select('*').ilike('slug', clean_slug).execute()
         if res.data and len(res.data) > 0:
-            return jsonify({'success': True, 'data': enrich_tournament_response(res.data[0])}), 200
+            t = res.data[0]
+            reg_count = 0
+            try:
+                reg_res = supabase.table('registrations').select('id').eq('tournament_slug', t.get('slug')).execute()
+                reg_count = len(reg_res.data) if reg_res.data else 0
+            except Exception as reg_err:
+                print(f"Notice querying tournament registrations: {reg_err}")
+            enrich_slots_data(t, reg_count)
+            return jsonify({'success': True, 'data': enrich_tournament_response(t)}), 200
     except Exception as e:
         print(f"Supabase error fetching tournament {slug}: {e}")
 
@@ -392,6 +437,20 @@ def register_tournament():
             save_tournament_rosters_to_db(supabase, pass_id, data.get('tournamentSlug') or 'tournament', data.get('teamName') or 'Team', data.get('college') or '', players)
         except Exception as att_err:
             print(f"event_attendance / tournament_rosters initial insert notice: {att_err}")
+
+        # Update filled count in tournaments table and clear cache
+        try:
+            t_slug = data.get('tournamentSlug') or data.get('tournament_slug')
+            if t_slug:
+                reg_check = supabase.table('registrations').select('id').eq('tournament_slug', t_slug).execute()
+                if reg_check.data:
+                    new_count = len(reg_check.data)
+                    total = parse_total_slots(tournament.get('teams') if tournament else '64')
+                    new_filled = min(100, max(0, round((new_count / total) * 100))) if total > 0 else 0
+                    supabase.table('tournaments').update({'filled': new_filled}).eq('slug', t_slug).execute()
+                    api_cache.clear_prefix('tournaments')
+        except Exception as update_err:
+            print(f"Tournament filled percentage update notice: {update_err}")
 
         return jsonify({'success': True, 'data': res.data, 'passId': pass_id}), 201
     except Exception as e:

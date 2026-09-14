@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { CalendarDays, MapPin, Search, SlidersHorizontal, Trophy, Users, Zap, Flame, ShieldCheck, ArrowRight, Clock, X } from 'lucide-react';
 import { gameFilters, statusFilters } from './data';
-import { getAllTournaments, getUserTournamentStatuses, getRegistrationCountdown } from '@/lib/tournaments-db';
+import { getAllTournaments, getUserTournamentStatuses, getRegistrationCountdown, getTournamentRegistrationCounts } from '@/lib/tournaments-db';
 import { getXenovaSession } from '@/lib/auth-session';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
@@ -95,14 +95,33 @@ function TournamentsContent() {
       } catch {}
 
       // Fast non-blocking fetch: Load real database tournaments immediately (<50ms)
-      getAllTournaments()
-        .then((allTournaments) => {
+      Promise.all([
+        getAllTournaments(),
+        getTournamentRegistrationCounts(),
+      ])
+        .then(([allTournaments, countsMap]) => {
           if (!isMounted) return;
           if (Array.isArray(allTournaments)) {
-            setTournamentsList(allTournaments);
-            cachedTournamentsMemory = allTournaments;
+            const enriched = allTournaments.map((t) => {
+              const slug = (t.slug || '').trim().toLowerCase();
+              const liveCount = countsMap[slug];
+              if (typeof liveCount === 'number') {
+                const total = t.totalSlots || 64;
+                const rem = Math.max(0, total - liveCount);
+                const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((liveCount / total) * 100))) : t.filled;
+                return {
+                  ...t,
+                  registeredCount: liveCount,
+                  remainingSlots: rem,
+                  filled: pct,
+                };
+              }
+              return t;
+            });
+            setTournamentsList(enriched);
+            cachedTournamentsMemory = enriched;
             try {
-              localStorage.setItem('xenova_tournaments_cache', JSON.stringify(allTournaments));
+              localStorage.setItem('xenova_tournaments_cache', JSON.stringify(enriched));
             } catch {}
           }
           setIsLoadingTournaments(false);
@@ -434,38 +453,90 @@ function TournamentsContent() {
                       </div>
 
                       {/* Key Stats HUD */}
-                      <div className="grid grid-cols-2 gap-2 text-xs text-zinc-300 bg-black/70 p-3.5 rounded-2xl border border-white/10">
-                        <span className="inline-flex items-center gap-1.5 truncate">
-                          <CalendarDays className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                          {tournament.date}
-                        </span>
-                        <span className="inline-flex items-center gap-1.5 truncate">
-                          <MapPin className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                          {tournament.region}
-                        </span>
-                        <span className="inline-flex items-center gap-1.5 truncate">
-                          <Trophy className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                          {tournament.format}
-                        </span>
-                        <span className="inline-flex items-center gap-1.5 truncate">
-                          <Users className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                          {tournament.players !== undefined ? `${tournament.players?.length || 0} Players` : `${tournament.teams} Teams`}
-                        </span>
-                      </div>
+                      {(() => {
+                        const rawTeams = String(tournament.teams || '64').trim();
+                        let totalSlots = tournament.totalSlots || 64;
+                        if (!tournament.totalSlots) {
+                          if (rawTeams.includes('/')) {
+                            totalSlots = parseInt(rawTeams.split('/')[1], 10) || 64;
+                          } else {
+                            const digits = rawTeams.match(/\d+/);
+                            if (digits) totalSlots = parseInt(digits[0], 10) || 64;
+                          }
+                        }
 
-                      {/* Filled Seats Progress Bar */}
-                      <div className="space-y-1.5 pt-1">
-                        <div className="h-2 overflow-hidden bg-zinc-900 rounded-full border border-white/10">
-                          <div
-                            className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 rounded-full transition-all duration-500"
-                            style={{ width: `${tournament.filled}%` }}
-                          />
-                        </div>
-                        <div className="flex items-center justify-between text-[10px] font-black uppercase text-zinc-400">
-                          <span>{tournament.filled}% Slots Reserved</span>
-                          <span className="text-emerald-400">{tournament.fee}</span>
-                        </div>
-                      </div>
+                        const registeredCount = typeof tournament.registeredCount === 'number'
+                          ? tournament.registeredCount
+                          : (typeof tournament.registered_count === 'number'
+                              ? tournament.registered_count
+                              : Math.round(((tournament.filled || 0) / 100) * totalSlots));
+
+                        const remainingSlots = typeof tournament.remainingSlots === 'number'
+                          ? tournament.remainingSlots
+                          : Math.max(0, totalSlots - registeredCount);
+
+                        const filledPct = typeof tournament.filled === 'number' && tournament.filled > 0
+                          ? tournament.filled
+                          : (totalSlots > 0 ? Math.min(100, Math.max(0, Math.round((registeredCount / totalSlots) * 100))) : 0);
+
+                        const teamDisplay = tournament.players !== undefined
+                          ? `${tournament.players?.length || 0} Players`
+                          : (/teams?/i.test(rawTeams) ? rawTeams : `${rawTeams} Teams`);
+
+                        return (
+                          <>
+                            <div className="grid grid-cols-2 gap-2 text-xs text-zinc-300 bg-black/70 p-3.5 rounded-2xl border border-white/10">
+                              <span className="inline-flex items-center gap-1.5 truncate">
+                                <CalendarDays className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                                {tournament.date}
+                              </span>
+                              <span className="inline-flex items-center gap-1.5 truncate">
+                                <MapPin className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                                {tournament.region}
+                              </span>
+                              <span className="inline-flex items-center gap-1.5 truncate">
+                                <Trophy className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                                {tournament.format}
+                              </span>
+                              <span className="inline-flex items-center gap-1.5 truncate">
+                                <Users className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                                {teamDisplay}
+                              </span>
+                            </div>
+
+                            {/* Filled Seats & Remaining Slots HUD */}
+                            <div className="space-y-1.5 pt-1">
+                              <div className="flex items-center justify-between text-[11px] font-semibold">
+                                <span className="text-zinc-300 flex items-center gap-1">
+                                  <span className="text-emerald-400 font-black">{registeredCount}</span>
+                                  <span className="text-zinc-400">/{totalSlots} Teams Registered</span>
+                                </span>
+                                <span className={`font-black text-[10px] px-2 py-0.5 rounded-md uppercase tracking-wider ${
+                                  remainingSlots === 0
+                                    ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                                    : remainingSlots <= 10
+                                      ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                                      : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                }`}>
+                                  {remainingSlots > 0 ? `${remainingSlots} Slots Left` : 'Slots Full'}
+                                </span>
+                              </div>
+
+                              <div className="h-2 overflow-hidden bg-zinc-900 rounded-full border border-white/10">
+                                <div
+                                  className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 rounded-full transition-all duration-500"
+                                  style={{ width: `${filledPct}%` }}
+                                />
+                              </div>
+
+                              <div className="flex items-center justify-between text-[10px] font-black uppercase text-zinc-400">
+                                <span>{filledPct}% Slots Reserved</span>
+                                <span className="text-emerald-400 font-bold">{tournament.fee}</span>
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
 

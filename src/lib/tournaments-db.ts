@@ -506,7 +506,29 @@ export async function fetchFreshTournaments(): Promise<Tournament[]> {
       .order('id', { ascending: true });
 
     if (!error && data && Array.isArray(data)) {
-      const mapped = data.map(mapSupabaseTournament);
+      let countsMap: Record<string, number> = {};
+      try {
+        countsMap = await getTournamentRegistrationCounts();
+      } catch {}
+
+      const mapped = data.map((item) => {
+        const base = mapSupabaseTournament(item);
+        const slug = (base.slug || '').trim().toLowerCase();
+        if (typeof countsMap[slug] === 'number') {
+          const liveCount = countsMap[slug];
+          const total = base.totalSlots || 64;
+          const rem = Math.max(0, total - liveCount);
+          const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((liveCount / total) * 100))) : base.filled;
+          return {
+            ...base,
+            registeredCount: liveCount,
+            remainingSlots: rem,
+            filled: pct,
+          };
+        }
+        return base;
+      });
+
       memoryTournamentsCache = mapped;
       if (typeof window !== 'undefined') {
         try {
@@ -533,7 +555,29 @@ export async function fetchFreshTournaments(): Promise<Tournament[]> {
     if (res.ok) {
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
-        const mapped = json.data.map(mapSupabaseTournament);
+        let countsMap: Record<string, number> = {};
+        try {
+          countsMap = await getTournamentRegistrationCounts();
+        } catch {}
+
+        const mapped = json.data.map((item: any) => {
+          const base = mapSupabaseTournament(item);
+          const slug = (base.slug || '').trim().toLowerCase();
+          if (typeof countsMap[slug] === 'number') {
+            const liveCount = countsMap[slug];
+            const total = base.totalSlots || 64;
+            const rem = Math.max(0, total - liveCount);
+            const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((liveCount / total) * 100))) : base.filled;
+            return {
+              ...base,
+              registeredCount: liveCount,
+              remainingSlots: rem,
+              filled: pct,
+            };
+          }
+          return base;
+        });
+
         memoryTournamentsCache = mapped;
         if (typeof window !== 'undefined') {
           try {
@@ -812,7 +856,44 @@ export async function getUserRegistrations(email?: string, userId?: string): Pro
   return records;
 }
 
+export async function getTournamentRegistrationCounts(): Promise<Record<string, number>> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const res = await fetch('/api/tournaments/stats', { cache: 'no-store' });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && json.counts) {
+        return json.counts;
+      }
+    }
+  } catch {}
+  return {};
+}
+
 function mapSupabaseTournament(item: any): Tournament {
+  const teamsStr = String(item.teams || '64 Teams').trim();
+  let totalSlots = 64;
+  let parsedRegistered = 0;
+
+  if (teamsStr.includes('/')) {
+    const parts = teamsStr.split('/');
+    parsedRegistered = parseInt(parts[0], 10) || 0;
+    totalSlots = parseInt(parts[1], 10) || 64;
+  } else {
+    const digits = teamsStr.match(/\d+/);
+    if (digits) totalSlots = parseInt(digits[0], 10) || 64;
+  }
+
+  const rawFilled = typeof item.filled === 'number' ? item.filled : 0;
+  const registered = typeof item.registered_count === 'number'
+    ? item.registered_count
+    : (typeof item.registeredCount === 'number'
+        ? item.registeredCount
+        : (parsedRegistered > 0 ? parsedRegistered : (rawFilled > 0 ? Math.round((rawFilled / 100) * totalSlots) : 0)));
+
+  const remaining = Math.max(0, totalSlots - registered);
+  const filledPct = totalSlots > 0 ? Math.min(100, Math.max(0, Math.round((registered / totalSlots) * 100))) : rawFilled;
+
   return {
     slug: item.slug,
     title: item.title || item.name,
@@ -826,12 +907,15 @@ function mapSupabaseTournament(item: any): Tournament {
     region: item.region || 'Pan India',
     format: item.format || 'Tournament',
     teams: item.teams || '64/64',
-    filled: typeof item.filled === 'number' ? item.filled : 50,
+    filled: filledPct,
     fee: item.fee || 'Free',
     registration_deadline: item.registration_deadline || null,
     is_registration_closed: typeof item.is_registration_closed === 'boolean'
       ? item.is_registration_closed
       : (item.registration_deadline ? new Date(item.registration_deadline).getTime() <= Date.now() : false),
+    registeredCount: registered,
+    remainingSlots: remaining,
+    totalSlots: totalSlots,
   };
 }
 

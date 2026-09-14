@@ -531,8 +531,25 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
                     <p className="text-sm font-black text-emerald-400">Exactly 4 Players</p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-[#09090b] p-5 space-y-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Slots Cap</span>
-                    <p className="text-sm font-black text-white">{tournament.teams || '64 Teams'}</p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Slots Cap</span>
+                      {typeof tournament.remainingSlots === 'number' && (
+                        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${tournament.remainingSlots <= 10 ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                          {tournament.remainingSlots > 0 ? `${tournament.remainingSlots} Left` : 'Full'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm font-black text-white">
+                      {(() => {
+                        const rawTeams = String(tournament.teams || '64').trim();
+                        return /teams?/i.test(rawTeams) ? rawTeams : `${rawTeams} Teams`;
+                      })()}
+                      {typeof tournament.registeredCount === 'number' && tournament.registeredCount > 0 && (
+                        <span className="text-xs text-zinc-400 font-normal ml-1.5">
+                          ({tournament.registeredCount} joined)
+                        </span>
+                      )}
+                    </p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-[#09090b] p-5 space-y-1">
                     <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Anti-Cheat</span>
