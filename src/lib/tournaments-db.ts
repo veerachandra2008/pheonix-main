@@ -514,19 +514,15 @@ export async function fetchFreshTournaments(): Promise<Tournament[]> {
       const mapped = data.map((item) => {
         const base = mapSupabaseTournament(item);
         const slug = (base.slug || '').trim().toLowerCase();
-        if (typeof countsMap[slug] === 'number') {
-          const liveCount = countsMap[slug];
-          const total = base.totalSlots || 64;
-          const rem = Math.max(0, total - liveCount);
-          const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((liveCount / total) * 100))) : base.filled;
-          return {
-            ...base,
-            registeredCount: liveCount,
-            remainingSlots: rem,
-            filled: pct,
-          };
-        }
-        return base;
+        const liveCount = countsMap[slug];
+        const stats = parseTournamentSlotStats(base, liveCount);
+        return {
+          ...base,
+          totalSlots: stats.totalSlots,
+          registeredCount: stats.registered,
+          remainingSlots: stats.remaining,
+          filled: stats.filledPct,
+        };
       });
 
       memoryTournamentsCache = mapped;
@@ -563,19 +559,15 @@ export async function fetchFreshTournaments(): Promise<Tournament[]> {
         const mapped = json.data.map((item: any) => {
           const base = mapSupabaseTournament(item);
           const slug = (base.slug || '').trim().toLowerCase();
-          if (typeof countsMap[slug] === 'number') {
-            const liveCount = countsMap[slug];
-            const total = base.totalSlots || 64;
-            const rem = Math.max(0, total - liveCount);
-            const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((liveCount / total) * 100))) : base.filled;
-            return {
-              ...base,
-              registeredCount: liveCount,
-              remainingSlots: rem,
-              filled: pct,
-            };
-          }
-          return base;
+          const liveCount = countsMap[slug];
+          const stats = parseTournamentSlotStats(base, liveCount);
+          return {
+            ...base,
+            totalSlots: stats.totalSlots,
+            registeredCount: stats.registered,
+            remainingSlots: stats.remaining,
+            filled: stats.filledPct,
+          };
         });
 
         memoryTournamentsCache = mapped;
@@ -870,29 +862,54 @@ export async function getTournamentRegistrationCounts(): Promise<Record<string, 
   return {};
 }
 
-function mapSupabaseTournament(item: any): Tournament {
-  const teamsStr = String(item.teams || '64 Teams').trim();
-  let totalSlots = 64;
-  let parsedRegistered = 0;
+export function parseTournamentTotalSlots(teams: any): number {
+  const str = String(teams || '').trim();
+  if (str.includes('/')) {
+    const parts = str.split('/');
+    const denom = parseInt(parts[1], 10);
+    if (!isNaN(denom) && denom > 0) return denom;
+  }
+  const match = str.match(/\d+/);
+  if (match) {
+    const parsed = parseInt(match[0], 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return 64;
+}
 
-  if (teamsStr.includes('/')) {
-    const parts = teamsStr.split('/');
-    parsedRegistered = parseInt(parts[0], 10) || 0;
-    totalSlots = parseInt(parts[1], 10) || 64;
+export function parseTournamentSlotStats(tournament: any, liveRegisteredCount?: number) {
+  const totalSlots = parseTournamentTotalSlots(tournament?.totalSlots || tournament?.teams);
+
+  // Registered teams count
+  let registered = 0;
+  if (typeof liveRegisteredCount === 'number') {
+    registered = liveRegisteredCount;
+  } else if (typeof tournament?.registeredCount === 'number') {
+    registered = tournament.registeredCount;
+  } else if (typeof tournament?.registered_count === 'number') {
+    registered = tournament.registered_count;
   } else {
-    const digits = teamsStr.match(/\d+/);
-    if (digits) totalSlots = parseInt(digits[0], 10) || 64;
+    const str = String(tournament?.teams || '').trim();
+    if (str.includes('/')) {
+      registered = parseInt(str.split('/')[0], 10) || 0;
+    } else if (typeof tournament?.filled === 'number' && tournament.filled > 0) {
+      registered = Math.round((tournament.filled / 100) * totalSlots);
+    }
   }
 
-  const rawFilled = typeof item.filled === 'number' ? item.filled : 0;
-  const registered = typeof item.registered_count === 'number'
-    ? item.registered_count
-    : (typeof item.registeredCount === 'number'
-        ? item.registeredCount
-        : (parsedRegistered > 0 ? parsedRegistered : (rawFilled > 0 ? Math.round((rawFilled / 100) * totalSlots) : 0)));
-
   const remaining = Math.max(0, totalSlots - registered);
-  const filledPct = totalSlots > 0 ? Math.min(100, Math.max(0, Math.round((registered / totalSlots) * 100))) : rawFilled;
+  const filledPct = totalSlots > 0 ? Math.min(100, Math.max(0, Math.round((registered / totalSlots) * 100))) : 0;
+
+  return {
+    totalSlots,
+    registered,
+    remaining,
+    filledPct,
+  };
+}
+
+function mapSupabaseTournament(item: any): Tournament {
+  const stats = parseTournamentSlotStats(item);
 
   return {
     slug: item.slug,
@@ -907,15 +924,15 @@ function mapSupabaseTournament(item: any): Tournament {
     region: item.region || 'Pan India',
     format: item.format || 'Tournament',
     teams: item.teams || '64/64',
-    filled: filledPct,
+    filled: stats.filledPct,
     fee: item.fee || 'Free',
     registration_deadline: item.registration_deadline || null,
     is_registration_closed: typeof item.is_registration_closed === 'boolean'
       ? item.is_registration_closed
       : (item.registration_deadline ? new Date(item.registration_deadline).getTime() <= Date.now() : false),
-    registeredCount: registered,
-    remainingSlots: remaining,
-    totalSlots: totalSlots,
+    registeredCount: stats.registered,
+    remainingSlots: stats.remaining,
+    totalSlots: stats.totalSlots,
   };
 }
 

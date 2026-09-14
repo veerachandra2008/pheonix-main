@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { CalendarDays, MapPin, Search, SlidersHorizontal, Trophy, Users, Zap, Flame, ShieldCheck, ArrowRight, Clock, X } from 'lucide-react';
 import { gameFilters, statusFilters } from './data';
-import { getAllTournaments, getUserTournamentStatuses, getRegistrationCountdown, getTournamentRegistrationCounts } from '@/lib/tournaments-db';
+import { getAllTournaments, getUserTournamentStatuses, getRegistrationCountdown, getTournamentRegistrationCounts, parseTournamentSlotStats } from '@/lib/tournaments-db';
 import { getXenovaSession } from '@/lib/auth-session';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
@@ -105,18 +105,14 @@ function TournamentsContent() {
             const enriched = allTournaments.map((t) => {
               const slug = (t.slug || '').trim().toLowerCase();
               const liveCount = countsMap[slug];
-              if (typeof liveCount === 'number') {
-                const total = t.totalSlots || 64;
-                const rem = Math.max(0, total - liveCount);
-                const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((liveCount / total) * 100))) : t.filled;
-                return {
-                  ...t,
-                  registeredCount: liveCount,
-                  remainingSlots: rem,
-                  filled: pct,
-                };
-              }
-              return t;
+              const stats = parseTournamentSlotStats(t, liveCount);
+              return {
+                ...t,
+                totalSlots: stats.totalSlots,
+                registeredCount: stats.registered,
+                remainingSlots: stats.remaining,
+                filled: stats.filledPct,
+              };
             });
             setTournamentsList(enriched);
             cachedTournamentsMemory = enriched;
@@ -454,34 +450,16 @@ function TournamentsContent() {
 
                       {/* Key Stats HUD */}
                       {(() => {
-                        const rawTeams = String(tournament.teams || '64').trim();
-                        let totalSlots = tournament.totalSlots || 64;
-                        if (!tournament.totalSlots) {
-                          if (rawTeams.includes('/')) {
-                            totalSlots = parseInt(rawTeams.split('/')[1], 10) || 64;
-                          } else {
-                            const digits = rawTeams.match(/\d+/);
-                            if (digits) totalSlots = parseInt(digits[0], 10) || 64;
-                          }
-                        }
+                        const stats = parseTournamentSlotStats(tournament);
+                        const totalSlots = stats.totalSlots;
+                        const registeredCount = stats.registered;
+                        const remainingSlots = stats.remaining;
+                        const filledPct = stats.filledPct;
 
-                        const registeredCount = typeof tournament.registeredCount === 'number'
-                          ? tournament.registeredCount
-                          : (typeof tournament.registered_count === 'number'
-                              ? tournament.registered_count
-                              : Math.round(((tournament.filled || 0) / 100) * totalSlots));
-
-                        const remainingSlots = typeof tournament.remainingSlots === 'number'
-                          ? tournament.remainingSlots
-                          : Math.max(0, totalSlots - registeredCount);
-
-                        const filledPct = typeof tournament.filled === 'number' && tournament.filled > 0
-                          ? tournament.filled
-                          : (totalSlots > 0 ? Math.min(100, Math.max(0, Math.round((registeredCount / totalSlots) * 100))) : 0);
-
+                        const rawTeams = String(tournament.teams || '').trim();
                         const teamDisplay = tournament.players !== undefined
                           ? `${tournament.players?.length || 0} Players`
-                          : (/teams?/i.test(rawTeams) ? rawTeams : `${rawTeams} Teams`);
+                          : (/teams?/i.test(rawTeams) ? rawTeams : `${totalSlots} Teams`);
 
                         return (
                           <>
