@@ -31,10 +31,7 @@ def create_app():
     app.url_map.strict_slashes = False
     
     # Enable CORS for Next.js / Vite React frontend
-    # Permitting https://xenova.vercel.app, https://pheonix-main.vercel.app during migration, and configurable CORS_ORIGINS
-    cors_env = os.getenv("CORS_ORIGINS", "*")
-    origins = [o.strip() for o in cors_env.split(",") if o.strip()] if cors_env != "*" else "*"
-    CORS(app, resources={r"/api/*": {"origins": origins}})
+    CORS(app, resources={r"/api/*": {"origins": "*"}})
 
     # Register API Blueprints
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
