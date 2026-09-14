@@ -13,8 +13,8 @@ from config import Config, get_supabase_client
 
 BREVO_API_ENDPOINT = "https://api.brevo.com/v3/smtp/email"
 # Production frontend URL for tournament passes and email links
-# Supports env override APP_BASE_URL while defaulting to https://xenova.vercel.app
-APP_BASE_URL = os.getenv("APP_BASE_URL", "https://xenova.vercel.app").rstrip("/")
+# Supports env override APP_BASE_URL while defaulting to https://xenova-app.vercel.app
+APP_BASE_URL = os.getenv("APP_BASE_URL", "https://xenova-app.vercel.app").rstrip("/")
 
 
 def _escape(val: any) -> str:
