@@ -37,7 +37,20 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        source: '/:all*(mp4|webm|jpg|jpeg|png|webp|svg|ico|woff2)',
+        source: '/:all*(mp4|webm)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=86400, no-transform',
+          },
+          {
+            key: 'Accept-Ranges',
+            value: 'bytes',
+          },
+        ],
+      },
+      {
+        source: '/:all*(jpg|jpeg|png|webp|svg|ico|woff2)',
         headers: [
           {
             key: 'Cache-Control',

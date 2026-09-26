@@ -369,14 +369,15 @@ export default function HeroCarousel() {
               {slide.type === 'video' ? (
                 <video
                   ref={videoRef}
-                  src={slide.src}
                   autoPlay
                   loop
                   muted={isMuted}
                   playsInline
-                  preload="auto"
+                  preload="metadata"
                   className="w-full h-full object-cover filter brightness-[0.62] contrast-[1.06] saturate-125 transition-transform duration-1000 ease-out"
-                />
+                >
+                  <source src={slide.src} type="video/mp4" />
+                </video>
               ) : (
                 <img
                   src={slide.src}
