@@ -21,28 +21,28 @@ const galleryItems: GalleryItem[] = [
   // COLUMN 1
   {
     id: '1',
-    title: 'NATIONAL CHAMPIONS',
+    title: 'XENOVA',
     subtitle: 'Collegiate Varsity League • Grand Finals',
-    category: 'VARSITY TROPHY',
-    image: '/gallery-trophy.png',
+    category: '',
+    image: '/xxenova.jpeg',
     aspectRatio: 'h-[520px]',
     gridSpan: 'lg:col-span-4 lg:row-span-2',
   },
   {
     id: '2',
     title: 'THE CLUTCH MOMENT',
-    subtitle: '5v5 Valorant Tactical • Bind Map',
-    category: 'LIVE PLAY',
-    image: '/hero-arena.jpg',
+    subtitle: '',
+    category: '',
+    image: '/gaming1.jpeg',
     aspectRatio: 'h-[300px]',
     gridSpan: 'lg:col-span-4',
   },
   {
     id: '3',
-    title: 'CAMPUS RIVALRY',
-    subtitle: 'IIT Bombay vs BITS Pilani',
-    category: 'VARSITY LEAGUE',
-    image: '/apex.jpg',
+    title: 'GAME FIELD',
+    subtitle: '',
+    category: '',
+    image: '/spectating.jpeg',
     aspectRatio: 'h-[260px]',
     gridSpan: 'lg:col-span-4',
   },
@@ -50,28 +50,28 @@ const galleryItems: GalleryItem[] = [
   // COLUMN 2
   {
     id: '4',
-    title: 'CS2 DEFUSE ARENA',
-    subtitle: 'Anna University Stadium LAN',
-    category: 'CS2 CHAMPIONSHIP',
-    image: '/cs2.jpg',
+    title: 'WINNERS',
+    subtitle: '',
+    category: '',
+    image: '/winners.jpeg',
     aspectRatio: 'h-[280px]',
     gridSpan: 'lg:col-span-4',
   },
   {
     id: '5',
     title: 'PRO GAMER FOCUS',
-    subtitle: 'Verified Athlete Telemetry • 240Hz Arena',
-    category: 'PLAYER PORTRAIT',
-    image: '/gallery-gamer.png',
+    subtitle: '',
+    category: '',
+    image: '/gaming2.jpeg',
     aspectRatio: 'h-[380px]',
     gridSpan: 'lg:col-span-4 lg:row-span-2',
   },
   {
     id: '6',
     title: 'COLLEGIATE STADIUM',
-    subtitle: 'Packed Audience • 5,000 Varsity Fans',
-    category: 'ARENA STAGE',
-    image: '/gallery-arena.png',
+    subtitle: '',
+    category: '',
+    image: '/playing.jpeg',
     aspectRatio: 'h-[280px]',
     gridSpan: 'lg:col-span-4',
   },
@@ -79,28 +79,28 @@ const galleryItems: GalleryItem[] = [
   // COLUMN 3
   {
     id: '7',
-    title: 'TACTICAL DISCIPLINE',
-    subtitle: 'VALORANT Champions League',
-    category: 'LIVE STREAM',
-    image: '/valorant.jpg',
+    title: 'Legacy',
+    subtitle: '',
+    category: '',
+    image: '/organizing.jpeg',
     aspectRatio: 'h-[260px]',
     gridSpan: 'lg:col-span-4',
   },
   {
     id: '8',
-    title: 'BGMI SQUAD WARFARE',
-    subtitle: 'Delhi University Esports Hub',
-    category: 'BATTLE ROYALE',
-    image: '/bgmi.jpg',
+    title: 'Victorious',
+    subtitle: '',
+    category: '',
+    image: '/first.jpeg',
     aspectRatio: 'h-[300px]',
     gridSpan: 'lg:col-span-4',
   },
   {
     id: '9',
-    title: 'VICTORY CELEBRATION',
-    subtitle: 'Team Titans • 7-Match Win Streak',
-    category: 'VARSITY TEAM',
-    image: '/gallery-team.png',
+    title: 'FOCUS',
+    subtitle: '',
+    category: '',
+    image: '/gaming.jpeg',
     aspectRatio: 'h-[520px]',
     gridSpan: 'lg:col-span-4 lg:row-span-2',
   },
@@ -111,12 +111,12 @@ export default function LeaderboardWidget() {
 
   return (
     <section className="py-24 md:py-32 bg-black text-white relative overflow-hidden">
-      
+
       {/* Background ambient lighting */}
       <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-emerald-500/10 rounded-full blur-[180px] pointer-events-none" />
 
       <div className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8 relative z-10">
-        
+
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
           <div>
@@ -140,7 +140,7 @@ export default function LeaderboardWidget() {
 
         {/* 📸 GALLERY GRID (EXACT REFERENCE LAYOUT COMPOSITION) */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-3 sm:gap-4 auto-rows-[220px] sm:auto-rows-[260px]">
-          
+
           {/* TILE 1: Left Tall Hero Tile (Spans 4 Cols, 2 Rows) */}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
