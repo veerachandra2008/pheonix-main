@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabase-admin';
-import { sanitizeTournamentPayload, CORE_TOURNAMENT_COLUMNS } from '@/lib/tournaments-db';
+import { sanitizeTournamentPayload, CORE_TOURNAMENT_COLUMNS, isTournamentExpired } from '@/lib/tournaments-db';
 
 // Disable static optimization for API routes
 export const dynamic = 'force-dynamic';
@@ -812,30 +812,10 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     }
   }
 
-  // 4. Registrations Endpoints
-  if (mainSegment === 'registrations' || (mainSegment === 'tournaments' && subSegment === 'register')) {
-    if (method === 'GET') {
-      const url = new URL(req.url);
-      const email = url.searchParams.get('email')?.trim().toLowerCase();
-      const userId = url.searchParams.get('user_id')?.trim();
-
-      let query = supabase.from('registrations').select('*');
-      if (userId) {
-        query = query.eq('user_id', userId);
-      } else if (email) {
-        query = query.eq('email', email);
-      }
-
-      const { data, error } = await query;
-      if (error) {
-        return NextResponse.json({ success: false, message: error.message }, { status: 400 });
-      }
-      return NextResponse.json({ success: true, data: data || [] }, { status: 200 });
-    }
-
-    if (method === 'POST') {
-      try {
-        const body = await req.json();
+  // 4. Registrations Creation Endpoints
+  if ((mainSegment === 'registrations' || (mainSegment === 'tournaments' && subSegment === 'register')) && method === 'POST') {
+    try {
+      const body = await req.json();
         const payload: any = {
           tournament_slug: body.tournamentSlug || body.tournament_slug,
           tournament_title: body.tournamentTitle || body.tournament_title || '',
@@ -891,7 +871,6 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
         return NextResponse.json({ success: false, message: err.message || 'Registration failed.' }, { status: 500 });
       }
     }
-  }
 
   // 10. Manual UPI Payment Endpoint (Native Next.js / Supabase Handler)
   if (mainSegment === 'payments' && subSegment === 'manual' && segments[2] === 'create' && method === 'POST') {
@@ -1333,12 +1312,8 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
       if (item.tournament_slug) {
         const { data: tData } = await supabaseAdmin.from('tournaments').select('*').eq('slug', item.tournament_slug).maybeSingle();
         if (tData) {
-          const rawDate = tData.end_date || tData.date || '';
-          const tStatus = (tData.status || '').toLowerCase();
-          if (tStatus === 'completed' || tStatus === 'concluded' || tStatus === 'ended') {
-            isExpired = true;
-            expDate = rawDate || 'Concluded';
-          }
+          isExpired = isTournamentExpired(tData);
+          expDate = tData.end_date || tData.date || 'Concluded';
         }
       }
 
@@ -1482,24 +1457,7 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
 
       const enriched = filtered.map((r: any) => {
         const t = tournamentMap[(r.tournament_slug || '').toLowerCase()];
-        const status = (t?.status || '').toLowerCase().trim();
-        const rawDate = (t?.end_date || t?.date || '').trim();
-        let isExpired = status === 'completed' || status === 'concluded' || status === 'ended' || status === 'past';
-
-        if (!isExpired && rawDate) {
-          const lower = rawDate.toLowerCase();
-          if (!['upcoming', 'tba', 'tbd', 'live', 'registering', 'scheduled', 'soon'].includes(lower)) {
-            try {
-              let parsed = Date.parse(rawDate);
-              if (isNaN(parsed)) parsed = Date.parse(`${rawDate} ${new Date().getFullYear()}`);
-              if (!isNaN(parsed)) {
-                const dt = new Date(parsed);
-                dt.setHours(23, 59, 59, 999);
-                if (Date.now() > dt.getTime()) isExpired = true;
-              }
-            } catch {}
-          }
-        }
+        const isExpired = isTournamentExpired(t, r.tournament_end_date || r.tournament_date || t?.end_date || t?.date);
 
         return {
           ...r,
@@ -1510,10 +1468,10 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
           tournament_slug: r.tournament_slug,
           tournamentTitle: r.tournament_title || t?.title || r.tournament_slug,
           tournament_title: r.tournament_title || t?.title || r.tournament_slug,
-          tournamentDate: t?.date || 'Upcoming',
-          tournament_date: t?.date || 'Upcoming',
-          tournamentEndDate: t?.end_date,
-          tournament_end_date: t?.end_date,
+          tournamentDate: t?.date || r.tournament_date || 'Upcoming',
+          tournament_date: t?.date || r.tournament_date || 'Upcoming',
+          tournamentEndDate: t?.end_date || r.tournament_end_date,
+          tournament_end_date: t?.end_date || r.tournament_end_date,
           tournamentStatus: t?.status || 'Registering',
           tournament_status: t?.status || 'Registering',
           tournamentGame: t?.game || 'Esports',
@@ -1527,6 +1485,95 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     } catch (err: any) {
       console.error('[Registrations GET Exception]', err);
       return NextResponse.json({ success: false, message: err?.message || 'Server error' }, { status: 500 });
+    }
+  }
+
+  // 15. Single Registration Pass Lookup (Native Next.js / Supabase Admin Handler)
+  // Handles GET /api/registrations/:passId
+  if (mainSegment === 'registrations' && subSegment && subSegment !== 'attendance' && subSegment !== 'verify' && method === 'GET') {
+    try {
+      const passId = subSegment.trim();
+      const { data: reg, error: regErr } = await supabaseAdmin
+        .from('registrations')
+        .select('*')
+        .ilike('pass_id', passId)
+        .maybeSingle();
+
+      if (regErr || !reg) {
+        return NextResponse.json({ success: false, message: `Registration pass ${passId} not found` }, { status: 404 });
+      }
+
+      // Fetch roster players
+      const { data: rosterRows } = await supabaseAdmin
+        .from('tournament_rosters')
+        .select('*')
+        .ilike('pass_id', passId)
+        .order('slot');
+
+      const players = (rosterRows || []).map((p: any) => ({
+        slot: p.slot,
+        name: p.player_name,
+        inGameTag: p.in_game_tag,
+        email: p.email,
+        phone: p.phone || '',
+        isCaptain: p.is_captain ?? (p.slot === 1)
+      }));
+
+      // Fetch tournament details
+      let isExpired = false;
+      let expDate = '';
+      let tTitle = reg.tournament_title;
+      let tDate = reg.tournament_date || 'Upcoming';
+      let tEndDate = reg.tournament_end_date;
+      let tStatus = reg.tournament_status || 'Registering';
+      let tGame = reg.tournament_game || 'Esports';
+
+      if (reg.tournament_slug) {
+        const { data: tData } = await supabaseAdmin
+          .from('tournaments')
+          .select('slug, title, date, end_date, status, game')
+          .eq('slug', reg.tournament_slug)
+          .maybeSingle();
+
+        if (tData) {
+          isExpired = isTournamentExpired(tData, tData.end_date || tData.date);
+          expDate = tData.end_date || tData.date || '';
+          tTitle = tData.title || tTitle;
+          tDate = tData.date || tDate;
+          tEndDate = tData.end_date || tEndDate;
+          tStatus = tData.status || tStatus;
+          tGame = tData.game || tGame;
+        }
+      }
+
+      const item = {
+        ...reg,
+        id: reg.id || reg.pass_id,
+        passId: reg.pass_id,
+        pass_id: reg.pass_id,
+        tournamentSlug: reg.tournament_slug,
+        tournament_slug: reg.tournament_slug,
+        tournamentTitle: tTitle,
+        tournament_title: tTitle,
+        tournamentDate: tDate,
+        tournament_date: tDate,
+        tournamentEndDate: tEndDate,
+        tournament_end_date: tEndDate,
+        tournamentStatus: tStatus,
+        tournament_status: tStatus,
+        tournamentGame: tGame,
+        tournament_game: tGame,
+        players,
+        player_emails: players.map((p: any) => p.email).filter(Boolean),
+        isExpired,
+        is_expired: isExpired,
+        expiryMessage: isExpired ? `Tournament concluded on ${expDate || 'matchday'}.` : ''
+      };
+
+      return NextResponse.json({ success: true, data: item }, { status: 200 });
+    } catch (e: any) {
+      console.error('[Registration Pass Lookup Exception]', e);
+      return NextResponse.json({ success: false, message: e?.message || 'Server error' }, { status: 500 });
     }
   }
 
@@ -1572,10 +1619,7 @@ function isNextJsNativeRoute(segments: string[]): boolean {
   }
 
   if (main === 'registrations') {
-    if (sub === 'attendance' && sub2 === 'update') return true;
-    if (sub === 'verify') return true;
-    if (!sub) return true;
-    return false;
+    return true;
   }
 
   if (main === 'attendance') {

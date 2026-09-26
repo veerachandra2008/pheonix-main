@@ -16,11 +16,13 @@ import {
   Mail,
   Loader2,
   Clock,
+  Lock,
 } from 'lucide-react';
 import { QRCodeComponent } from '@/components/QRCodeComponent';
 import { getApiBaseUrl } from '@/lib/api-config';
 import { supabase } from '@/lib/supabase';
 import { getXenovaSession } from '@/lib/auth-session';
+import { isTournamentExpired } from '@/lib/tournaments-db';
 
 interface PageProps {
   params?: Promise<{ slug: string }>;
@@ -50,6 +52,7 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
   const [ticketData, setTicketData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
+  const [unauthorizedMsg, setUnauthorizedMsg] = useState('');
   const [origin, setOrigin] = useState('https://xenova.gg');
   const [emailStatus, setEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [emailStatusMsg, setEmailStatusMsg] = useState('');
@@ -122,11 +125,11 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             if (res.ok) {
               const result = await res.json();
               if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-                // Find registration matching this tournament slug, or get latest
+                // Find registration matching this tournament slug strictly
                 const match = result.data.find((r: any) => {
                   const rSlug = (r.tournament_slug || r.tournamentSlug || '').toLowerCase();
                   return rSlug === slug.toLowerCase();
-                }) || result.data[0];
+                });
 
                 if (match) {
                   resolvedPassId = match.pass_id || match.passId;
@@ -145,6 +148,63 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
         return;
       }
 
+      // Strict Ticket Authorization Verification
+      const verifyPassOwnership = (record: any): { authorized: boolean; reason?: string } => {
+        // 1. Session storage match (just registered in this browser session)
+        try {
+          const rawSession = sessionStorage.getItem('reg_selection');
+          if (rawSession) {
+            const data = JSON.parse(rawSession);
+            const savedPid = (data.passId || data.pass_id || '').trim().toLowerCase();
+            const currentPid = (record.passId || record.pass_id || resolvedPassId || '').trim().toLowerCase();
+            if (savedPid && savedPid === currentPid) {
+              return { authorized: true };
+            }
+          }
+        } catch {}
+
+        // 2. Logged-in session check
+        const currentSession = getXenovaSession();
+        if (!currentSession) {
+          return {
+            authorized: false,
+            reason: 'You must be signed in with the registered participant account to view this tournament pass.'
+          };
+        }
+
+        const role = (currentSession.role || '').toLowerCase();
+        if (role === 'organizer' || role === 'admin') {
+          return { authorized: true };
+        }
+
+        const userEmail = (currentSession.email || '').trim().toLowerCase();
+        const userId = String(currentSession.id || '').trim();
+        const recordEmail = (record.email || record.captain_email || '').trim().toLowerCase();
+        const recordUserId = String(record.userId || record.user_id || '').trim();
+
+        if (userEmail && recordEmail && userEmail === recordEmail) {
+          return { authorized: true };
+        }
+        if (userId && recordUserId && userId === recordUserId) {
+          return { authorized: true };
+        }
+
+        // Check if current user is in the team roster
+        if (userEmail && Array.isArray(record.players)) {
+          const inRoster = record.players.some((p: any) => (p.email || '').trim().toLowerCase() === userEmail);
+          if (inRoster) return { authorized: true };
+        }
+        if (userEmail && Array.isArray(record.player_emails)) {
+          const inEmails = record.player_emails.some((em: string) => (em || '').trim().toLowerCase() === userEmail);
+          if (inEmails) return { authorized: true };
+        }
+
+        return {
+          authorized: false,
+          reason: "Access Restricted: This tournament entry pass belongs to another athlete. You can only view passes issued to your own account or squad."
+        };
+      };
+
       const checkTournamentExpired = async (tournSlug: string) => {
         try {
           const { supabase } = await import('@/lib/supabase');
@@ -155,26 +215,10 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             .maybeSingle();
 
           if (tData) {
-            const tStatus = (tData.status || '').toLowerCase().trim();
-            if (['completed', 'concluded', 'ended', 'past'].includes(tStatus)) {
-              return { isExpired: true, message: 'This tournament has officially concluded.' };
-            }
-            const rawDate = (tData.end_date || tData.date || '').trim();
-            if (rawDate) {
-              const lower = rawDate.toLowerCase();
-              if (!['upcoming', 'tba', 'tbd', 'live', 'registering', 'scheduled', 'soon'].includes(lower)) {
-                try {
-                  let parsed = Date.parse(rawDate);
-                  if (isNaN(parsed)) parsed = Date.parse(`${rawDate} ${new Date().getFullYear()}`);
-                  if (!isNaN(parsed)) {
-                    const dt = new Date(parsed);
-                    dt.setHours(23, 59, 59, 999);
-                    if (Date.now() > dt.getTime()) {
-                      return { isExpired: true, message: `Tournament date (${rawDate}) has passed and concluded.` };
-                    }
-                  }
-                } catch {}
-              }
+            const expired = isTournamentExpired(tData);
+            if (expired) {
+              const displayDate = tData.end_date || tData.date || 'Concluded';
+              return { isExpired: true, message: `Tournament concluded on ${displayDate}.` };
             }
           }
         } catch {}
@@ -187,6 +231,13 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
         if (res.ok) {
           const result = await res.json();
           if (result.success && result.data) {
+            const authCheck = verifyPassOwnership(result.data);
+            if (!authCheck.authorized) {
+              setUnauthorizedMsg(authCheck.reason || 'Access Restricted');
+              setLoading(false);
+              return;
+            }
+
             const expiry = await checkTournamentExpired(result.data.tournamentSlug || slug);
             setTicketData({
               ...result.data,
@@ -211,13 +262,6 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
 
         if (!error && data && data.length > 0) {
           const item = data[0];
-          let userBio = item.bio || '';
-          if (!userBio && item.email) {
-            try {
-              const { data: uData } = await supabase.from('users').select('bio, role, tag').eq('email', item.email).maybeSingle();
-              if (uData?.bio) userBio = uData.bio;
-            } catch {}
-          }
 
           const { data: rosterRows } = await supabase
             .from('tournament_rosters')
@@ -233,6 +277,21 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             phone: p.phone || '',
             isCaptain: p.is_captain ?? (p.slot === 1)
           }));
+
+          const authCheck = verifyPassOwnership({ ...item, players });
+          if (!authCheck.authorized) {
+            setUnauthorizedMsg(authCheck.reason || 'Access Restricted');
+            setLoading(false);
+            return;
+          }
+
+          let userBio = item.bio || '';
+          if (!userBio && item.email) {
+            try {
+              const { data: uData } = await supabase.from('users').select('bio, role, tag').eq('email', item.email).maybeSingle();
+              if (uData?.bio) userBio = uData.bio;
+            } catch {}
+          }
 
           const expiry = await checkTournamentExpired(item.tournament_slug || slug);
 
@@ -278,6 +337,41 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
         <div className="text-center space-y-4">
           <div className="w-12 h-12 rounded-full border-2 border-white/10 border-t-emerald-500 animate-spin mx-auto" />
           <p className="text-zinc-400 text-sm font-medium">Fetching verified ticket from database...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (unauthorizedMsg) {
+    return (
+      <main className="min-h-screen bg-[#09090b] flex items-center justify-center p-6 text-white font-sans selection:bg-amber-500 selection:text-black">
+        <div className="text-center space-y-5 max-w-md bg-white/[0.03] border border-amber-500/20 p-8 sm:p-10 rounded-3xl backdrop-blur-xl shadow-2xl shadow-amber-500/5">
+          <div className="w-16 h-16 rounded-3xl bg-amber-500/10 border border-amber-500/25 text-amber-400 flex items-center justify-center mx-auto shadow-inner">
+            <Lock className="w-7 h-7" />
+          </div>
+          <div className="space-y-2">
+            <span className="text-[10px] font-mono font-bold tracking-widest uppercase px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              Access Restricted
+            </span>
+            <h2 className="text-xl font-black text-white uppercase tracking-tight pt-1">Private Tournament Pass</h2>
+            <p className="text-xs text-zinc-400 leading-relaxed font-medium">
+              {unauthorizedMsg}
+            </p>
+          </div>
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <Link
+              href="/dashboard"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-emerald-500 text-zinc-950 font-black text-xs uppercase tracking-wider hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20"
+            >
+              My Dashboard
+            </Link>
+            <Link
+              href="/login"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl border border-white/10 bg-white/5 text-zinc-300 font-bold text-xs uppercase tracking-wider hover:bg-white/10 transition"
+            >
+              Switch Account
+            </Link>
+          </div>
         </div>
       </main>
     );

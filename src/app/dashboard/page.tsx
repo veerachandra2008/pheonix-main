@@ -30,6 +30,7 @@ import {
   Ticket
 } from 'lucide-react';
 import FinalCTA from '@/components/xenova/FinalCTA';
+import HeroCarousel from '@/components/HeroCarousel';
 
 const cards = [
   {
@@ -83,6 +84,28 @@ export default function DashboardPage() {
   const router = useRouter();
   const [session, setSession] = useState<any>(null);
   const [userRegistrations, setUserRegistrations] = useState<TournamentRegistrationRecord[]>([]);
+  const [passFilter, setPassFilter] = useState<'all' | 'active' | 'expired'>('all');
+
+  const activeRegistrations = userRegistrations.filter((r) => {
+    return !(
+      r.isExpired ||
+      ['completed', 'concluded', 'ended', 'past'].includes((r.tournamentStatus || '').toLowerCase())
+    );
+  });
+
+  const expiredRegistrations = userRegistrations.filter((r) => {
+    return Boolean(
+      r.isExpired ||
+      ['completed', 'concluded', 'ended', 'past'].includes((r.tournamentStatus || '').toLowerCase())
+    );
+  });
+
+  const displayedRegistrations =
+    passFilter === 'active'
+      ? activeRegistrations
+      : passFilter === 'expired'
+      ? expiredRegistrations
+      : userRegistrations;
 
   useEffect(() => {
     // Remove any stale local storage mock registration tickets
@@ -253,7 +276,7 @@ export default function DashboardPage() {
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-transparent" />
         </div>
 
-        <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-8 sm:space-y-10">
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-8">
             
             <div className="flex flex-col sm:flex-row sm:items-center gap-6">
@@ -349,6 +372,11 @@ export default function DashboardPage() {
             </div>
 
           </div>
+
+          {/* ═══════════════ CINEMATIC HERO MEDIA CAROUSEL ═══════════════ */}
+          <div className="pt-2">
+            <HeroCarousel />
+          </div>
         </div>
       </section>
 
@@ -405,21 +433,57 @@ export default function DashboardPage() {
 
           {/* ═══════════════ REGISTERED TOURNAMENTS SECTION ═══════════════ */}
           <div className="space-y-6 pt-6 border-t border-zinc-900">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Database Verified</span>
                 <h2 className="text-2xl font-black uppercase tracking-tight text-white mt-0.5">My Registered Tournaments</h2>
               </div>
               {userRegistrations.length > 0 && (
-                <span className="self-start sm:self-auto px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-xs font-mono font-bold">
-                  {userRegistrations.length} {userRegistrations.length === 1 ? 'Pass' : 'Passes'} Registered
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center p-1 rounded-2xl bg-white/[0.04] border border-white/10 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setPassFilter('all')}
+                      className={`px-3 py-1.5 rounded-xl font-bold transition text-xs ${
+                        passFilter === 'all'
+                          ? 'bg-white/15 text-white shadow-sm'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      All ({userRegistrations.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPassFilter('active')}
+                      className={`px-3 py-1.5 rounded-xl font-bold transition text-xs flex items-center gap-1.5 ${
+                        passFilter === 'active'
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          : 'text-zinc-400 hover:text-emerald-400'
+                      }`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Active ({activeRegistrations.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPassFilter('expired')}
+                      className={`px-3 py-1.5 rounded-xl font-bold transition text-xs flex items-center gap-1.5 ${
+                        passFilter === 'expired'
+                          ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                          : 'text-zinc-400 hover:text-orange-400'
+                      }`}
+                    >
+                      <Clock className="w-3 h-3" />
+                      Expired ({expiredRegistrations.length})
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
 
-            {userRegistrations.length > 0 ? (
+            {displayedRegistrations.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {userRegistrations.map((reg, idx) => {
+                {displayedRegistrations.map((reg, idx) => {
                   const isExpired = Boolean(
                     reg.isExpired ||
                     ['completed', 'concluded', 'ended', 'past'].includes((reg.tournamentStatus || '').toLowerCase())
@@ -498,6 +562,19 @@ export default function DashboardPage() {
                     </div>
                   );
                 })}
+              </div>
+            ) : userRegistrations.length > 0 ? (
+              <div className="p-8 rounded-3xl bg-[#09090b] border border-white/10 text-center space-y-3 max-w-md mx-auto my-4">
+                <Clock className="w-8 h-8 mx-auto text-zinc-500" />
+                <h3 className="text-base font-bold text-white uppercase tracking-tight">No {passFilter} Passes Found</h3>
+                <p className="text-xs text-zinc-400">You do not currently have any tournament passes matching the &apos;{passFilter}&apos; filter.</p>
+                <button
+                  type="button"
+                  onClick={() => setPassFilter('all')}
+                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-white transition"
+                >
+                  Show All Passes ({userRegistrations.length})
+                </button>
               </div>
             ) : (
               <div className="p-8 rounded-3xl bg-[#09090b] border border-white/10 text-center space-y-4 max-w-xl mx-auto my-4">

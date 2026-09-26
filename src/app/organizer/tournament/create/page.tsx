@@ -63,6 +63,7 @@ export default function CreateTournamentPage() {
     teams: '32',
     prize: '₹50,000',
     date: '18-20 May 2026',
+    end_date: '',
     region: 'Online',
     fee: 'Free',
     image: '/valorant.jpg',
@@ -295,6 +296,7 @@ export default function CreateTournamentPage() {
         prize_2nd: p2 || '',
         prize_3rd: p3 || '',
         date: formData.date.trim(),
+        end_date: formData.end_date.trim(),
         region: formData.region,
         format: formData.format,
         teams: `${formData.teams} Teams`,
@@ -537,13 +539,24 @@ export default function CreateTournamentPage() {
             </label>
 
             <label className="block">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Tournament Schedule / Dates *</span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Tournament Start Date *</span>
               <input
                 type="text"
                 required
-                placeholder="e.g. 24-26 Jun 2026"
+                placeholder="e.g. 24 Jun 2026"
                 value={formData.date}
                 onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                className="mt-2 w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3.5 text-sm text-white outline-none focus:border-indigo-500/50"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Tournament End Date</span>
+              <input
+                type="text"
+                placeholder="e.g. 26 Jun 2026 or 2026-06-26"
+                value={formData.end_date}
+                onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
                 className="mt-2 w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3.5 text-sm text-white outline-none focus:border-indigo-500/50"
               />
             </label>

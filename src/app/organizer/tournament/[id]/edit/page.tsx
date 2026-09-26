@@ -78,6 +78,7 @@ export default function EditTournamentPage() {
     teams: '32',
     prize: '₹50,000',
     date: '18-20 May 2026',
+    end_date: '',
     region: 'Online',
     fee: 'Free',
     image: '/valorant.jpg',
@@ -205,6 +206,7 @@ export default function EditTournamentPage() {
         teams: String(found.teams || '32').replace(/[^0-9]/g, '') || '32',
         prize: found.prize || '₹50,000',
         date: found.date || 'Upcoming',
+        end_date: found.end_date || found.endDate || '',
         region: found.region || 'Online',
         fee: found.fee || 'Free',
         image: found.image || '/valorant.jpg',
@@ -318,6 +320,7 @@ export default function EditTournamentPage() {
         prize_2nd: p2 || '',
         prize_3rd: p3 || '',
         date: formData.date.trim(),
+        end_date: formData.end_date.trim(),
         region: formData.region,
         format: formData.format,
         teams: formData.teams.includes('Teams') ? formData.teams : `${formData.teams} Teams`,
@@ -591,16 +594,30 @@ export default function EditTournamentPage() {
               </select>
             </div>
 
-            {/* Event Dates */}
+            {/* Event Dates (Start Date) */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Calendar className="h-3.5 w-3.5 text-emerald-400" /> Event Date
+                <Calendar className="h-3.5 w-3.5 text-emerald-400" /> Event Start Date
               </label>
               <input
                 type="text"
                 value={formData.date}
                 onChange={(e) => setFormData((prev) => ({ ...prev, date: e.target.value }))}
-                placeholder="e.g. 28 May - 2 Jun 2026"
+                placeholder="e.g. 28 May 2026"
+                className="w-full px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-sm outline-none focus:border-indigo-500 font-semibold"
+              />
+            </div>
+
+            {/* Event End Date */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <Calendar className="h-3.5 w-3.5 text-rose-400" /> Event End Date
+              </label>
+              <input
+                type="text"
+                value={formData.end_date}
+                onChange={(e) => setFormData((prev) => ({ ...prev, end_date: e.target.value }))}
+                placeholder="e.g. 2 Jun 2026 or 2026-06-02"
                 className="w-full px-4 py-3 bg-black/50 border border-white/10 rounded-xl text-white text-sm outline-none focus:border-indigo-500 font-semibold"
               />
             </div>

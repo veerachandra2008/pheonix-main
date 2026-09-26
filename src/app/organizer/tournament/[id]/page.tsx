@@ -336,7 +336,13 @@ export default function TournamentManagePage() {
                   </span>
                   <span>•</span>
                   <span className="flex items-center gap-1">
-                    <Calendar className="h-3.5 w-3.5 text-emerald-400" /> {tournament.date || 'Scheduled'}
+                    <Calendar className="h-3.5 w-3.5 text-emerald-400" />
+                    <span>
+                      {tournament.date || 'Scheduled'}
+                      {tournament.end_date && tournament.end_date !== tournament.date && (
+                        <span className="text-slate-300 font-normal"> – {tournament.end_date}</span>
+                      )}
+                    </span>
                   </span>
                   <span>•</span>
                   <span className="text-amber-400 font-bold">

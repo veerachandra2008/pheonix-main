@@ -26,7 +26,9 @@ import {
   Sparkles,
   Award,
   UserPlus,
-  UserCheck
+  UserCheck,
+  Clock,
+  Lock
 } from 'lucide-react';
 import { getUserRegistrations, TournamentRegistrationRecord } from '@/lib/tournaments-db';
 import FinalCTA from '@/components/xenova/FinalCTA';
@@ -183,15 +185,16 @@ export default function PlayerProfilePage() {
         }
       }
 
-      // Load Passes in background
-      const emailForPasses = matched?.email || (isSelf && sessionUser?.email ? sessionUser.email : '');
-      if (emailForPasses) {
+      // Load Passes strictly if viewing own profile (never expose another user's passes)
+      if (isSelf && sessionUser?.email) {
         try {
-          const passes = await getUserRegistrations(emailForPasses);
+          const passes = await getUserRegistrations(sessionUser.email, sessionUser.id ? String(sessionUser.id) : undefined);
           if (passes && Array.isArray(passes)) {
             setUserPasses(passes);
           }
         } catch {}
+      } else {
+        setUserPasses([]);
       }
 
       setLoading(false);
@@ -394,10 +397,19 @@ export default function PlayerProfilePage() {
               <p className="text-3xl font-black text-amber-400 mt-1">{profileData?.trophies || 5} Trophies</p>
             </div>
 
-            <div className="p-5 rounded-2xl border border-white/10 bg-[#09090b]">
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Active Passes</span>
-              <p className="text-3xl font-black text-white mt-1">{userPasses.length} Entries</p>
-            </div>
+            {isOwnProfile ? (
+              <div className="p-5 rounded-2xl border border-white/10 bg-[#09090b]">
+                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Active Passes</span>
+                <p className="text-3xl font-black text-white mt-1">
+                  {userPasses.filter((p) => !p.isExpired && !['completed', 'concluded', 'ended', 'past'].includes((p.tournamentStatus || '').toLowerCase())).length} Active
+                </p>
+              </div>
+            ) : (
+              <div className="p-5 rounded-2xl border border-white/10 bg-[#09090b]">
+                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Athlete Status</span>
+                <p className="text-3xl font-black text-emerald-400 mt-1">Varsity Verified</p>
+              </div>
+            )}
 
             <div className="p-5 rounded-2xl border border-white/10 bg-[#09090b]">
               <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Status</span>
@@ -405,8 +417,8 @@ export default function PlayerProfilePage() {
             </div>
           </div>
 
-          {/* Registered Tournament Passes */}
-          {userPasses.length > 0 && (
+          {/* Registered Tournament Passes (Visible ONLY to profile owner - Never leak to other users) */}
+          {isOwnProfile && userPasses.length > 0 && (
             <div className="rounded-3xl border border-emerald-500/20 bg-[#09090b] p-6 sm:p-8 space-y-6 shadow-2xl">
               <div className="flex items-center justify-between">
                 <div>
@@ -414,43 +426,68 @@ export default function PlayerProfilePage() {
                     <Ticket className="h-3.5 w-3.5" /> Authenticated Passes
                   </span>
                   <h3 className="text-xl font-black uppercase tracking-tight text-white mt-1">
-                    Active Tournament Passes ({userPasses.length})
+                    My Tournament Passes ({userPasses.filter((p) => !p.isExpired && !['completed', 'concluded', 'ended', 'past'].includes((p.tournamentStatus || '').toLowerCase())).length} Active)
                   </h3>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {userPasses.map((pass, idx) => (
-                  <div
-                    key={pass.passId ? `${pass.passId}-${idx}` : `pass-${idx}`}
-                    className="p-5 rounded-2xl bg-black border border-white/10 hover:border-emerald-500/50 transition space-y-3"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono font-bold">
-                        {pass.passId}
-                      </span>
-                      <span className="text-[10px] font-bold text-zinc-500 uppercase">
-                        {pass.tournamentFormat || 'Tournament'}
-                      </span>
+                {userPasses.map((pass, idx) => {
+                  const isExpired = Boolean(
+                    pass.isExpired ||
+                    ['completed', 'concluded', 'ended', 'past'].includes((pass.tournamentStatus || '').toLowerCase())
+                  );
+
+                  return (
+                    <div
+                      key={pass.passId ? `${pass.passId}-${idx}` : `pass-${idx}`}
+                      className={`p-5 rounded-2xl transition space-y-3 border ${
+                        isExpired
+                          ? 'bg-zinc-950/80 border-zinc-800 text-zinc-400 opacity-80 hover:opacity-100'
+                          : 'bg-black border-white/10 hover:border-emerald-500/50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border ${
+                          isExpired
+                            ? 'bg-zinc-800/80 border-zinc-700 text-zinc-400'
+                            : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                        }`}>
+                          {pass.passId}
+                        </span>
+                        {isExpired ? (
+                          <span className="px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-400 text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5" /> EXPIRED
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> ACTIVE ENTRY
+                          </span>
+                        )}
+                      </div>
+
+                      <h4 className={`text-base font-black truncate ${isExpired ? 'text-zinc-300' : 'text-white'}`}>{pass.tournamentTitle}</h4>
+                      <p className="text-xs text-zinc-400 truncate">
+                        Squad: <span className={isExpired ? 'text-zinc-300 font-bold' : 'text-emerald-400 font-bold'}>{pass.teamName}</span> • {pass.college}
+                      </p>
+
+                      <div className="pt-2 border-t border-white/5 flex items-center justify-between">
+                        <span className="text-[11px] text-zinc-500">
+                          {new Date(pass.registeredAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </span>
+
+                        <Link
+                          href={`/registration/${pass.tournamentSlug}/pass?passId=${pass.passId}`}
+                          className={`text-xs font-bold hover:underline flex items-center gap-1 ${
+                            isExpired ? 'text-zinc-400 hover:text-white' : 'text-emerald-400'
+                          }`}
+                        >
+                          {isExpired ? 'View Archived Pass' : 'View Pass'} <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      </div>
                     </div>
-
-                    <h4 className="text-base font-black text-white truncate">{pass.tournamentTitle}</h4>
-                    <p className="text-xs text-zinc-400 truncate">Squad: <span className="text-emerald-400 font-bold">{pass.teamName}</span> • {pass.college}</p>
-
-                    <div className="pt-2 border-t border-white/5 flex items-center justify-between">
-                      <span className="text-[11px] text-zinc-500">
-                        {new Date(pass.registeredAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                      </span>
-
-                      <Link
-                        href={`/registration/${pass.tournamentSlug}/pass?passId=${pass.passId}`}
-                        className="text-xs font-bold text-emerald-400 hover:underline flex items-center gap-1"
-                      >
-                        View Pass <ExternalLink className="h-3 w-3" />
-                      </Link>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

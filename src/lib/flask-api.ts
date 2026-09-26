@@ -884,11 +884,10 @@ export const flaskApi = {
     const nowIso = new Date().toISOString();
     const organizerName = attendedBy || 'Organizer Desk';
 
-    // 1. Sync to Backend API (Next.js serverless route or Flask)
+    // 1. Primary: Sync to local Next.js API route first (0 cold-start, uses supabaseAdmin)
     try {
-      const apiBase = getApiBaseUrl();
       const res = await fetchWithTimeout(
-        `${apiBase}/registrations/attendance/update`,
+        `/api/registrations/attendance/update`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -900,7 +899,7 @@ export const flaskApi = {
             ...additionalData,
           }),
         },
-        3000
+        4000
       );
       if (res.ok) {
         const json = await res.json().catch(() => ({}));
@@ -908,11 +907,41 @@ export const flaskApi = {
           return { success: true, message: `Updated attendance to ${attendanceStatus}`, status: attendanceStatus };
         }
       }
+    } catch (localErr) {
+      console.warn('Local attendance update API notice:', localErr);
+    }
+
+    // 2. Fallback: External deployed backend API if configured
+    try {
+      const apiBase = getApiBaseUrl();
+      if (apiBase && apiBase !== '/api') {
+        const res = await fetchWithTimeout(
+          `${apiBase}/registrations/attendance/update`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              pass_id: cleanId,
+              attendance_status: attendanceStatus,
+              attended_by: attendanceStatus === 'NOT_MARKED' ? null : organizerName,
+              attended_at: attendanceStatus === 'NOT_MARKED' ? null : nowIso,
+              ...additionalData,
+            }),
+          },
+          3000
+        );
+        if (res.ok) {
+          const json = await res.json().catch(() => ({}));
+          if (json.success) {
+            return { success: true, message: `Updated attendance to ${attendanceStatus}`, status: attendanceStatus };
+          }
+        }
+      }
     } catch (apiErr) {
       console.warn('Backend attendance update API notice:', apiErr);
     }
 
-    // 2. Resilient Direct Supabase Fallback (Check then Update or Insert, avoiding onConflict constraint issues)
+    // 3. Resilient Direct Supabase Fallback (Check then Update or Insert, avoiding onConflict constraint issues)
     try {
       const { data: reg } = await supabase
         .from('registrations')
@@ -1050,18 +1079,17 @@ export const flaskApi = {
       return { isExpired: false, formattedDate: raw };
     };
 
-    // 1. Primary: Flask Backend Verification with atomic auto-check-in
+    // 1. Primary: Local Next.js API route verification (0 cold-start, uses supabaseAdmin)
     try {
-      const apiBase = getApiBaseUrl();
       const queryParams = new URLSearchParams({
         auto_check_in: autoCheckIn ? 'true' : 'false',
         attended_by: attendedBy,
       });
 
       const res = await fetchWithTimeout(
-        `${apiBase}/registrations/verify/${encodeURIComponent(cleanId)}?${queryParams.toString()}`,
+        `/api/registrations/verify/${encodeURIComponent(cleanId)}?${queryParams.toString()}`,
         { method: 'GET' },
-        2500
+        3000
       );
 
       if (res.ok) {
@@ -1089,6 +1117,53 @@ export const flaskApi = {
           };
         } else if (json.status === 'INVALID' || json.status === 'NOT_FOUND') {
           return { valid: false, status: 'INVALID', passId: cleanId, message: json.message || 'Pass ID not found on server' };
+        }
+      }
+    } catch (localErr) {
+      console.warn('Local Next.js verify notice:', localErr);
+    }
+
+    // 2. Fallback: External Flask/Render Backend Verification
+    try {
+      const apiBase = getApiBaseUrl();
+      if (apiBase && apiBase !== '/api') {
+        const queryParams = new URLSearchParams({
+          auto_check_in: autoCheckIn ? 'true' : 'false',
+          attended_by: attendedBy,
+        });
+
+        const res = await fetchWithTimeout(
+          `${apiBase}/registrations/verify/${encodeURIComponent(cleanId)}?${queryParams.toString()}`,
+          { method: 'GET' },
+          2500
+        );
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.status === 'EXPIRED' || json.is_expired === true) {
+            return {
+              valid: false,
+              status: 'EXPIRED',
+              is_expired: true,
+              passId: json.passId || cleanId,
+              message: json.message || 'This ticket pass has expired. Tournament has concluded.',
+              data: json.data || {},
+            };
+          }
+
+          if (json.valid) {
+            const isAlready = json.status === 'ALREADY_CHECKED_IN' || json.already_checked_in === true;
+            return {
+              valid: true,
+              status: isAlready ? 'ALREADY_CHECKED_IN' : 'VERIFIED',
+              already_checked_in: isAlready,
+              passId: json.passId || cleanId,
+              message: json.message || (isAlready ? 'Participant already checked in' : 'Valid entry pass'),
+              data: json.data || {},
+            };
+          } else if (json.status === 'INVALID' || json.status === 'NOT_FOUND') {
+            return { valid: false, status: 'INVALID', passId: cleanId, message: json.message || 'Pass ID not found on server' };
+          }
         }
       }
     } catch (e) {

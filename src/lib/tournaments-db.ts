@@ -30,14 +30,14 @@ let memoryTournamentsCache: Tournament[] | null = null;
 
 export const CORE_TOURNAMENT_COLUMNS = new Set([
   'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
-  'prize', 'date', 'region', 'format', 'teams', 'filled', 'fee',
+  'prize', 'date', 'end_date', 'region', 'format', 'teams', 'filled', 'fee',
   'description', 'rules', 'schedule', 'map_pool', 'contact_email',
   'discord_url', 'organizer_email', 'registration_deadline'
 ]);
 
 export const VALID_TOURNAMENT_COLUMNS = new Set([
   'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
-  'prize', 'prize_1st', 'prize_2nd', 'prize_3rd', 'date', 'region', 'format',
+  'prize', 'prize_1st', 'prize_2nd', 'prize_3rd', 'date', 'end_date', 'region', 'format',
   'teams', 'filled', 'fee', 'description', 'rules', 'schedule', 'map_pool',
   'contact_email', 'discord_url', 'organizer_email',
   'organizer_name', 'organizer_phone', 'organizer_college', 'contact_phone', 'college',
@@ -637,35 +637,98 @@ export async function saveRegistration(record: TournamentRegistrationRecord): Pr
 const REG_CACHE = new Map<string, { data: TournamentRegistrationRecord[]; expires: number }>();
 
 /**
- * Evaluates whether a tournament is concluded or expired based on status and dates.
+ * Safely parses any tournament date or date range string to extract the concluding Date object.
+ * Handles:
+ * - Single ISO dates: "2026-09-25", "2026-09-25T18:00"
+ * - Formatted dates: "25 Sep 2026", "25 September 2026", "September 25, 2026", "25/09/2026", "25-09-2026"
+ * - Date ranges: "18-20 May 2026", "18 - 20 May 2026", "28 May - 2 Jun 2026", "May 18 to May 20, 2026"
+ * - Short dates: "20 May" (assumes current year)
+ */
+export function parseTournamentEndDate(rawDateStr?: string | null): Date | null {
+  if (!rawDateStr) return null;
+  let str = String(rawDateStr).trim();
+  if (!str) return null;
+
+  const lower = str.toLowerCase();
+  if (['upcoming', 'tba', 'tbd', 'live', 'registering', 'scheduled', 'soon', 'open', 'ongoing'].includes(lower)) {
+    return null;
+  }
+
+  // Handle range separators: " - ", " – ", " — ", " to ", or "18-20 May"
+  // Make sure not to break ISO format "2026-05-20" or "20-05-2026"
+  const isIsoOrDmySingleDate = /^\d{4}-\d{1,2}-\d{1,2}/.test(str) || /^\d{1,2}-\d{1,2}-\d{4}/.test(str);
+  if (!isIsoOrDmySingleDate) {
+    if (str.includes('–')) {
+      const parts = str.split('–');
+      str = parts[parts.length - 1].trim();
+    } else if (str.includes('—')) {
+      const parts = str.split('—');
+      str = parts[parts.length - 1].trim();
+    } else if (str.toLowerCase().includes(' to ')) {
+      const parts = str.split(/\s+to\s+/i);
+      str = parts[parts.length - 1].trim();
+    } else if (str.includes(' - ')) {
+      const parts = str.split(' - ');
+      str = parts[parts.length - 1].trim();
+    } else {
+      // Regex for "18-20 May 2026" or "18-20 May"
+      const rangeMatch = str.match(/^\d{1,2}\s*-\s*(\d{1,2}\s+[a-zA-Z]+.*)$/);
+      if (rangeMatch) {
+        str = rangeMatch[1].trim();
+      }
+    }
+  }
+
+  // Check DD/MM/YYYY or DD-MM-YYYY format (e.g. 25/09/2026 or 25-09-2026)
+  const dmyMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10) - 1;
+    const year = parseInt(dmyMatch[3], 10);
+    const dt = new Date(year, month, day, 23, 59, 59, 999);
+    if (!isNaN(dt.getTime())) return dt;
+  }
+
+  // Standard parse attempt
+  let timestamp = Date.parse(str);
+  if (isNaN(timestamp)) {
+    // Try appending current year if missing (e.g. "20 May")
+    const currentYear = new Date().getFullYear();
+    timestamp = Date.parse(`${str} ${currentYear}`);
+  }
+
+  if (!isNaN(timestamp)) {
+    const dt = new Date(timestamp);
+    // If no specific time was provided (e.g. no colon ':'), default to end of that calendar day (23:59:59.999)
+    if (!str.includes(':')) {
+      dt.setHours(23, 59, 59, 999);
+    }
+    return dt;
+  }
+
+  return null;
+}
+
+/**
+ * Evaluates whether a tournament is concluded or expired based on status and end_date/date.
  */
 export function isTournamentExpired(
-  tournament?: { date?: string; end_date?: string; status?: string } | null,
-  fallbackDateStr?: string
+  tournament?: { date?: string | null; end_date?: string | null; status?: string | null } | null,
+  fallbackDateStr?: string | null
 ): boolean {
   const status = (tournament?.status || '').toLowerCase().trim();
   if (status === 'completed' || status === 'concluded' || status === 'ended' || status === 'past') {
     return true;
   }
 
+  // Check end_date first, fallback to date, then fallbackDateStr
   const rawDate = (tournament?.end_date || tournament?.date || fallbackDateStr || '').trim();
   if (!rawDate) return false;
 
-  const lower = rawDate.toLowerCase();
-  if (['upcoming', 'tba', 'tbd', 'live', 'registering', 'scheduled', 'soon'].includes(lower)) {
-    return false;
-  }
-
   try {
-    let parsed = Date.parse(rawDate);
-    if (isNaN(parsed)) {
-      parsed = Date.parse(`${rawDate} ${new Date().getFullYear()}`);
-    }
-    if (!isNaN(parsed)) {
-      const dt = new Date(parsed);
-      // End of event day
-      dt.setHours(23, 59, 59, 999);
-      return Date.now() > dt.getTime();
+    const endDate = parseTournamentEndDate(rawDate);
+    if (endDate) {
+      return Date.now() > endDate.getTime();
     }
   } catch {}
 
@@ -815,22 +878,25 @@ export async function getUserRegistrations(email?: string, userId?: string): Pro
         if (tournamentsData && Array.isArray(tournamentsData)) {
           const tMap = new Map(tournamentsData.map((t) => [(t.slug || '').toLowerCase(), t]));
           for (const rec of records) {
-            const t = tMap.get((rec.tournamentSlug || '').toLowerCase());
+            const t = tMap.get((rec.tournamentSlug || '').toLowerCase()) ||
+              defaultMockTournaments.find((st) => st.slug.toLowerCase() === (rec.tournamentSlug || '').toLowerCase());
+
             if (t) {
               rec.tournamentTitle = rec.tournamentTitle || t.title;
               rec.tournamentDate = t.date || rec.tournamentDate;
-              rec.tournamentEndDate = t.end_date;
-              rec.tournamentStatus = t.status;
+              rec.tournamentEndDate = ('end_date' in t ? t.end_date : (t as any).endDate) || rec.tournamentEndDate;
+              rec.tournamentStatus = t.status || rec.tournamentStatus;
               rec.tournamentGame = rec.tournamentGame || t.game;
               rec.tournamentImage = t.image || rec.tournamentImage;
-              rec.isExpired = isTournamentExpired(t, rec.tournamentDate);
+              rec.isExpired = isTournamentExpired(t, rec.tournamentEndDate || rec.tournamentDate);
             } else {
-              rec.isExpired = isTournamentExpired(null, rec.tournamentDate);
+              rec.isExpired = isTournamentExpired(null, rec.tournamentEndDate || rec.tournamentDate);
             }
           }
         } else {
           for (const rec of records) {
-            rec.isExpired = isTournamentExpired(null, rec.tournamentDate);
+            const mock = defaultMockTournaments.find((st) => st.slug.toLowerCase() === (rec.tournamentSlug || '').toLowerCase());
+            rec.isExpired = isTournamentExpired(mock, rec.tournamentEndDate || rec.tournamentDate);
           }
         }
       }
@@ -838,7 +904,7 @@ export async function getUserRegistrations(email?: string, userId?: string): Pro
       console.warn('Tournament metadata enrichment notice:', enrichErr);
       for (const rec of records) {
         if (rec.isExpired === undefined) {
-          rec.isExpired = isTournamentExpired(null, rec.tournamentDate);
+          rec.isExpired = isTournamentExpired(null, rec.tournamentEndDate || rec.tournamentDate);
         }
       }
     }
@@ -921,6 +987,8 @@ function mapSupabaseTournament(item: any): Tournament {
     statusColor: item.status_color || item.statusColor || '#22C55E',
     prize: item.prize || '₹50,000',
     date: item.date || 'Soon',
+    end_date: item.end_date || item.endDate || null,
+    endDate: item.end_date || item.endDate || null,
     region: item.region || 'Pan India',
     format: item.format || 'Tournament',
     teams: item.teams || '64/64',

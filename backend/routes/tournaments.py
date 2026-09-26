@@ -225,7 +225,7 @@ def get_tournament_by_slug(slug):
 
 VALID_TOURNAMENT_COLUMNS = {
     'slug', 'title', 'host', 'image', 'game', 'status', 'status_color',
-    'prize', 'date', 'region', 'format', 'teams', 'filled', 'fee', 'organizer_email',
+    'prize', 'date', 'end_date', 'region', 'format', 'teams', 'filled', 'fee', 'organizer_email',
     'description', 'rules', 'schedule', 'map_pool', 'contact_email', 'discord_url',
     'organizer_name', 'organizer_phone', 'organizer_college', 'contact_phone',
     'college', 'prize_1st', 'prize_2nd', 'prize_3rd', 'registration_deadline'
@@ -238,6 +238,8 @@ def sanitize_tournament_payload(data):
             sanitized['status_color'] = v
         elif k == 'organizerEmail' or k == 'createdBy':
             sanitized['organizer_email'] = v
+        elif k in ('endDate', 'end_date'):
+            sanitized['end_date'] = str(v).strip() if v else None
         elif k in ('registration_deadline', 'registrationDeadline'):
             if v is None or v == '' or str(v).lower() in ('null', 'none'):
                 sanitized['registration_deadline'] = None

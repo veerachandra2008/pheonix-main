@@ -105,18 +105,21 @@ export default function VerifyPassPage(props: PageProps) {
         setResult((prev: any) => ({
           ...prev,
           data: {
-            ...prev.data,
+            ...prev?.data,
             attendanceStatus: 'PRESENT',
+            attendance_status: 'PRESENT',
             attendedAt: new Date().toISOString(),
+            attended_at: new Date().toISOString(),
             attendedBy: organizerName,
+            attended_by: organizerName,
           }
         }));
         setCheckInMsg('✅ Participant checked in successfully as PRESENT!');
       } else {
-        setCheckInMsg('Updated status to PRESENT.');
+        setCheckInMsg(`❌ ${res?.message || 'Failed to update attendance status.'}`);
       }
     } catch (e: any) {
-      setCheckInMsg('Checked in as PRESENT.');
+      setCheckInMsg(`❌ Error marking present: ${e?.message || 'Server error'}`);
     } finally {
       setCheckingIn(false);
     }
@@ -271,7 +274,11 @@ export default function VerifyPassPage(props: PageProps) {
             </div>
 
             {checkInMsg && (
-              <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 text-xs font-bold rounded-xl text-center">
+              <div className={`p-3 border text-xs font-bold rounded-xl text-center ${
+                checkInMsg.startsWith('❌')
+                  ? 'bg-rose-950/40 border-rose-500/30 text-rose-300'
+                  : 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
+              }`}>
                 {checkInMsg}
               </div>
             )}

@@ -214,7 +214,7 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
             : Promise.resolve(null),
           supabase
             .from('registrations')
-            .select('*')
+            .select('team_name, captain_name, college')
             .eq('tournament_slug', activeSlug)
         ]);
 
@@ -451,7 +451,13 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
               </span>
               <span>•</span>
               <span className="flex items-center gap-1.5 text-zinc-300">
-                <CalendarDays className="h-4 w-4 text-emerald-400" /> {tournament.date || 'Scheduled'}
+                <CalendarDays className="h-4 w-4 text-emerald-400" />
+                <span>
+                  {tournament.date || 'Scheduled'}
+                  {tournament.end_date && tournament.end_date !== tournament.date && (
+                    <span className="text-zinc-400 font-normal"> – {tournament.end_date}</span>
+                  )}
+                </span>
               </span>
               <span>•</span>
               <span className="flex items-center gap-1.5 text-zinc-300">
@@ -821,6 +827,29 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
                     <Clock className="h-5 w-5 text-emerald-400" /> Match Schedule & Stages
                   </h3>
 
+                  {/* Official Dates Summary Banner */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-2xl bg-white/[0.03] border border-white/10 text-xs">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                        <Clock className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Tournament Start</span>
+                        <span className="font-bold text-white">{tournament.date || 'Scheduled'}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
+                        <CalendarDays className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Tournament End</span>
+                        <span className="font-bold text-white">{tournament.end_date || tournament.date || 'Concludes on matchday'}</span>
+                      </div>
+                    </div>
+                  </div>
+
                   {tournament.schedule ? (
                     <div className="p-5 bg-black/40 rounded-2xl border border-white/10 font-mono text-xs sm:text-sm text-slate-300 leading-relaxed whitespace-pre-line">
                       {tournament.schedule}
@@ -881,13 +910,13 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {registeredTeamsList.map((reg, idx) => (
                         <div
-                          key={reg.pass_id || idx}
+                          key={`squad-${reg.team_name || idx}-${idx}`}
                           className="p-4 rounded-2xl bg-black/40 border border-white/10 space-y-2"
                         >
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-black text-white uppercase">{reg.team_name || reg.teamName}</span>
-                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 text-slate-400">
-                              {reg.pass_id || reg.passId}
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                              Verified Squad
                             </span>
                           </div>
                           <p className="text-xs text-slate-400">

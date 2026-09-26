@@ -10,6 +10,8 @@ export interface Tournament {
   statusColor: string;
   prize: string;
   date: string;
+  end_date?: string | null;
+  endDate?: string | null;
   region: string;
   format: string;
   teams: string;
