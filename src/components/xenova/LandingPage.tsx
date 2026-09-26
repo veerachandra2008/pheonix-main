@@ -26,6 +26,7 @@ import LiveMatchTicker from './LiveMatchTicker';
 import PlatformBentoGrid from './PlatformBentoGrid';
 import LeaderboardWidget from './LeaderboardWidget';
 import LiveTelecaster from './LiveTelecaster';
+import HeroCarousel from '@/components/HeroCarousel';
 
 /* ───────── Data ───────── */
 
@@ -102,24 +103,6 @@ export default function LandingPage() {
   const router = useRouter();
   const [selectedGameFilter, setSelectedGameFilter] = useState('ALL');
   const [showScrollTop, setShowScrollTop] = useState(false);
-  const heroVideoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const video = heroVideoRef.current;
-    if (!video) return;
-    video.play().catch(() => {});
-    const handlePause = () => {
-      video.play().catch(() => {});
-    };
-    video.addEventListener('pause', handlePause);
-    video.addEventListener('stalled', handlePause);
-    video.addEventListener('waiting', handlePause);
-    return () => {
-      video.removeEventListener('pause', handlePause);
-      video.removeEventListener('stalled', handlePause);
-      video.removeEventListener('waiting', handlePause);
-    };
-  }, []);
 
   // Top Scroll Progress Line
   const { scrollYProgress } = useScroll();
@@ -169,90 +152,88 @@ export default function LandingPage() {
       <main className="relative z-10">
         
         {/* ═══════════════ 1. SPACIOUS CINEMATIC HERO ═══════════════ */}
-        <section className="relative min-h-screen flex items-center justify-start overflow-hidden py-28 md:py-36 pl-6 sm:pl-16 lg:pl-24 pr-6">
-          {/* Background Video Layer - Black Vignette Overlay */}
+        <section className="relative overflow-hidden pt-28 md:pt-36 pb-16 px-4 sm:px-6 lg:px-8">
+          {/* Ambient High-Tech Backdrop Glows */}
           <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-            <video
-              ref={heroVideoRef}
-              autoPlay
-              muted
-              loop
-              playsInline
-              preload="auto"
-              disablePictureInPicture
-              disableRemotePlayback
-              poster="/image.png"
-              className="w-full h-full object-cover opacity-95 md:opacity-100 transform-gpu will-change-transform"
-            >
-              <source src="/video.mp4" type="video/mp4" />
-            </video>
-            {/* Pure High-Clarity Backdrop Vignette Overlays */}
-            <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/25 to-transparent" />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/70" />
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_0%,rgba(16,185,129,0.14),transparent_70%)]" />
+            <div className="absolute inset-0 bg-gradient-to-b from-black via-zinc-950/70 to-black" />
+            <div className="absolute top-1/6 left-1/2 -translate-x-1/2 w-[900px] h-[450px] bg-emerald-500/10 rounded-full blur-[160px] pointer-events-none" />
           </div>
 
-          {/* Left-Aligned Hero Content - Larger Scale & Spacing */}
-          <div className="relative z-10 max-w-5xl text-left space-y-10 flex flex-col items-start pt-12">
-            
-            {/* Badge */}
-            <motion.div
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs sm:text-sm font-extrabold uppercase tracking-widest backdrop-blur-md"
-            >
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              Collegiate Varsity Infrastructure
-            </motion.div>
-
-            {/* Headline - Substantially Larger & High Impact */}
-            <motion.h1
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.1 }}
-              className="text-6xl sm:text-8xl lg:text-[8rem] xl:text-[8.5rem] font-black tracking-tighter text-white leading-[0.9] uppercase drop-shadow-2xl max-w-5xl"
-            >
-              The Collegiate <br />
-              <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-emerald-500 bg-clip-text text-transparent">
-                Esports Hub
-              </span>
-            </motion.h1>
-
-            {/* Subtext - Increased Size & Spacing */}
-            <motion.p
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-              className="max-w-3xl text-lg sm:text-2xl text-zinc-300 leading-relaxed font-normal drop-shadow-md"
-            >
-              The unified competitive portal for university esports teams and players. Host, compete, and dominate in national varsity leagues.
-            </motion.p>
-
-            {/* Liquid Glassmorphic CTA Buttons */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.3 }}
-              className="flex flex-wrap items-center gap-5 pt-4 z-20"
-            >
-              <button
-                type="button"
-                onClick={() => router.push('/host')}
-                className="blob-btn inline-flex items-center gap-3 rounded-full bg-emerald-500 px-9 py-4 text-xs sm:text-sm font-black uppercase tracking-wider text-zinc-950 hover:bg-emerald-400 transition shadow-2xl shadow-emerald-500/40 hover:scale-105 cursor-pointer border border-emerald-400/40"
+          <div className="relative z-10 max-w-7xl mx-auto w-full space-y-10 sm:space-y-12">
+            {/* Left-Aligned Hero Content */}
+            <div className="max-w-5xl space-y-8 flex flex-col items-start pt-4 sm:pt-8">
+              
+              {/* Badge */}
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs sm:text-sm font-extrabold uppercase tracking-widest backdrop-blur-md"
               >
-                <Trophy className="h-4.5 w-4.5 fill-zinc-950" />
-                <span className="nav-menu-link tracking-[0.14em]">HOST EVENT</span>
-                <ArrowRight className="h-4.5 w-4.5" />
-              </button>
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                Collegiate Varsity Infrastructure
+              </motion.div>
 
-              <button
-                type="button"
-                onClick={() => requireLogin('/tournaments')}
-                className="blob-btn-secondary inline-flex items-center gap-3 rounded-full border border-white/20 bg-black/60 backdrop-blur-2xl px-9 py-4 text-xs sm:text-sm font-extrabold uppercase tracking-wider text-zinc-200 hover:bg-white/10 hover:text-white hover:border-emerald-500/50 transition shadow-2xl hover:scale-105 cursor-pointer"
+              {/* Headline */}
+              <motion.h1
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.1 }}
+                className="text-5xl sm:text-7xl lg:text-[7rem] xl:text-[7.5rem] font-black tracking-tighter text-white leading-[0.9] uppercase drop-shadow-2xl max-w-5xl"
               >
-                <Gamepad2 className="h-4.5 w-4.5 text-emerald-400" />
-                <span className="nav-menu-link tracking-[0.14em]">Explore Tournaments</span>
-              </button>
+                The Collegiate <br />
+                <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-emerald-500 bg-clip-text text-transparent">
+                  Esports Hub
+                </span>
+              </motion.h1>
+
+              {/* Subtext */}
+              <motion.p
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.2 }}
+                className="max-w-3xl text-base sm:text-xl text-zinc-300 leading-relaxed font-normal drop-shadow-md"
+              >
+                The unified competitive portal for university esports teams and players. Host, compete, and dominate in national varsity leagues.
+              </motion.p>
+
+              {/* Action Buttons */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.3 }}
+                className="flex flex-wrap items-center gap-4 pt-2 z-20"
+              >
+                <button
+                  type="button"
+                  onClick={() => router.push('/host')}
+                  className="blob-btn inline-flex items-center gap-3 rounded-full bg-emerald-500 px-8 sm:px-9 py-3.5 sm:py-4 text-xs sm:text-sm font-black uppercase tracking-wider text-zinc-950 hover:bg-emerald-400 transition shadow-2xl shadow-emerald-500/40 hover:scale-105 cursor-pointer border border-emerald-400/40"
+                >
+                  <Trophy className="h-4.5 w-4.5 fill-zinc-950" />
+                  <span className="nav-menu-link tracking-[0.14em]">HOST EVENT</span>
+                  <ArrowRight className="h-4.5 w-4.5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => requireLogin('/tournaments')}
+                  className="blob-btn-secondary inline-flex items-center gap-3 rounded-full border border-white/20 bg-black/60 backdrop-blur-2xl px-8 sm:px-9 py-3.5 sm:py-4 text-xs sm:text-sm font-extrabold uppercase tracking-wider text-zinc-200 hover:bg-white/10 hover:text-white hover:border-emerald-500/50 transition shadow-2xl hover:scale-105 cursor-pointer"
+                >
+                  <Gamepad2 className="h-4.5 w-4.5 text-emerald-400" />
+                  <span className="nav-menu-link tracking-[0.14em]">Explore Tournaments</span>
+                </button>
+              </motion.div>
+            </div>
+
+            {/* ═══════════════ CINEMATIC HERO CAROUSEL ═══════════════ */}
+            <motion.div
+              initial={{ opacity: 0, y: 35 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.7, delay: 0.35 }}
+              className="w-full pt-4 sm:pt-6"
+            >
+              <HeroCarousel />
             </motion.div>
           </div>
         </section>
