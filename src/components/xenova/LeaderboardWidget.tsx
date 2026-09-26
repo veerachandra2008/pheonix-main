@@ -100,7 +100,7 @@ const galleryItems: GalleryItem[] = [
     title: 'FOCUS',
     subtitle: '',
     category: '',
-    image: '/gaming.jpeg',
+    image: '/gaming4.jpeg',
     aspectRatio: 'h-[520px]',
     gridSpan: 'lg:col-span-4 lg:row-span-2',
   },

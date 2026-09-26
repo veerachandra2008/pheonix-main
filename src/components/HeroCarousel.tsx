@@ -39,6 +39,8 @@ interface Slide {
   tournamentSlug?: string;
   redirectUrl: string;
   badgeExtra?: string;
+  objectPosition?: string;
+  imageBrightness?: string;
 }
 
 const BASE_STATIC_SLIDES: Slide[] = [
@@ -73,6 +75,8 @@ const BASE_STATIC_SLIDES: Slide[] = [
     secondaryCtaText: 'College Rankings',
     secondaryCtaHref: '/colleges',
     redirectUrl: '/leaderboards',
+    objectPosition: 'center 22%',
+    imageBrightness: 'filter brightness-[0.82] contrast-[1.04] saturate-110',
   },
   {
     id: 'lan-action',
@@ -89,6 +93,8 @@ const BASE_STATIC_SLIDES: Slide[] = [
     secondaryCtaText: 'Browse Athletes',
     secondaryCtaHref: '/players',
     redirectUrl: '/tournaments',
+    objectPosition: 'center 38%',
+    imageBrightness: 'filter brightness-[0.70] contrast-[1.06] saturate-125',
   },
 ];
 
@@ -211,6 +217,8 @@ export default function HeroCarousel({ fullscreen = false }: HeroCarouselProps) 
       tournamentSlug: latestTournament.slug,
       redirectUrl: `/tournaments/${latestTournament.slug}`,
       badgeExtra: latestTournament.date ? `Starts ${latestTournament.date}` : undefined,
+      objectPosition: 'center 35%',
+      imageBrightness: 'filter brightness-[0.72] contrast-[1.06] saturate-125',
     };
 
     return [tournamentSlide, ...BASE_STATIC_SLIDES];
@@ -391,7 +399,12 @@ export default function HeroCarousel({ fullscreen = false }: HeroCarouselProps) 
                   alt={slide.titlePrefix}
                   decoding="async"
                   loading="eager"
-                  className="w-full h-full object-cover filter brightness-[0.58] contrast-[1.06] saturate-125 transition-transform duration-1000 ease-out"
+                  style={{
+                    objectPosition: slide.objectPosition || 'center center',
+                  }}
+                  className={`w-full h-full object-cover transition-transform duration-1000 ease-out ${
+                    slide.imageBrightness || 'filter brightness-[0.70] contrast-[1.06] saturate-125'
+                  }`}
                 />
               )}
             </div>
@@ -399,9 +412,12 @@ export default function HeroCarousel({ fullscreen = false }: HeroCarouselProps) 
         })}
 
         {/* ─── CINEMATIC GRADIENT OVERLAYS ─── */}
-        <div className="absolute inset-0 z-10 pointer-events-none bg-gradient-to-t from-black via-black/40 to-black/30" />
-        <div className="absolute inset-0 z-10 pointer-events-none bg-gradient-to-r from-black/95 via-black/60 to-transparent max-w-4xl" />
-        <div className="absolute inset-0 z-10 pointer-events-none bg-[radial-gradient(ellipse_at_top_right,rgba(16,185,129,0.12),transparent_70%)]" />
+        {/* Soft bottom vignette, keeping the upper face area clean and clear */}
+        <div className="absolute inset-0 z-10 pointer-events-none bg-gradient-to-t from-black via-black/15 to-transparent" />
+        {/* Left-side dark vignette for pure text readability without obscuring faces on the right */}
+        <div className="absolute inset-0 z-10 pointer-events-none bg-gradient-to-r from-black/90 via-black/40 to-transparent max-w-2xl sm:max-w-3xl" />
+        {/* Ambient emerald esports glow */}
+        <div className="absolute inset-0 z-10 pointer-events-none bg-[radial-gradient(ellipse_at_top_right,rgba(16,185,129,0.15),transparent_70%)]" />
       </div>
 
       {/* ─── ACTIVE SLIDE TEXT & CONTROLS OVERLAY ─── */}
