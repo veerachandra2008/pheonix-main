@@ -125,26 +125,9 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
 
   const targetSlug = slug || rawSlug;
   
-  // Instant 0ms Synchronous State Hydration
-  const [tournament, setTournament] = useState<any>(() => {
-    if (!targetSlug) return null;
-    if (typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem('xenova_tournaments_cache');
-        if (cached) {
-          const list = JSON.parse(cached);
-          if (Array.isArray(list)) {
-            const foundCache = list.find((t: any) => t.slug?.toLowerCase() === targetSlug.toLowerCase() || String(t.id) === targetSlug);
-            if (foundCache) return foundCache;
-          }
-        }
-      } catch {}
-    }
-    const found = defaultTournaments.find((t) => t.slug?.toLowerCase() === targetSlug.toLowerCase());
-    return found || null;
-  });
-
-  const [loading, setLoading] = useState(() => (tournament ? false : true));
+  // SSR-Safe Tournament Lobby State (prevents React Hydration Error #418)
+  const [tournament, setTournament] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [sessionUser, setSessionUser] = useState<any>(null);
   const [alreadyRegistered, setAlreadyRegistered] = useState(false);
   const [isPendingReview, setIsPendingReview] = useState(false);
@@ -165,9 +148,10 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
     college: '',
   });
 
-  const [currentTime, setCurrentTime] = useState<number>(() => Date.now());
+  const [currentTime, setCurrentTime] = useState<number>(0);
 
   useEffect(() => {
+    setCurrentTime(Date.now());
     const timer = setInterval(() => {
       setCurrentTime(Date.now());
     }, 1000);
@@ -199,6 +183,21 @@ export default function TournamentDetailPage({ params: paramsPromise }: Tourname
           setSessionUser(user);
           userEmail = (user.email || '').trim().toLowerCase();
           userId = user.id;
+        }
+      } catch {}
+
+      // Fast client cache lookup on mount (<1ms)
+      try {
+        const cached = localStorage.getItem('xenova_tournaments_cache');
+        if (cached) {
+          const list = JSON.parse(cached);
+          if (Array.isArray(list)) {
+            const foundCache = list.find((t: any) => t.slug?.toLowerCase() === activeSlug.toLowerCase() || String(t.id) === activeSlug);
+            if (foundCache && isMounted) {
+              setTournament(foundCache);
+              setLoading(false);
+            }
+          }
         }
       } catch {}
 

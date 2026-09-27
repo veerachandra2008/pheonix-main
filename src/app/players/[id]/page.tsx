@@ -142,9 +142,9 @@ export default function PlayerProfilePage() {
             avatar_url: sbUser.avatar_url || '/valorant.jpg',
             avatar: sbUser.avatar_url || '/valorant.jpg',
             role: (sbUser.role || 'PLAYER').toLowerCase(),
-            rank: sbUser.rank || 1,
-            win_rate: sbUser.win_rate || 84.5,
-            trophies: sbUser.trophies || 5,
+            rank: sbUser.rank ?? null,
+            win_rate: sbUser.win_rate ?? null,
+            trophies: sbUser.trophies ?? null,
           };
         }
       } catch (err) {
@@ -342,9 +342,6 @@ export default function PlayerProfilePage() {
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase">
                   <ShieldCheck className="h-3.5 w-3.5" /> Verified Varsity Athlete
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 text-xs font-black uppercase">
-                  <Crown className="h-3.5 w-3.5" /> Rank #{profileData?.rank || 1}
-                </span>
                 {profileData?.role && (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-400 text-xs font-black uppercase">
                     {profileData.role.toUpperCase()}
@@ -388,13 +385,17 @@ export default function PlayerProfilePage() {
           {/* Metric Bento Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="p-5 rounded-2xl border border-white/10 bg-[#09090b]">
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Win Rate</span>
-              <p className="text-3xl font-black text-emerald-400 mt-1">{profileData?.win_rate || 84.5}%</p>
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Collegiate Campus</span>
+              <p className="text-lg sm:text-xl font-black text-white mt-1 truncate" title={playerCollege}>
+                {playerCollege}
+              </p>
             </div>
 
             <div className="p-5 rounded-2xl border border-white/10 bg-[#09090b]">
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Trophies Earned</span>
-              <p className="text-3xl font-black text-amber-400 mt-1">{profileData?.trophies || 5} Trophies</p>
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Team Roster</span>
+              <p className="text-lg sm:text-xl font-black text-white mt-1 truncate" title={playerTeam}>
+                {playerTeam}
+              </p>
             </div>
 
             {isOwnProfile ? (

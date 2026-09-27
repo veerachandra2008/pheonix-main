@@ -26,45 +26,43 @@ function TournamentsContent() {
   const [selectedStatus, setSelectedStatus] = useState<'All' | 'Live' | 'Registering' | 'Upcoming'>('All');
   const [selectedGame, setSelectedGame] = useState('All');
 
-  // Database-driven Tournaments State with sub-ms local storage cache & NO fake mock data
-  const [tournamentsList, setTournamentsList] = useState<any[]>(() => {
-    if (cachedTournamentsMemory && cachedTournamentsMemory.length > 0) return cachedTournamentsMemory;
-    if (typeof window !== 'undefined') {
+  // SSR-Safe Database-driven Tournaments State (prevents React Hydration Error #418)
+  const [mounted, setMounted] = useState(false);
+  const [tournamentsList, setTournamentsList] = useState<any[]>([]);
+  const [isLoadingTournaments, setIsLoadingTournaments] = useState(true);
+
+  const [registeredSlugs, setRegisteredSlugs] = useState<Set<string>>(new Set());
+  const [registeredPasses, setRegisteredPasses] = useState<Map<string, string>>(new Map());
+  const [pendingSlugs, setPendingSlugs] = useState<Set<string>>(new Set());
+  const [pendingInfoModal, setPendingInfoModal] = useState<{ slug: string; title: string } | null>(null);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+
+  useEffect(() => {
+    setMounted(true);
+    setCurrentTime(Date.now());
+
+    // Restore cached tournaments immediately on client mount
+    if (cachedTournamentsMemory && cachedTournamentsMemory.length > 0) {
+      setTournamentsList(cachedTournamentsMemory);
+      setIsLoadingTournaments(false);
+    } else {
       try {
         const stored = localStorage.getItem('xenova_tournaments_cache');
         if (stored) {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed) && parsed.length > 0) {
             cachedTournamentsMemory = parsed;
-            return parsed;
+            setTournamentsList(parsed);
+            setIsLoadingTournaments(false);
           }
         }
       } catch {}
     }
-    return [];
-  });
 
-  const [isLoadingTournaments, setIsLoadingTournaments] = useState(() => tournamentsList.length === 0);
+    if (cachedRegisteredSlugsMemory) setRegisteredSlugs(cachedRegisteredSlugsMemory);
+    if (cachedRegisteredPassesMemory) setRegisteredPasses(cachedRegisteredPassesMemory);
+    if (cachedPendingSlugsMemory) setPendingSlugs(cachedPendingSlugsMemory);
 
-  const [registeredSlugs, setRegisteredSlugs] = useState<Set<string>>(() => {
-    if (cachedRegisteredSlugsMemory) return cachedRegisteredSlugsMemory;
-    return new Set();
-  });
-
-  const [registeredPasses, setRegisteredPasses] = useState<Map<string, string>>(() => {
-    if (cachedRegisteredPassesMemory) return cachedRegisteredPassesMemory;
-    return new Map();
-  });
-
-  const [pendingSlugs, setPendingSlugs] = useState<Set<string>>(() => {
-    if (cachedPendingSlugsMemory) return cachedPendingSlugsMemory;
-    return new Set();
-  });
-
-  const [pendingInfoModal, setPendingInfoModal] = useState<{ slug: string; title: string } | null>(null);
-  const [currentTime, setCurrentTime] = useState<number>(() => Date.now());
-
-  useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(Date.now());
     }, 1000);
@@ -295,8 +293,8 @@ function TournamentsContent() {
             >
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Live Brackets</p>
-                <div className="text-2xl font-black text-emerald-400 mt-0.5">
-                  {isLoadingTournaments && tournamentsList.length === 0 ? (
+                <div suppressHydrationWarning className="text-2xl font-black text-emerald-400 mt-0.5">
+                  {!mounted || (isLoadingTournaments && tournamentsList.length === 0) ? (
                     <span className="inline-block w-8 h-7 bg-zinc-800/80 rounded-md animate-pulse align-middle" />
                   ) : (
                     activeTournaments.length
@@ -371,7 +369,7 @@ function TournamentsContent() {
       {/* ═══════════════ 2. TOURNAMENTS MATCH GRID WITH SLANTED BENTO CARDS ═══════════════ */}
       <section className="py-14 sm:py-20 bg-black">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          {isLoadingTournaments && tournamentsList.length === 0 ? (
+          {!mounted || (isLoadingTournaments && tournamentsList.length === 0) ? (
             <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
               {[1, 2, 3].map((n) => (
                 <div
@@ -442,7 +440,7 @@ function TournamentsContent() {
                       
                       {/* Status Badges */}
                       <div className="absolute left-3 top-3 flex flex-wrap items-center gap-2">
-                        <span className={`inline-flex items-center gap-1.5 bg-black/90 backdrop-blur-md px-3 py-1 text-[10px] font-black uppercase tracking-wider rounded-full shadow-lg ${
+                        <span suppressHydrationWarning className={`inline-flex items-center gap-1.5 bg-black/90 backdrop-blur-md px-3 py-1 text-[10px] font-black uppercase tracking-wider rounded-full shadow-lg ${
                           countdown.isClosed
                             ? 'text-zinc-400 border border-zinc-700/60'
                             : 'text-emerald-400 border border-emerald-500/40'
@@ -450,7 +448,7 @@ function TournamentsContent() {
                           <span className={`h-2 w-2 rounded-full ${
                             countdown.isClosed ? 'bg-zinc-500' : 'bg-emerald-400 animate-pulse'
                           }`} />
-                          {countdown.isClosed ? 'CLOSED' : tournament.status}
+                          <span suppressHydrationWarning>{countdown.isClosed ? 'CLOSED' : tournament.status}</span>
                         </span>
                         <span className="bg-black/90 backdrop-blur-md px-3 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-200 border border-white/15 rounded-full">
                           {tournament.game}
@@ -482,7 +480,7 @@ function TournamentsContent() {
                             <span className={`w-1.5 h-1.5 rounded-full ${
                               countdown.isClosed ? 'bg-zinc-500' : 'bg-rose-500 animate-pulse'
                             }`} />
-                            <span>{countdown.badgeText}</span>
+                            <span suppressHydrationWarning>{countdown.badgeText}</span>
                           </div>
                         </div>
                       )}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, useScroll, useSpring } from 'framer-motion';
 import {
@@ -16,16 +16,18 @@ import {
   Layers,
   ChevronUp,
 } from 'lucide-react';
+import Link from 'next/link';
 import FinalCTA from './FinalCTA';
 import SpotlightCard from './SpotlightCard';
 import { ServiceCarousel, type Service } from '@/components/ui/services-card';
 import { getXenovaSession } from '@/lib/auth-session';
+import { fetchFreshTournaments, isTournamentExpired, cleanDescriptionText } from '@/lib/tournaments-db';
+import { isGameFilterMatch } from '@/app/tournaments/data';
+import { supabase } from '@/lib/supabase';
 
-// New Component Imports
-import LiveMatchTicker from './LiveMatchTicker';
+// Component Imports
 import PlatformBentoGrid from './PlatformBentoGrid';
 import LeaderboardWidget from './LeaderboardWidget';
-import LiveTelecaster from './LiveTelecaster';
 import HeroCarousel from '@/components/HeroCarousel';
 
 /* ───────── Data ───────── */
@@ -41,68 +43,82 @@ const marqueeGames = [
   'COD MOBILE',
 ];
 
-// Event Cards formatted as Service items for animated ServiceCarousel with direct actionUrl redirection
-const allEventServices: (Service & { category: string })[] = [
-  {
-    number: "001",
-    title: "Inter-College Valorant Showdown",
-    description: "IIT Bombay & BITS Pilani • 32 Colleges competing in 5v5 Tactical Shooter mode for ₹1,50,000 prize pool.",
-    icon: Swords,
-    gradient: "from-purple-950/90 via-zinc-950 to-black",
-    tag: "LIVE NOW",
-    prizePool: "₹1,50,000",
-    mode: "VALORANT • 5v5 Tactical",
-    image: "/valorant.jpg",
-    category: "VALORANT",
-    actionUrl: "/tournaments",
-  },
-  {
-    number: "002",
-    title: "National Collegiate BGMI Championship",
-    description: "Delhi University Esports Hub • 64 Squads battle in Battle Royale for bragging rights and ₹2,50,000 prize pool.",
-    icon: Trophy,
-    gradient: "from-amber-950/90 via-zinc-950 to-black",
-    tag: "QUICK APPLY",
-    prizePool: "₹2,50,000",
-    mode: "BGMI • Battle Royale",
-    image: "/bgmi.jpg",
-    category: "BGMI",
-    actionUrl: "/tournaments",
-  },
-  {
-    number: "003",
-    title: "CS2 University Pro League S4",
-    description: "Anna University & SRM • 16 Top teams in 5v5 Defuse battling for ₹1,00,000 total prize pool.",
-    icon: ShieldCheck,
-    gradient: "from-emerald-950/90 via-zinc-950 to-black",
-    tag: "REGISTRATION OPEN",
-    prizePool: "₹1,00,000",
-    mode: "COUNTER-STRIKE 2 • 5v5",
-    image: "/cs2.jpg",
-    category: "CS2",
-    actionUrl: "/tournaments",
-  },
-  {
-    number: "004",
-    title: "Campus FC24 Showdown",
-    description: "University Sports Federation • 1v1 Football tournament with high-stakes individual bracket competition.",
-    icon: Gamepad2,
-    gradient: "from-blue-950/90 via-zinc-950 to-black",
-    tag: "UPCOMING",
-    prizePool: "₹75,000",
-    mode: "EA SPORTS FC24 • 1v1",
-    image: "/fc.jpg",
-    category: "FC24",
-    actionUrl: "/tournaments",
-  },
-];
-
 /* ───────── MAIN COMPONENT ───────── */
 
 export default function LandingPage() {
   const router = useRouter();
   const [selectedGameFilter, setSelectedGameFilter] = useState('ALL');
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [tournaments, setTournaments] = useState<any[]>([]);
+  const [loadingTournaments, setLoadingTournaments] = useState(true);
+
+  // Load real active tournaments from database
+  useEffect(() => {
+    let isMounted = true;
+    const load = async () => {
+      try {
+        const list = await fetchFreshTournaments();
+        if (isMounted) {
+          const active = (list || []).filter((t: any) => !isTournamentExpired(t));
+          setTournaments(active);
+          setLoadingTournaments(false);
+        }
+      } catch {
+        if (isMounted) setLoadingTournaments(false);
+      }
+    };
+    load();
+
+    const handleUpdate = () => load();
+    window.addEventListener('xenova-tournaments-updated', handleUpdate);
+
+    const channel = supabase
+      .channel('realtime:landing_tournaments')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tournaments' },
+        () => {
+          load();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('xenova-tournaments-updated', handleUpdate);
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const eventServices: (Service & { category: string })[] = useMemo(() => {
+    return tournaments.map((t, idx) => {
+      const cleanDesc = cleanDescriptionText(t.description || '');
+      const subtitle = cleanDesc
+        ? cleanDesc.length > 120 ? cleanDesc.slice(0, 120) + '...' : cleanDesc
+        : `${t.college || t.host || 'University Circuit'} • ${t.format || 'Tournament'} • ${t.teams || 'Open Brackets'}`;
+
+      const isLive = (t.status || '').toLowerCase() === 'live';
+
+      return {
+        number: String(idx + 1).padStart(3, '0'),
+        title: t.title || t.name,
+        description: subtitle,
+        icon: isLive ? Swords : Trophy,
+        gradient: 'from-emerald-950/90 via-zinc-950 to-black',
+        tag: isLive ? 'LIVE NOW' : 'REGISTRATIONS OPEN',
+        prizePool: t.prize,
+        mode: `${t.game} • ${t.format || 'Collegiate'}`,
+        image: t.image || '/hero-arena.jpg',
+        category: (t.game || '').toUpperCase(),
+        actionUrl: `/tournaments/${t.slug}`,
+      };
+    });
+  }, [tournaments]);
+
+  const filteredEvents = useMemo(() => {
+    if (selectedGameFilter === 'ALL') return eventServices;
+    return eventServices.filter((e) => isGameFilterMatch(e.category, selectedGameFilter));
+  }, [eventServices, selectedGameFilter]);
 
   // Top Scroll Progress Line
   const { scrollYProgress } = useScroll();
@@ -136,10 +152,6 @@ export default function LandingPage() {
     router.push('/login');
   };
 
-  const filteredEvents = selectedGameFilter === 'ALL'
-    ? allEventServices
-    : allEventServices.filter(e => e.category === selectedGameFilter);
-
   return (
     <div className="relative min-h-screen bg-black text-white font-sans selection:bg-emerald-500 selection:text-zinc-950 overflow-x-hidden">
       
@@ -156,17 +168,7 @@ export default function LandingPage() {
           <HeroCarousel fullscreen />
         </section>
 
-        {/* ═══════════════ 2. LIVE MATCH TICKER (MICRO-SCROLL REVEAL) ═══════════════ */}
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.2 }}
-          transition={{ duration: 0.6 }}
-        >
-          <LiveMatchTicker />
-        </motion.div>
-
-        {/* ═══════════════ 3. SLEEK HORIZONTAL GAME MARQUEE ═══════════════ */}
+        {/* ═══════════════ 2. SLEEK HORIZONTAL GAME MARQUEE ═══════════════ */}
         <section className="border-y border-zinc-900 bg-black/90 py-3 overflow-hidden select-none backdrop-blur-xl">
           <div className="relative flex overflow-x-hidden whitespace-nowrap">
             <motion.div
@@ -229,12 +231,42 @@ export default function LandingPage() {
             </div>
 
             {/* Animated Service Carousel Component */}
-            <ServiceCarousel services={filteredEvents} />
+            {loadingTournaments ? (
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {[1, 2, 3].map((n) => (
+                  <div key={n} className="h-[460px] rounded-3xl bg-zinc-900/60 border border-white/10 animate-pulse" />
+                ))}
+              </div>
+            ) : filteredEvents.length > 0 ? (
+              <ServiceCarousel services={filteredEvents} />
+            ) : (
+              <div className="rounded-3xl border border-white/10 bg-[#09090b]/80 p-12 text-center backdrop-blur-md">
+                <Trophy className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
+                <h3 className="text-xl font-bold uppercase tracking-tight text-white mb-2">No Active Tournaments</h3>
+                <p className="text-zinc-400 text-sm max-w-md mx-auto mb-6">
+                  There are currently no active tournaments matching this selection. Explore all circuits or host your own tournament.
+                </p>
+                <div className="flex flex-wrap justify-center gap-4">
+                  <Link
+                    href="/tournaments"
+                    className="px-5 py-2.5 rounded-xl bg-emerald-500 text-zinc-950 text-xs font-black uppercase tracking-wider hover:bg-emerald-400 transition"
+                  >
+                    View All Tournaments
+                  </Link>
+                  <Link
+                    href="/organizer/tournament/create"
+                    className="px-5 py-2.5 rounded-xl border border-white/20 bg-white/5 text-white text-xs font-black uppercase tracking-wider hover:bg-white/10 transition"
+                  >
+                    Host Tournament
+                  </Link>
+                </div>
+              </div>
+            )}
 
           </div>
         </motion.section>
 
-        {/* ═══════════════ 5. ACETERNITY / MAGIC UI BENTO GRID (SCROLL REVEAL) ═══════════════ */}
+        {/* ═══════════════ 4. ACETERNITY / MAGIC UI BENTO GRID (SCROLL REVEAL) ═══════════════ */}
         <motion.div
           initial={{ opacity: 0, y: 40 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -244,7 +276,7 @@ export default function LandingPage() {
           <PlatformBentoGrid />
         </motion.div>
 
-        {/* ═══════════════ 6. UNIQUE 3-TIER PODIUM LEADERBOARD WIDGET ═══════════════ */}
+        {/* ═══════════════ 5. UNIQUE 3-TIER PODIUM LEADERBOARD WIDGET ═══════════════ */}
         <motion.div
           initial={{ opacity: 0, y: 40 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -254,17 +286,7 @@ export default function LandingPage() {
           <LeaderboardWidget />
         </motion.div>
 
-        {/* ═══════════════ 7. LIVE MATCH TELECASTER ═══════════════ */}
-        <motion.div
-          initial={{ opacity: 0, y: 40 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.15 }}
-          transition={{ duration: 0.6 }}
-        >
-          <LiveTelecaster />
-        </motion.div>
-
-        {/* ═══════════════ 8. FINAL CTA & FOOTER ═══════════════ */}
+        {/* ═══════════════ 6. FINAL CTA & FOOTER ═══════════════ */}
         <motion.div
           initial={{ opacity: 0, y: 40 }}
           whileInView={{ opacity: 1, y: 0 }}

@@ -42,7 +42,12 @@ type Player = {
 };
 
 // In-memory module cache for sub-millisecond route transitions (0.0ms)
-const PLAYERS_CACHE_KEY = 'xenova_players_cache_v2';
+const PLAYERS_CACHE_KEY = 'xenova_players_cache_v3';
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('xenova_players_cache_v2');
+  } catch {}
+}
 let cachedPlayersMemory: Player[] | null = null;
 let cachedFollowsMemory: Set<string> | null = null;
 
@@ -74,9 +79,6 @@ export const preloadPlayers = async () => {
           tag: u.tag || `@${(u.name || 'player').toLowerCase().replace(/\s+/g, '')}`,
           avatar: cleanAvatar,
           avatar_url: cleanAvatar,
-          rank: u.rank || idx + 1,
-          win_rate: u.win_rate ?? 0.0,
-          trophies: u.trophies ?? 0,
         };
       });
       cachedPlayersMemory = mapped;
@@ -98,56 +100,45 @@ export default function PlayersPage() {
   const router = useRouter();
   const [session, setSession] = useState<any>(null);
   
-  // High-performance Instant SWR State (0ms First Contentful Paint)
-  const [players, setPlayers] = useState<Player[]>(() => {
-    if (cachedPlayersMemory && cachedPlayersMemory.length > 0) return cachedPlayersMemory;
-    if (typeof window !== 'undefined') {
+  // SSR-Safe Initial State (prevents React Hydration Error #418)
+  const [mounted, setMounted] = useState(false);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [followingSet, setFollowingSet] = useState<Set<string>>(new Set());
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'following' | 'player' | 'organizer'>('all');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setMounted(true);
+
+    // Restore cached players & follows immediately on client mount
+    if (cachedPlayersMemory && cachedPlayersMemory.length > 0) {
+      setPlayers(cachedPlayersMemory);
+      setLoading(false);
+    } else {
       try {
         const stored = localStorage.getItem(PLAYERS_CACHE_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            cachedPlayersMemory = parsed;
-            return parsed;
+            setPlayers(parsed);
+            setLoading(false);
           }
         }
       } catch {}
     }
-    return [];
-  });
 
-  const [followingSet, setFollowingSet] = useState<Set<string>>(() => {
-    if (cachedFollowsMemory) return cachedFollowsMemory;
-    if (typeof window !== 'undefined') {
+    if (cachedFollowsMemory) {
+      setFollowingSet(cachedFollowsMemory);
+    } else {
       try {
         const stored = localStorage.getItem('xenova_following');
         if (stored) {
-          const set = new Set<string>(JSON.parse(stored));
-          cachedFollowsMemory = set;
-          return set;
+          setFollowingSet(new Set<string>(JSON.parse(stored)));
         }
       } catch {}
     }
-    return new Set<string>();
-  });
 
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'following' | 'player' | 'organizer'>('all');
-  const [loading, setLoading] = useState(() => {
-    if (cachedPlayersMemory && cachedPlayersMemory.length > 0) return false;
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem(PLAYERS_CACHE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) return false;
-        }
-      } catch {}
-    }
-    return true;
-  });
-
-  useEffect(() => {
     let currentEmail = '';
     const parsed = getXenovaSession();
     if (parsed) {
@@ -188,9 +179,6 @@ export default function PlayersPage() {
             tag: u.tag || `@${(u.name || 'player').toLowerCase().replace(/\s+/g, '')}`,
             avatar: u.avatar_url || '/valorant.jpg',
             avatar_url: u.avatar_url || '/valorant.jpg',
-            rank: u.rank || idx + 1,
-            win_rate: u.win_rate ?? 0.0,
-            trophies: u.trophies ?? 0,
           }));
         } else {
           // 2. Fast non-blocking fallback if Supabase is unavailable (500ms timeout)
@@ -221,9 +209,6 @@ export default function PlayersPage() {
                   tag: u.tag || `@${(u.name || 'player').toLowerCase().replace(/\s+/g, '')}`,
                   avatar: u.avatar_url || u.avatar || '/valorant.jpg',
                   avatar_url: u.avatar_url || u.avatar || '/valorant.jpg',
-                  rank: u.rank || idx + 1,
-                  win_rate: u.win_rate ?? 0.0,
-                  trophies: u.trophies ?? 0,
                 }));
               }
             }
@@ -399,12 +384,12 @@ export default function PlayersPage() {
             <div className="flex items-center gap-4 border border-white/10 bg-zinc-950/80 backdrop-blur-xl p-4 rounded-3xl shrink-0">
               <div className="px-3 text-center">
                 <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Other Athletes</span>
-                <p className="text-2xl sm:text-3xl font-black text-white">{players.length}</p>
+                <p suppressHydrationWarning className="text-2xl sm:text-3xl font-black text-white">{mounted ? players.length : 0}</p>
               </div>
               <div className="h-8 w-px bg-white/10" />
               <div className="px-3 text-center">
                 <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Following</span>
-                <p className="text-2xl sm:text-3xl font-black text-emerald-400">{followingSet.size}</p>
+                <p suppressHydrationWarning className="text-2xl sm:text-3xl font-black text-emerald-400">{mounted ? followingSet.size : 0}</p>
               </div>
             </div>
 
@@ -438,7 +423,7 @@ export default function PlayersPage() {
                     : 'text-zinc-400 hover:text-white hover:bg-white/5'
                   }`}
               >
-                All Athletes ({players.length})
+                All Athletes <span suppressHydrationWarning>({mounted ? players.length : 0})</span>
               </button>
 
               <button
@@ -448,7 +433,7 @@ export default function PlayersPage() {
                     : 'text-zinc-400 hover:text-white hover:bg-white/5'
                   }`}
               >
-                <Heart className="h-3.5 w-3.5" /> Following ({followingSet.size})
+                <Heart className="h-3.5 w-3.5" /> Following <span suppressHydrationWarning>({mounted ? followingSet.size : 0})</span>
               </button>
 
               <button
@@ -604,8 +589,8 @@ export default function PlayersPage() {
 
                     {/* Footer CTA */}
                     <div className="pt-5 mt-4 border-t border-white/5 flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-zinc-500 uppercase">
-                        Rank #{player.rank || 1}
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
+                        <ShieldCheck className="h-3.5 w-3.5" /> Verified
                       </span>
 
                       <Link
