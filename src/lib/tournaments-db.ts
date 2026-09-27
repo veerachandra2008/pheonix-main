@@ -503,7 +503,7 @@ export async function fetchFreshTournaments(): Promise<Tournament[]> {
     const { data, error } = await supabase
       .from('tournaments')
       .select('*')
-      .order('id', { ascending: true });
+      .order('id', { ascending: false });
 
     if (!error && data && Array.isArray(data)) {
       let countsMap: Record<string, number> = {};
@@ -689,10 +689,15 @@ export function parseTournamentEndDate(rawDateStr?: string | null): Date | null 
     if (!isNaN(dt.getTime())) return dt;
   }
 
+  // Ensure 4-digit year is present; if missing, append current year
+  if (!/\b(20\d{2})\b/.test(str)) {
+    const currentYear = new Date().getFullYear();
+    str = `${str} ${currentYear}`;
+  }
+
   // Standard parse attempt
   let timestamp = Date.parse(str);
   if (isNaN(timestamp)) {
-    // Try appending current year if missing (e.g. "20 May")
     const currentYear = new Date().getFullYear();
     timestamp = Date.parse(`${str} ${currentYear}`);
   }
@@ -978,9 +983,12 @@ function mapSupabaseTournament(item: any): Tournament {
   const stats = parseTournamentSlotStats(item);
 
   return {
+    id: item.id,
+    created_at: item.created_at,
     slug: item.slug,
     title: item.title || item.name,
     host: item.host || 'Xenova',
+    college: item.college || item.organizer_college,
     image: item.image || '/hero-arena.jpg',
     game: item.game || 'Esports',
     status: item.status || 'Registering',
@@ -994,6 +1002,12 @@ function mapSupabaseTournament(item: any): Tournament {
     teams: item.teams || '64/64',
     filled: stats.filledPct,
     fee: item.fee || 'Free',
+    description: item.description,
+    rules: item.rules,
+    schedule: item.schedule,
+    map_pool: item.map_pool,
+    discord_url: item.discord_url,
+    contact_email: item.contact_email,
     registration_deadline: item.registration_deadline || null,
     is_registration_closed: typeof item.is_registration_closed === 'boolean'
       ? item.is_registration_closed

@@ -18,7 +18,7 @@ import {
   Gamepad2,
   Sparkles,
 } from 'lucide-react';
-import { getAllTournaments, cleanDescriptionText } from '@/lib/tournaments-db';
+import { getAllTournaments, fetchFreshTournaments, cleanDescriptionText, isTournamentExpired } from '@/lib/tournaments-db';
 import { supabase } from '@/lib/supabase';
 
 interface Slide {
@@ -120,25 +120,39 @@ export default function HeroCarousel({ fullscreen = false }: HeroCarouselProps) 
   // ─── 1. FETCH & SYNC LATEST TOURNAMENT LAUNCH ───
   const loadLatestTournament = useCallback(async () => {
     try {
-      const list = await getAllTournaments();
+      const list = await fetchFreshTournaments();
       if (list && list.length > 0) {
-        // Sort descending by ID or created_at to locate the newest launched tournament
-        const sorted = [...list].sort((a: any, b: any) => {
-          const aId = Number(a.id) || 0;
-          const bId = Number(b.id) || 0;
-          return bId - aId;
-        });
+        // Filter out expired tournaments so carousel only features active/upcoming tournaments
+        const activeList = list.filter((t: any) => !isTournamentExpired(t));
+        const candidateList = activeList.length > 0 ? activeList : [];
 
-        const newest = sorted[0];
-        if (newest && newest.slug) {
-          setLatestTournament(newest);
+        if (candidateList.length > 0) {
+          // Sort descending: newest created_at or highest id first
+          const sorted = [...candidateList].sort((a: any, b: any) => {
+            const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0;
+            if (bCreated !== aCreated) return bCreated - aCreated;
+            const aId = Number(a.id) || 0;
+            const bId = Number(b.id) || 0;
+            return bId - aId;
+          });
 
-          // Preload tournament image for instant zero-delay rendering
-          if (newest.image && typeof window !== 'undefined') {
-            const img = new Image();
-            img.src = newest.image;
+          const newest = sorted[0];
+          if (newest && newest.slug) {
+            setLatestTournament(newest);
+            setCurrentIndex(0); // Ensure the newest tournament is displayed as the first slide
+
+            // Preload tournament image for instant zero-delay rendering
+            if (newest.image && typeof window !== 'undefined') {
+              const img = new Image();
+              img.src = newest.image;
+            }
           }
+        } else {
+          setLatestTournament(null);
         }
+      } else {
+        setLatestTournament(null);
       }
     } catch (err) {
       console.warn('HeroCarousel tournament load notice:', err);

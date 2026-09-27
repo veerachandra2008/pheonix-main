@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { CalendarDays, MapPin, Search, SlidersHorizontal, Trophy, Users, Zap, Flame, ShieldCheck, ArrowRight, Clock, X } from 'lucide-react';
-import { gameFilters, statusFilters } from './data';
-import { getAllTournaments, getUserTournamentStatuses, getRegistrationCountdown, getTournamentRegistrationCounts, parseTournamentSlotStats } from '@/lib/tournaments-db';
+import { gameFilters, statusFilters, isGameFilterMatch } from './data';
+import { getAllTournaments, getUserTournamentStatuses, getRegistrationCountdown, getTournamentRegistrationCounts, parseTournamentSlotStats, isTournamentExpired } from '@/lib/tournaments-db';
+import { supabase } from '@/lib/supabase';
 import { getXenovaSession } from '@/lib/auth-session';
 import FinalCTA from '@/components/xenova/FinalCTA';
 
@@ -149,29 +150,79 @@ function TournamentsContent() {
     };
     window.addEventListener('xenova-tournaments-updated', handleUpdateEvent);
 
+    const channel = supabase
+      .channel('realtime:tournaments_page')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tournaments' },
+        () => {
+          loadData();
+        }
+      )
+      .subscribe();
+
     return () => {
       isMounted = false;
       window.removeEventListener('xenova-tournaments-updated', handleUpdateEvent);
+      supabase.removeChannel(channel);
     };
   }, []);
 
+  // Only active, non-expired tournaments are displayed on tournaments page (ended tournaments are invisible)
+  const activeTournaments = useMemo(() => {
+    return tournamentsList.filter((tournament) => !isTournamentExpired(tournament));
+  }, [tournamentsList]);
+
   const filteredTournaments = useMemo(
     () =>
-      tournamentsList.filter((tournament) => {
-        const matchesSearch = [tournament.title, tournament.host, tournament.game, tournament.region]
-          .join(' ')
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase());
+      activeTournaments.filter((tournament) => {
+        // 1. Comprehensive multi-keyword search across title, college, game, host, region, format, date, prize
+        const searchWords = searchTerm.toLowerCase().trim().split(/\s+/).filter(Boolean);
+        if (searchWords.length > 0) {
+          const searchableText = [
+            tournament.title,
+            tournament.name,
+            tournament.host,
+            tournament.college,
+            tournament.game,
+            tournament.region,
+            tournament.format,
+            tournament.date,
+            tournament.prize,
+            tournament.fee,
+            tournament.description,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
 
-        const matchesStatus = selectedStatus === 'All' || tournament.status === selectedStatus;
-        const matchesGame =
-          selectedGame === 'All' ||
-          tournament.game?.toLowerCase() === selectedGame.toLowerCase() ||
-          tournament.game?.toLowerCase().includes(selectedGame.toLowerCase());
+          const matchesAllWords = searchWords.every((word) => searchableText.includes(word));
+          if (!matchesAllWords) return false;
+        }
 
-        return matchesSearch && matchesStatus && matchesGame;
+        // 2. Status matching (case-insensitive & trimmed with aliases)
+        const normalizedSelected = selectedStatus.toLowerCase().trim();
+        if (normalizedSelected !== 'all') {
+          const tStatus = (tournament.status || '').toLowerCase().trim();
+          if (normalizedSelected === 'live') {
+            if (tStatus !== 'live' && tStatus !== 'ongoing') return false;
+          } else if (normalizedSelected === 'registering') {
+            if (tStatus !== 'registering' && tStatus !== 'open') return false;
+          } else if (normalizedSelected === 'upcoming') {
+            if (tStatus !== 'upcoming' && tStatus !== 'scheduled' && tStatus !== 'soon') return false;
+          } else if (tStatus !== normalizedSelected) {
+            return false;
+          }
+        }
+
+        // 3. Game category filtering with robust alias mapping and normalization
+        if (!isGameFilterMatch(tournament.game, selectedGame)) {
+          return false;
+        }
+
+        return true;
       }),
-    [searchTerm, selectedStatus, selectedGame, tournamentsList]
+    [searchTerm, selectedStatus, selectedGame, activeTournaments]
   );
 
   return (
@@ -248,7 +299,7 @@ function TournamentsContent() {
                   {isLoadingTournaments && tournamentsList.length === 0 ? (
                     <span className="inline-block w-8 h-7 bg-zinc-800/80 rounded-md animate-pulse align-middle" />
                   ) : (
-                    tournamentsList.length
+                    activeTournaments.length
                   )}
                 </div>
               </div>

@@ -56,29 +56,42 @@ export default function CreateTournamentPage() {
     { id: 'tier-3', label: '3rd Place (Bronze)', amount: '₹50,000 + Bronze', rankKey: '3rd' },
   ]);
 
-  const [formData, setFormData] = useState({
-    title: '',
-    game: 'Valorant',
-    format: 'Single Elimination',
-    teams: '32',
-    prize: '₹50,000',
-    date: '18-20 May 2026',
-    end_date: '',
-    region: 'Online',
-    fee: 'Free',
-    image: '/valorant.jpg',
-    status: 'Registering',
-    host: '',
-    organizer_name: '',
-    organizer_email: '',
-    organizer_phone: '',
-    organizer_college: '',
-    description: '',
-    rules: '',
-    schedule: '',
-    map_pool: '',
-    contact_email: '',
-    discord_url: '',
+  const [formData, setFormData] = useState(() => {
+    const now = new Date();
+    const start = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const end = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const startMonth = months[start.getMonth()];
+    const endMonth = months[end.getMonth()];
+    const dateRangeStr = startMonth === endMonth
+      ? `${start.getDate()}-${end.getDate()} ${startMonth} ${start.getFullYear()}`
+      : `${start.getDate()} ${startMonth} - ${end.getDate()} ${endMonth} ${end.getFullYear()}`;
+    const endDateStr = `${end.getDate()} ${endMonth} ${end.getFullYear()}`;
+
+    return {
+      title: '',
+      game: 'Valorant',
+      format: 'Single Elimination',
+      teams: '32',
+      prize: '₹50,000',
+      date: dateRangeStr,
+      end_date: endDateStr,
+      region: 'Online',
+      fee: 'Free',
+      image: '/valorant.jpg',
+      status: 'Registering',
+      host: '',
+      organizer_name: '',
+      organizer_email: '',
+      organizer_phone: '',
+      organizer_college: '',
+      description: '',
+      rules: '',
+      schedule: '',
+      map_pool: '',
+      contact_email: '',
+      discord_url: '',
+    };
   });
 
   const handleAddPrizeTier = (presetLabel?: string, defaultAmount?: string) => {
@@ -296,7 +309,7 @@ export default function CreateTournamentPage() {
         prize_2nd: p2 || '',
         prize_3rd: p3 || '',
         date: formData.date.trim(),
-        end_date: formData.end_date.trim(),
+        end_date: formData.end_date.trim() || formData.date.trim(),
         region: formData.region,
         format: formData.format,
         teams: `${formData.teams} Teams`,
