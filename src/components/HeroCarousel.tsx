@@ -41,6 +41,7 @@ interface Slide {
   badgeExtra?: string;
   objectPosition?: string;
   imageBrightness?: string;
+  imageTransform?: string;
 }
 
 const BASE_STATIC_SLIDES: Slide[] = [
@@ -75,8 +76,8 @@ const BASE_STATIC_SLIDES: Slide[] = [
     secondaryCtaText: 'College Rankings',
     secondaryCtaHref: '/colleges',
     redirectUrl: '/leaderboards',
-    objectPosition: 'center 22%',
-    imageBrightness: 'filter brightness-[0.82] contrast-[1.04] saturate-110',
+    objectPosition: 'center 30%',
+    imageBrightness: 'filter brightness-[0.84] contrast-[1.04] saturate-110',
   },
   {
     id: 'lan-action',
@@ -401,6 +402,7 @@ export default function HeroCarousel({ fullscreen = false }: HeroCarouselProps) 
                   loading="eager"
                   style={{
                     objectPosition: slide.objectPosition || 'center center',
+                    transform: slide.imageTransform || undefined,
                   }}
                   className={`w-full h-full object-cover transition-transform duration-1000 ease-out ${
                     slide.imageBrightness || 'filter brightness-[0.70] contrast-[1.06] saturate-125'

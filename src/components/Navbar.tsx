@@ -197,12 +197,14 @@ export const Navbar = () => {
       <div className="pointer-events-auto flex items-center">
         <Link
           href="/"
-          className="flex items-center justify-center p-2 sm:p-2.5 rounded-full border border-emerald-500/40 bg-black/60 backdrop-blur-2xl shadow-xl transition duration-200 hover:scale-105 hover:bg-emerald-500/10 group"
+          className="flex items-center justify-center px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full border border-emerald-500/40 bg-black/60 backdrop-blur-2xl shadow-xl transition duration-200 hover:scale-105 hover:bg-emerald-500/10 hover:border-emerald-400/70 group"
           title="XENOVA Home"
         >
-          <div className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-emerald-500/20 border border-emerald-500/40">
-            <Zap className="h-4 w-4 sm:h-4.5 sm:w-4.5 text-emerald-400 fill-emerald-400 group-hover:rotate-12 transition-transform" />
-          </div>
+          <img
+            src="/logo.png"
+            alt="XENOVA"
+            className="h-6 sm:h-7.5 w-auto object-contain filter drop-shadow-[0_0_10px_rgba(16,185,129,0.35)] transition-transform duration-200 group-hover:scale-105"
+          />
         </Link>
       </div>
 
