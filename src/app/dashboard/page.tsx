@@ -30,7 +30,6 @@ import {
   Ticket
 } from 'lucide-react';
 import FinalCTA from '@/components/xenova/FinalCTA';
-import HeroCarousel from '@/components/HeroCarousel';
 
 const cards = [
   {
@@ -371,11 +370,6 @@ export default function DashboardPage() {
               </Link>
             </div>
 
-          </div>
-
-          {/* ═══════════════ CINEMATIC HERO MEDIA CAROUSEL ═══════════════ */}
-          <div className="pt-2">
-            <HeroCarousel />
           </div>
         </div>
       </section>

@@ -13,7 +13,12 @@ export const metadata: Metadata = {
   keywords: ["XENOVA", "Esports", "Gaming", "College", "University", "Tournaments", "VALORANT", "CS2", "League of Legends", "Competitive Gaming"],
   authors: [{ name: "XENOVA" }],
   icons: {
-    icon: "/favicon.ico",
+    icon: [
+      { url: "/favicon.ico?v=4", sizes: "any" },
+      { url: "/icon.png?v=4", type: "image/png", sizes: "32x32" },
+    ],
+    shortcut: "/favicon.ico?v=4",
+    apple: "/apple-icon.png?v=4",
   },
   openGraph: {
     title: "XENOVA - Collegiate Esports Platform",
@@ -37,6 +42,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning className="dark" data-scroll-behavior="smooth">
       <head>
+        <link rel="icon" type="image/x-icon" href="/favicon.ico?v=4" />
+        <link rel="shortcut icon" href="/favicon.ico?v=4" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/icon.png?v=4" />
+        <link rel="apple-touch-icon" href="/apple-icon.png?v=4" />
         <link rel="preload" as="image" href="/valorant.jpg" fetchPriority="high" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />

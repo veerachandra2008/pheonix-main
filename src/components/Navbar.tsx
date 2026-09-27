@@ -197,13 +197,16 @@ export const Navbar = () => {
       <div className="pointer-events-auto flex items-center">
         <Link
           href="/"
-          className="flex items-center justify-center px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full border border-emerald-500/40 bg-black/60 backdrop-blur-2xl shadow-xl transition duration-200 hover:scale-105 hover:bg-emerald-500/10 hover:border-emerald-400/70 group"
+          className="relative flex items-center justify-center px-4 py-2 sm:px-5 sm:py-2 rounded-full border border-emerald-500/50 bg-black/85 backdrop-blur-2xl shadow-[0_0_25px_rgba(16,185,129,0.2)] transition-all duration-300 hover:scale-105 hover:bg-emerald-500/15 hover:border-emerald-400 group overflow-hidden"
           title="XENOVA Home"
         >
+          {/* Ambient Glow Behind Logo to make dark letters pop */}
+          <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/25 via-teal-500/15 to-emerald-500/25 rounded-full blur-sm opacity-80 group-hover:opacity-100 transition-opacity pointer-events-none" />
+
           <img
             src="/logo.png"
             alt="XENOVA"
-            className="h-6 sm:h-7.5 w-auto object-contain filter drop-shadow-[0_0_10px_rgba(16,185,129,0.35)] transition-transform duration-200 group-hover:scale-105"
+            className="relative z-10 h-8 sm:h-9 md:h-10 w-auto object-contain filter brightness-[1.35] contrast-[1.12] drop-shadow-[0_0_14px_rgba(16,185,129,0.65)] transition-all duration-200 group-hover:scale-105 group-hover:brightness-[1.45]"
           />
         </Link>
       </div>
