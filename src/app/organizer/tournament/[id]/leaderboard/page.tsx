@@ -292,20 +292,17 @@ export default function OrganizerLeaderboardPage() {
       const standingsRes = await flaskApi.getTournamentStandings(targetSlug);
       if (standingsRes && standingsRes.success) {
         setStandings(standingsRes.standings || []);
-        if (standingsRes.counts) {
-          setCounts({
-            registered: standingsRes.counts.registered || 0,
-            present: standingsRes.counts.present || 0,
-            matches: standingsRes.counts.matches || matchList.length,
-          });
-        }
-      } else if (res && res.counts) {
-        setCounts({
-          registered: res.counts.registered || 0,
-          present: res.counts.present || 0,
-          matches: matchList.length,
-        });
       }
+
+      // Robust Consolidated Counts (Registered, Present, Matches)
+      const regCount = standingsRes?.counts?.registered ?? res?.counts?.registered ?? 0;
+      const presCount = standingsRes?.counts?.present ?? res?.counts?.present ?? 0;
+      const matchCount = standingsRes?.counts?.matches ?? matchList.length;
+      setCounts({
+        registered: regCount,
+        present: presCount,
+        matches: matchCount,
+      });
 
       // 5. Fetch Phase 5 & 6 Tournament Status (LIVE / FINALIZED / SUBMITTED / CHANGES_REQUESTED / APPROVED / PUBLISHED)
       const statusRes = await flaskApi.getTournamentLeaderboardStatus(targetSlug);

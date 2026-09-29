@@ -1592,13 +1592,247 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     }
   }
 
-  // 17. Leaderboard Direct Database Fallback (Resilient offline-safe execution)
+  // 17. Leaderboard Direct Database Handler (Ultra-Resilient Server-Authoritative Execution)
   if (mainSegment === 'leaderboard') {
     const slug = (segments[1] || '').trim().toLowerCase();
     const action = segments[2] || '';
     const subAction = segments[3] || '';
 
-    // Status: GET /api/leaderboard/:slug/status
+    // Helper: Server-authoritative Score Calculation Engine
+    const calculateScoreForRule = (rule: any, rawVal: any): number => {
+      const ruleType = (rule.type || 'PER_UNIT').toUpperCase();
+      const pointsPerUnit = Number(rule.points_per_unit) || 0;
+      const rawNum = Number(rawVal) || 0;
+
+      if (ruleType === 'PER_UNIT' || ruleType === 'OCCURRENCE') {
+        return rawNum * pointsPerUnit;
+      }
+      if (ruleType === 'PENALTY') {
+        return pointsPerUnit > 0 ? -(rawNum * pointsPerUnit) : rawNum * pointsPerUnit;
+      }
+      if (ruleType === 'PLACEMENT') {
+        const pos = Math.round(rawNum);
+        if (pos <= 0) return 0;
+        const placementList = rule.placement_points || [];
+        const found = placementList.find((p: any) => Number(p.placement) === pos);
+        return found ? Number(found.points) || 0 : 0;
+      }
+      return 0;
+    };
+
+    // Helper: Fetch Present Teams using Registration and Attendance records
+    const getPresentTeamsForTournament = async (cleanSlug: string) => {
+      const [attRes, regRes] = await Promise.all([
+        supabaseAdmin.from('event_attendance').select('*').ilike('tournament_slug', cleanSlug),
+        supabaseAdmin.from('registrations').select('*').ilike('tournament_slug', cleanSlug),
+      ]);
+
+      const allAtt = attRes.data || [];
+      const allRegs = regRes.data || [];
+
+      const attendanceStatusMap: Record<string, string> = {};
+      allAtt.forEach((a: any) => {
+        const status = String(a.attendance_status || 'NOT_MARKED').toUpperCase();
+        if (a.pass_id) attendanceStatusMap[String(a.pass_id)] = status;
+        if (a.team_id) attendanceStatusMap[String(a.team_id)] = status;
+        if (a.id) attendanceStatusMap[String(a.id)] = status;
+      });
+
+      const seenTeamIds = new Set<string>();
+      const presentTeams: any[] = [];
+
+      allRegs.forEach((r: any) => {
+        const teamId = String(r.team_id || r.pass_id || r.id);
+        const passId = String(r.pass_id || r.id);
+
+        const status = (
+          attendanceStatusMap[passId] ||
+          attendanceStatusMap[teamId] ||
+          String(r.attendance_status || 'NOT_MARKED')
+        ).toUpperCase();
+
+        if (status === 'PRESENT') {
+          if (!seenTeamIds.has(teamId)) {
+            seenTeamIds.add(teamId);
+            presentTeams.push({
+              team_id: teamId,
+              team_name: r.team_name || 'Squad',
+              captain_name: r.captain_name || 'Captain',
+              captain_in_game_name: r.captain_in_game_name || r.captain_freefire_username || '',
+              college: r.college || '',
+              pass_id: passId,
+              attended_at: r.attended_at || new Date().toISOString(),
+            });
+          }
+        }
+      });
+
+      allAtt.forEach((a: any) => {
+        if (String(a.attendance_status).toUpperCase() === 'PRESENT') {
+          const teamId = String(a.team_id || a.pass_id || a.id);
+          const passId = String(a.pass_id || a.id);
+          if (!seenTeamIds.has(teamId)) {
+            seenTeamIds.add(teamId);
+            presentTeams.push({
+              team_id: teamId,
+              team_name: a.team_name || 'Squad',
+              captain_name: a.captain_name || 'Captain',
+              captain_in_game_name: a.captain_in_game_name || '',
+              college: a.college || '',
+              pass_id: passId,
+              attended_at: a.attended_at || new Date().toISOString(),
+            });
+          }
+        }
+      });
+
+      return {
+        registeredCount: allRegs.length,
+        presentTeams,
+      };
+    };
+
+    // Helper: Fetch Scoring Rules (Auto-seeds standard Battle Royale rules if empty)
+    const getRulesForTournament = async (cleanSlug: string) => {
+      const { data: rules } = await supabaseAdmin
+        .from('tournament_scoring_rules')
+        .select('*')
+        .eq('tournament_id', cleanSlug)
+        .order('sort_order', { ascending: true });
+
+      let ruleList = rules || [];
+
+      if (ruleList.length === 0) {
+        const rule1Id = crypto.randomUUID();
+        const rule2Id = crypto.randomUUID();
+        const nowIso = new Date().toISOString();
+
+        const defaultRule1 = {
+          id: rule1Id,
+          tournament_id: cleanSlug,
+          name: 'Placement Points',
+          type: 'PLACEMENT',
+          points_per_unit: 0,
+          sort_order: 1,
+          created_at: nowIso,
+          updated_at: nowIso,
+        };
+
+        const defaultRule2 = {
+          id: rule2Id,
+          tournament_id: cleanSlug,
+          name: 'Kill Points',
+          type: 'PER_UNIT',
+          points_per_unit: 1,
+          sort_order: 2,
+          created_at: nowIso,
+          updated_at: nowIso,
+        };
+
+        const placementPointsMatrix = [
+          { placement: 1, points: 12 },
+          { placement: 2, points: 9 },
+          { placement: 3, points: 8 },
+          { placement: 4, points: 7 },
+          { placement: 5, points: 6 },
+          { placement: 6, points: 5 },
+          { placement: 7, points: 4 },
+          { placement: 8, points: 3 },
+          { placement: 9, points: 2 },
+          { placement: 10, points: 1 },
+          { placement: 11, points: 0 },
+          { placement: 12, points: 0 },
+        ];
+
+        try {
+          await supabaseAdmin.from('tournament_scoring_rules').insert([defaultRule1, defaultRule2]);
+          const placementInserts = placementPointsMatrix.map((p) => ({
+            id: crypto.randomUUID(),
+            scoring_rule_id: rule1Id,
+            placement: p.placement,
+            points: p.points,
+          }));
+          await supabaseAdmin.from('placement_scoring_rules').insert(placementInserts);
+
+          return [
+            { ...defaultRule1, placement_points: placementPointsMatrix },
+            { ...defaultRule2, placement_points: [] },
+          ];
+        } catch (seedErr) {
+          console.warn('Auto-seed default scoring rules notice:', seedErr);
+          return [
+            { ...defaultRule1, placement_points: placementPointsMatrix },
+            { ...defaultRule2, placement_points: [] },
+          ];
+        }
+      }
+
+      const placementRuleIds = ruleList
+        .filter((r: any) => (r.type || '').toUpperCase() === 'PLACEMENT')
+        .map((r: any) => r.id);
+      const placementMap: Record<string, any[]> = {};
+
+      if (placementRuleIds.length > 0) {
+        const { data: pData } = await supabaseAdmin
+          .from('placement_scoring_rules')
+          .select('*')
+          .in('scoring_rule_id', placementRuleIds)
+          .order('placement', { ascending: true });
+
+        (pData || []).forEach((p: any) => {
+          const parentId = String(p.scoring_rule_id);
+          if (!placementMap[parentId]) placementMap[parentId] = [];
+          placementMap[parentId].push({
+            id: p.id,
+            placement: Number(p.placement),
+            points: Number(p.points),
+          });
+        });
+      }
+
+      return ruleList.map((r: any) => ({
+        ...r,
+        type: (r.type || 'PER_UNIT').toUpperCase(),
+        points_per_unit: Number(r.points_per_unit) || 0,
+        sort_order: Number(r.sort_order) || 0,
+        placement_points: placementMap[String(r.id)] || [],
+      }));
+    };
+
+    // Helper: Recalculate match results when scoring rules change
+    const recalculateMatchResults = async (cleanSlug: string) => {
+      try {
+        const rules = await getRulesForTournament(cleanSlug);
+        const { data: rows } = await supabaseAdmin
+          .from('match_team_results')
+          .select('*')
+          .eq('tournament_id', cleanSlug);
+        if (!rows || rows.length === 0) return;
+
+        const nowIso = new Date().toISOString();
+        for (const row of rows) {
+          const rawScores = row.raw_scores || {};
+          const calcScores: Record<string, number> = {};
+          rules.forEach((col: any) => {
+            const rawVal = rawScores[col.id] !== undefined ? Number(rawScores[col.id]) || 0 : 0;
+            calcScores[col.id] = calculateScoreForRule(col, rawVal);
+          });
+          const totalPoints = Object.values(calcScores).reduce((a, b) => a + b, 0);
+          await supabaseAdmin
+            .from('match_team_results')
+            .update({
+              calculated_scores: calcScores,
+              total_points: totalPoints,
+              updated_at: nowIso,
+            })
+            .eq('id', row.id);
+        }
+      } catch (err) {
+        console.warn('Notice recalculating match results:', err);
+      }
+    };
+
+    // 1. Status: GET /api/leaderboard/:slug/status
     if (action === 'status' && method === 'GET') {
       try {
         const { data: statusRows } = await supabaseAdmin
@@ -1625,173 +1859,655 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
           change_request_reason: statusRecord?.change_request_reason || null,
           change_requested_by: statusRecord?.change_requested_by || null,
           change_requested_at: statusRecord?.change_requested_at || null,
+          submission_id: statusRecord?.submission_id || null,
         }, { status: 200 });
       } catch (err: any) {
-        return NextResponse.json({
-          success: true,
-          status: 'LIVE',
-          is_locked: false,
-        }, { status: 200 });
+        return NextResponse.json({ success: true, status: 'LIVE', is_locked: false }, { status: 200 });
       }
     }
 
-    // Matches: GET /api/leaderboard/:slug/matches
-    if (action === 'matches' && !subAction && method === 'GET') {
-      try {
-        const { data: matches } = await supabaseAdmin
-          .from('tournament_matches')
-          .select('*')
-          .eq('tournament_id', slug)
-          .order('match_number', { ascending: true });
+    // 2. Matches Management
+    if (action === 'matches') {
+      // GET /api/leaderboard/:slug/matches
+      if (!subAction && method === 'GET') {
+        try {
+          const { data: matches } = await supabaseAdmin
+            .from('tournament_matches')
+            .select('*')
+            .eq('tournament_id', slug)
+            .order('match_number', { ascending: true });
 
-        return NextResponse.json({
-          success: true,
-          tournament_slug: slug,
-          matches: matches || []
-        }, { status: 200 });
-      } catch (err: any) {
-        return NextResponse.json({ success: true, tournament_slug: slug, matches: [] }, { status: 200 });
+          return NextResponse.json({
+            success: true,
+            tournament_slug: slug,
+            matches: matches || [],
+          }, { status: 200 });
+        } catch (err: any) {
+          return NextResponse.json({ success: true, tournament_slug: slug, matches: [] }, { status: 200 });
+        }
+      }
+
+      // POST /api/leaderboard/:slug/matches (Create Match)
+      if (!subAction && method === 'POST') {
+        try {
+          const body = await req.json().catch(() => ({}));
+          const { data: existingMatches } = await supabaseAdmin
+            .from('tournament_matches')
+            .select('*')
+            .eq('tournament_id', slug)
+            .order('match_number', { ascending: true });
+
+          const matchesList = existingMatches || [];
+          let matchNumber = body.match_number;
+          if (!matchNumber) {
+            const maxNum = matchesList.length > 0 ? Math.max(...matchesList.map((m: any) => Number(m.match_number) || 0)) : 0;
+            matchNumber = maxNum + 1;
+          } else {
+            matchNumber = Number(matchNumber);
+          }
+
+          const title = (body.title || '').trim() || `Match ${matchNumber}`;
+          const matchId = crypto.randomUUID();
+          const nowIso = new Date().toISOString();
+
+          const newMatch = {
+            id: matchId,
+            tournament_id: slug,
+            match_number: matchNumber,
+            title,
+            status: body.status || 'COMPLETED',
+            created_at: nowIso,
+            updated_at: nowIso,
+          };
+
+          const { error: insErr } = await supabaseAdmin.from('tournament_matches').insert([newMatch]);
+          if (insErr) {
+            console.error('Error inserting tournament match:', insErr);
+            return NextResponse.json({ success: false, message: insErr.message }, { status: 500 });
+          }
+
+          return NextResponse.json({
+            success: true,
+            message: `Match '${title}' created successfully.`,
+            match: newMatch,
+          }, { status: 201 });
+        } catch (err: any) {
+          return NextResponse.json({ success: false, message: err?.message || 'Failed to create match.' }, { status: 500 });
+        }
+      }
+
+      // Save Match Results: PUT or POST /api/leaderboard/:slug/matches/:matchId/results
+      if (subAction && segments[4] === 'results' && (method === 'PUT' || method === 'POST')) {
+        const matchId = subAction;
+        try {
+          const body = await req.json().catch(() => ({}));
+          const submittedResults = body.results || [];
+          if (!Array.isArray(submittedResults)) {
+            return NextResponse.json({ success: false, message: 'results list is required.' }, { status: 400 });
+          }
+
+          const [rules, { presentTeams }] = await Promise.all([
+            getRulesForTournament(slug),
+            getPresentTeamsForTournament(slug),
+          ]);
+
+          const presentTeamIds = new Set(presentTeams.map((t: any) => String(t.team_id)));
+          const presentTeamMap = new Map(presentTeams.map((t: any) => [String(t.team_id), t]));
+          const nowIso = new Date().toISOString();
+
+          const upsertRows: any[] = [];
+          const processedResults: any[] = [];
+
+          for (const item of submittedResults) {
+            const teamId = String(item.team_id);
+            if (!presentTeamIds.has(teamId)) {
+              return NextResponse.json({
+                success: false,
+                message: `Team ID '${teamId}' is not marked PRESENT. Only verified PRESENT teams can participate in match results.`,
+              }, { status: 400 });
+            }
+
+            const rawScores: Record<string, number> = {};
+            const calcScores: Record<string, number> = {};
+            const inputRaw = item.raw_scores || {};
+
+            rules.forEach((col: any) => {
+              const rawVal = inputRaw[col.id] !== undefined ? Number(inputRaw[col.id]) || 0 : 0;
+              rawScores[col.id] = rawVal;
+              calcScores[col.id] = calculateScoreForRule(col, rawVal);
+            });
+
+            const totalPoints = Object.values(calcScores).reduce((a, b) => a + b, 0);
+
+            const resultRow = {
+              match_id: matchId,
+              tournament_id: slug,
+              team_id: teamId,
+              raw_scores: rawScores,
+              calculated_scores: calcScores,
+              total_points: totalPoints,
+              updated_at: nowIso,
+            };
+            upsertRows.push(resultRow);
+
+            const teamInfo = presentTeamMap.get(teamId) || {};
+            processedResults.push({
+              ...resultRow,
+              team_name: teamInfo.team_name || 'Squad',
+              captain_in_game_name: teamInfo.captain_in_game_name || '',
+            });
+          }
+
+          if (upsertRows.length > 0) {
+            const { error: upsertErr } = await supabaseAdmin
+              .from('match_team_results')
+              .upsert(upsertRows, { onConflict: 'match_id,team_id' });
+
+            if (upsertErr) {
+              console.error('Upsert match_team_results error:', upsertErr);
+            }
+          }
+
+          return NextResponse.json({
+            success: true,
+            message: `Match results saved successfully for ${processedResults.length} squads.`,
+            match_id: matchId,
+            results: processedResults,
+          }, { status: 200 });
+        } catch (err: any) {
+          return NextResponse.json({ success: false, message: err?.message || 'Failed to save results.' }, { status: 500 });
+        }
+      }
+
+      // GET /api/leaderboard/:slug/matches/:matchId (Match Details)
+      if (subAction && !segments[4] && method === 'GET') {
+        const matchId = subAction;
+        try {
+          const [matchRes, rules, { registeredCount, presentTeams }, resultsRes] = await Promise.all([
+            supabaseAdmin.from('tournament_matches').select('*').eq('id', matchId).maybeSingle(),
+            getRulesForTournament(slug),
+            getPresentTeamsForTournament(slug),
+            supabaseAdmin.from('match_team_results').select('*').eq('match_id', matchId),
+          ]);
+
+          const matchObj = matchRes.data;
+          if (!matchObj) {
+            return NextResponse.json({ success: false, message: `Match ID '${matchId}' not found.` }, { status: 404 });
+          }
+
+          const resultsData = resultsRes.data || [];
+          const resultsMap: Record<string, any> = {};
+          resultsData.forEach((r: any) => {
+            resultsMap[String(r.team_id)] = r;
+          });
+
+          const formattedTeams = presentTeams.map((t: any) => {
+            const tid = String(t.team_id);
+            const r = resultsMap[tid];
+            const rawScores: Record<string, number> = {};
+            const calcScores: Record<string, number> = {};
+
+            rules.forEach((col: any) => {
+              const rawVal = r?.raw_scores?.[col.id] !== undefined ? Number(r.raw_scores[col.id]) || 0 : 0;
+              rawScores[col.id] = rawVal;
+              calcScores[col.id] = calculateScoreForRule(col, rawVal);
+            });
+
+            const totalPoints = r?.total_points !== undefined ? Number(r.total_points) : Object.values(calcScores).reduce((a, b) => a + b, 0);
+
+            return {
+              ...t,
+              raw_scores: rawScores,
+              calculated_scores: calcScores,
+              total_points: totalPoints,
+            };
+          });
+
+          return NextResponse.json({
+            success: true,
+            match: matchObj,
+            columns: rules,
+            teams: formattedTeams,
+            counts: {
+              registered: registeredCount,
+              present: presentTeams.length,
+            },
+          }, { status: 200 });
+        } catch (err: any) {
+          return NextResponse.json({ success: false, message: err?.message || 'Failed to fetch match details.' }, { status: 500 });
+        }
+      }
+
+      // DELETE /api/leaderboard/:slug/matches/:matchId
+      if (subAction && !segments[4] && method === 'DELETE') {
+        const matchId = subAction;
+        try {
+          await supabaseAdmin.from('match_team_results').delete().eq('match_id', matchId);
+          await supabaseAdmin.from('tournament_matches').delete().eq('id', matchId);
+          return NextResponse.json({ success: true, message: 'Match deleted successfully.' }, { status: 200 });
+        } catch (err: any) {
+          return NextResponse.json({ success: false, message: err?.message || 'Failed to delete match.' }, { status: 500 });
+        }
       }
     }
 
-    // Standings: GET /api/leaderboard/:slug/standings
+    // 3. Scoring Rules Management
+    if (action === 'rules') {
+      // GET /api/leaderboard/:slug/rules
+      if (!subAction && method === 'GET') {
+        try {
+          const rules = await getRulesForTournament(slug);
+          return NextResponse.json({ success: true, columns: rules }, { status: 200 });
+        } catch (err: any) {
+          return NextResponse.json({ success: false, columns: [] }, { status: 500 });
+        }
+      }
+
+      // POST /api/leaderboard/:slug/rules (Create Rule)
+      if (!subAction && method === 'POST') {
+        try {
+          const body = await req.json().catch(() => ({}));
+          const name = (body.name || '').trim();
+          const ruleType = (body.type || 'PER_UNIT').trim().toUpperCase();
+          const pointsPerUnit = Number(body.points_per_unit) || 0;
+          const sortOrder = Number(body.sort_order) || 1;
+          const placementPoints = body.placement_points || [];
+
+          if (!name) {
+            return NextResponse.json({ success: false, message: 'Column name is required.' }, { status: 400 });
+          }
+
+          const ruleId = crypto.randomUUID();
+          const nowIso = new Date().toISOString();
+
+          const newRule = {
+            id: ruleId,
+            tournament_id: slug,
+            name,
+            type: ruleType,
+            points_per_unit: pointsPerUnit,
+            sort_order: sortOrder,
+            created_at: nowIso,
+            updated_at: nowIso,
+          };
+
+          await supabaseAdmin.from('tournament_scoring_rules').insert([newRule]);
+
+          let cleanPlacementPoints: any[] = [];
+          if (ruleType === 'PLACEMENT') {
+            cleanPlacementPoints = (Array.isArray(placementPoints) ? placementPoints : []).map((p: any) => ({
+              id: crypto.randomUUID(),
+              scoring_rule_id: ruleId,
+              placement: Number(p.placement),
+              points: Number(p.points),
+            }));
+            if (cleanPlacementPoints.length > 0) {
+              await supabaseAdmin.from('placement_scoring_rules').insert(cleanPlacementPoints);
+            }
+          }
+
+          await recalculateMatchResults(slug);
+
+          return NextResponse.json({
+            success: true,
+            message: `Scoring column '${name}' added successfully.`,
+            column: {
+              ...newRule,
+              placement_points: cleanPlacementPoints.map((p) => ({ id: p.id, placement: p.placement, points: p.points })),
+            },
+          }, { status: 201 });
+        } catch (err: any) {
+          return NextResponse.json({ success: false, message: err?.message || 'Failed to add rule.' }, { status: 500 });
+        }
+      }
+
+      // POST /api/leaderboard/:slug/rules/reorder
+      if (subAction === 'reorder' && method === 'POST') {
+        try {
+          const body = await req.json().catch(() => ({}));
+          const ruleIds = body.rule_ids || [];
+          for (let i = 0; i < ruleIds.length; i++) {
+            await supabaseAdmin.from('tournament_scoring_rules').update({ sort_order: i + 1 }).eq('id', ruleIds[i]);
+          }
+          return NextResponse.json({ success: true, message: 'Rules reordered.' }, { status: 200 });
+        } catch (err: any) {
+          return NextResponse.json({ success: false, message: err?.message || 'Failed to reorder rules.' }, { status: 500 });
+        }
+      }
+
+      // PUT /api/leaderboard/:slug/rules/:id
+      if (subAction && method === 'PUT') {
+        const ruleId = subAction;
+        try {
+          const body = await req.json().catch(() => ({}));
+          const name = (body.name || '').trim();
+          const ruleType = (body.type || 'PER_UNIT').trim().toUpperCase();
+          const pointsPerUnit = Number(body.points_per_unit) || 0;
+          const placementPoints = body.placement_points || [];
+          const nowIso = new Date().toISOString();
+
+          await supabaseAdmin.from('tournament_scoring_rules').update({
+            name,
+            type: ruleType,
+            points_per_unit: pointsPerUnit,
+            updated_at: nowIso,
+          }).eq('id', ruleId);
+
+          if (ruleType === 'PLACEMENT') {
+            await supabaseAdmin.from('placement_scoring_rules').delete().eq('scoring_rule_id', ruleId);
+            const cleanPlacementPoints = (Array.isArray(placementPoints) ? placementPoints : []).map((p: any) => ({
+              id: crypto.randomUUID(),
+              scoring_rule_id: ruleId,
+              placement: Number(p.placement),
+              points: Number(p.points),
+            }));
+            if (cleanPlacementPoints.length > 0) {
+              await supabaseAdmin.from('placement_scoring_rules').insert(cleanPlacementPoints);
+            }
+          }
+
+          await recalculateMatchResults(slug);
+
+          return NextResponse.json({ success: true, message: 'Scoring rule updated.' }, { status: 200 });
+        } catch (err: any) {
+          return NextResponse.json({ success: false, message: err?.message || 'Failed to update rule.' }, { status: 500 });
+        }
+      }
+
+      // DELETE /api/leaderboard/:slug/rules/:id
+      if (subAction && method === 'DELETE') {
+        const ruleId = subAction;
+        try {
+          await supabaseAdmin.from('placement_scoring_rules').delete().eq('scoring_rule_id', ruleId);
+          await supabaseAdmin.from('tournament_scoring_rules').delete().eq('id', ruleId);
+          await recalculateMatchResults(slug);
+          return NextResponse.json({ success: true, message: 'Scoring rule deleted.' }, { status: 200 });
+        } catch (err: any) {
+          return NextResponse.json({ success: false, message: err?.message || 'Failed to delete rule.' }, { status: 500 });
+        }
+      }
+    }
+
+    // 4. Standings: GET /api/leaderboard/:slug/standings
     if (action === 'standings' && method === 'GET') {
       try {
-        const [rulesRes, matchesRes, resultsRes, attRes, regRes] = await Promise.all([
-          supabaseAdmin.from('tournament_scoring_rules').select('*').eq('tournament_id', slug).order('sort_order', { ascending: true }),
+        const [rules, matchesRes, resultsRes, { registeredCount, presentTeams }] = await Promise.all([
+          getRulesForTournament(slug),
           supabaseAdmin.from('tournament_matches').select('*').eq('tournament_id', slug).order('match_number', { ascending: true }),
           supabaseAdmin.from('match_team_results').select('*').eq('tournament_id', slug),
-          supabaseAdmin.from('event_attendance').select('*').eq('tournament_slug', slug).eq('attendance_status', 'PRESENT'),
-          supabaseAdmin.from('registrations').select('*').eq('tournament_slug', slug)
+          getPresentTeamsForTournament(slug),
         ]);
 
-        const rules = rulesRes.data || [];
         const matches = matchesRes.data || [];
         const results = resultsRes.data || [];
-        const presentAtt = attRes.data || [];
-        const registrations = regRes.data || [];
 
-        const teamMap: Record<string, any> = {};
-        registrations.forEach((r: any) => {
-          const tid = String(r.team_id || r.pass_id || r.id);
-          teamMap[tid] = {
+        const resultsByMatch: Record<string, Record<string, any>> = {};
+        matches.forEach((m: any) => {
+          resultsByMatch[String(m.id)] = {};
+        });
+        results.forEach((r: any) => {
+          const mid = String(r.match_id);
+          const tid = String(r.team_id);
+          if (!resultsByMatch[mid]) resultsByMatch[mid] = {};
+          resultsByMatch[mid][tid] = r;
+        });
+
+        // Build standings for ONLY VERIFIED PRESENT teams!
+        const standingsList = presentTeams.map((t: any) => {
+          const tid = String(t.team_id);
+          const matchScores: Record<string, number> = {};
+          const matchBreakdowns: Record<string, any> = {};
+          let overallTotal = 0;
+
+          matches.forEach((m: any) => {
+            const mid = String(m.id);
+            const mRes = resultsByMatch[mid]?.[tid];
+            let pts = 0;
+            const rawScores: Record<string, number> = {};
+            const calcScores: Record<string, number> = {};
+
+            if (mRes) {
+              const inRaw = mRes.raw_scores || {};
+              rules.forEach((col: any) => {
+                const rVal = inRaw[col.id] !== undefined ? Number(inRaw[col.id]) || 0 : 0;
+                rawScores[col.id] = rVal;
+                calcScores[col.id] = calculateScoreForRule(col, rVal);
+              });
+              pts = mRes.total_points !== undefined ? Number(mRes.total_points) : Object.values(calcScores).reduce((a, b) => a + b, 0);
+            } else {
+              rules.forEach((col: any) => {
+                rawScores[col.id] = 0;
+                calcScores[col.id] = 0;
+              });
+              pts = 0;
+            }
+
+            matchScores[mid] = pts;
+            matchBreakdowns[mid] = {
+              match_id: mid,
+              match_title: m.title || `Match ${m.match_number || 1}`,
+              match_number: Number(m.match_number) || 1,
+              total_points: pts,
+              raw_scores: rawScores,
+              calculated_scores: calcScores,
+            };
+            overallTotal += pts;
+          });
+
+          return {
             team_id: tid,
-            team_name: r.team_name || 'Squad',
-            captain_name: r.captain_name || '',
-            captain_in_game_name: r.captain_in_game_name || r.captain_freefire_username || '',
-            college: r.college || '',
-            pass_id: r.pass_id || '',
+            team_name: t.team_name || 'Squad',
+            captain_name: t.captain_name || '',
+            captain_in_game_name: t.captain_in_game_name || '',
+            college: t.college || '',
+            pass_id: t.pass_id || '',
+            match_scores: matchScores,
+            match_breakdowns: matchBreakdowns,
+            overall_total: overallTotal,
           };
         });
 
-        presentAtt.forEach((a: any) => {
-          const tid = String(a.team_id || a.pass_id || a.id);
-          if (!teamMap[tid]) {
-            teamMap[tid] = {
-              team_id: tid,
-              team_name: a.team_name || 'Squad',
-              captain_name: a.captain_name || '',
-              captain_in_game_name: a.captain_in_game_name || '',
-              college: a.college || '',
-              pass_id: a.pass_id || '',
-            };
-          }
+        // Deterministic sort: overall_total DESC, team_name ASC
+        standingsList.sort((a, b) => {
+          if (b.overall_total !== a.overall_total) return b.overall_total - a.overall_total;
+          return a.team_name.localeCompare(b.team_name);
         });
 
-        const teamStandings: Record<string, any> = {};
-        Object.keys(teamMap).forEach((tid) => {
-          teamStandings[tid] = {
-            ...teamMap[tid],
-            match_scores: {},
-            match_breakdowns: {},
-            overall_total: 0,
-          };
-        });
-
-        results.forEach((res: any) => {
-          const tid = String(res.team_id);
-          const mid = String(res.match_id);
-          const totalPts = Number(res.total_points) || 0;
-          if (teamStandings[tid]) {
-            teamStandings[tid].match_scores[mid] = totalPts;
-            teamStandings[tid].match_breakdowns[mid] = {
-              raw_scores: res.raw_scores || {},
-              calculated_scores: res.calculated_scores || {},
-              total_points: totalPts
-            };
-            teamStandings[tid].overall_total += totalPts;
-          }
-        });
-
-        const standingsList = Object.values(teamStandings)
-          .sort((a: any, b: any) => b.overall_total - a.overall_total)
-          .map((row: any, idx) => ({ ...row, rank: idx + 1 }));
+        const rankedStandings = standingsList.map((row, idx) => ({
+          ...row,
+          rank: idx + 1,
+        }));
 
         return NextResponse.json({
           success: true,
           tournament_slug: slug,
           matches,
           columns: rules,
-          standings: standingsList
+          counts: {
+            registered: registeredCount,
+            present: presentTeams.length,
+            matches: matches.length,
+          },
+          standings: rankedStandings,
         }, { status: 200 });
       } catch (err: any) {
-        return NextResponse.json({ success: true, tournament_slug: slug, matches: [], columns: [], standings: [] }, { status: 200 });
+        return NextResponse.json({
+          success: true,
+          tournament_slug: slug,
+          matches: [],
+          columns: [],
+          counts: { registered: 0, present: 0, matches: 0 },
+          standings: [],
+        }, { status: 200 });
       }
     }
 
-    // Main: GET /api/leaderboard/:slug
-    if (!action && method === 'GET') {
+    // 5. Finalize: POST /api/leaderboard/:slug/finalize
+    if (action === 'finalize' && method === 'POST') {
       try {
-        const [rulesRes, matchesRes, attRes, regRes] = await Promise.all([
-          supabaseAdmin.from('tournament_scoring_rules').select('*').eq('tournament_id', slug).order('sort_order', { ascending: true }),
+        const nowIso = new Date().toISOString();
+        const { data: statusRows } = await supabaseAdmin.from('tournament_leaderboard_status').select('*').eq('tournament_id', slug);
+        if (statusRows && statusRows.length > 0) {
+          await supabaseAdmin.from('tournament_leaderboard_status').update({
+            status: 'FINALIZED',
+            finalized_at: nowIso,
+            updated_at: nowIso,
+          }).eq('tournament_id', slug);
+        } else {
+          await supabaseAdmin.from('tournament_leaderboard_status').insert([{
+            id: crypto.randomUUID(),
+            tournament_id: slug,
+            status: 'FINALIZED',
+            finalized_at: nowIso,
+            created_at: nowIso,
+            updated_at: nowIso,
+          }]);
+        }
+        return NextResponse.json({ success: true, status: 'FINALIZED', finalized_at: nowIso }, { status: 200 });
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: err?.message || 'Failed to finalize.' }, { status: 500 });
+      }
+    }
+
+    // 6. Submit: POST /api/leaderboard/:slug/submit
+    if (action === 'submit' && method === 'POST') {
+      try {
+        const body = await req.json().catch(() => ({}));
+        const nowIso = new Date().toISOString();
+        const subId = crypto.randomUUID();
+
+        await supabaseAdmin.from('tournament_submissions').insert([{
+          id: subId,
+          tournament_id: slug,
+          status: 'SUBMITTED',
+          notes: body.notes || '',
+          submitted_at: nowIso,
+          created_at: nowIso,
+          updated_at: nowIso,
+        }]);
+
+        await supabaseAdmin.from('tournament_leaderboard_status').upsert({
+          tournament_id: slug,
+          status: 'SUBMITTED',
+          submitted_at: nowIso,
+          submission_id: subId,
+          updated_at: nowIso,
+        }, { onConflict: 'tournament_id' });
+
+        return NextResponse.json({ success: true, status: 'SUBMITTED', submission_id: subId, submitted_at: nowIso }, { status: 200 });
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: err?.message || 'Failed to submit.' }, { status: 500 });
+      }
+    }
+
+    // 7. Export CSV: GET /api/leaderboard/:slug/export
+    if (action === 'export' && method === 'GET') {
+      try {
+        const [rules, matchesRes, resultsRes, { presentTeams }] = await Promise.all([
+          getRulesForTournament(slug),
           supabaseAdmin.from('tournament_matches').select('*').eq('tournament_id', slug).order('match_number', { ascending: true }),
-          supabaseAdmin.from('event_attendance').select('*').eq('tournament_slug', slug).eq('attendance_status', 'PRESENT'),
-          supabaseAdmin.from('registrations').select('*').eq('tournament_slug', slug)
+          supabaseAdmin.from('match_team_results').select('*').eq('tournament_id', slug),
+          getPresentTeamsForTournament(slug),
         ]);
 
-        const rules = rulesRes.data || [];
         const matches = matchesRes.data || [];
-        const presentAtt = attRes.data || [];
-        const allRegs = regRes.data || [];
+        const results = resultsRes.data || [];
+        const resultsByMatch: Record<string, Record<string, any>> = {};
+        matches.forEach((m: any) => { resultsByMatch[String(m.id)] = {}; });
+        results.forEach((r: any) => {
+          const mid = String(r.match_id);
+          const tid = String(r.team_id);
+          if (!resultsByMatch[mid]) resultsByMatch[mid] = {};
+          resultsByMatch[mid][tid] = r;
+        });
 
-        const seenTeamIds = new Set<string>();
-        const presentTeams: any[] = [];
+        const matchHeaders = matches.map((m: any) => `"${m.title || `Match ${m.match_number}`}"`);
+        const csvHeader = ['Rank', 'Team Name', 'Captain Name', 'Captain IGN', 'College', 'Pass ID', ...matchHeaders, 'Overall Total'].join(',');
 
-        presentAtt.forEach((a: any) => {
-          const tid = String(a.team_id || a.pass_id || a.id);
-          if (!seenTeamIds.has(tid)) {
-            seenTeamIds.add(tid);
-            presentTeams.push({
-              team_id: tid,
-              team_name: a.team_name || 'Squad',
-              captain_name: a.captain_name || '',
-              captain_in_game_name: a.captain_in_game_name || '',
-              college: a.college || '',
-              pass_id: a.pass_id || '',
-              attended_at: a.attended_at
-            });
-          }
+        const rows = presentTeams.map((t: any) => {
+          const tid = String(t.team_id);
+          let overall = 0;
+          const matchPts = matches.map((m: any) => {
+            const mid = String(m.id);
+            const mRes = resultsByMatch[mid]?.[tid];
+            const pts = Number(mRes?.total_points) || 0;
+            overall += pts;
+            return pts;
+          });
+
+          return [
+            0,
+            `"${(t.team_name || '').replace(/"/g, '""')}"`,
+            `"${(t.captain_name || '').replace(/"/g, '""')}"`,
+            `"${(t.captain_in_game_name || '').replace(/"/g, '""')}"`,
+            `"${(t.college || '').replace(/"/g, '""')}"`,
+            `"${(t.pass_id || '').replace(/"/g, '""')}"`,
+            ...matchPts,
+            overall,
+          ];
+        });
+
+        rows.sort((a, b) => (b[b.length - 1] as number) - (a[a.length - 1] as number));
+        rows.forEach((r, idx) => { r[0] = idx + 1; });
+
+        const csvContent = [csvHeader, ...rows.map(r => r.join(','))].join('\n');
+
+        return new NextResponse(csvContent, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/csv',
+            'Content-Disposition': `attachment; filename="leaderboard_${slug}.csv"`,
+          },
+        });
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: err?.message || 'Export failed.' }, { status: 500 });
+      }
+    }
+
+    // 8. Main Organizer View: GET /api/leaderboard/:slug
+    if (!action && method === 'GET') {
+      try {
+        const [rules, matchesRes, { registeredCount, presentTeams }] = await Promise.all([
+          getRulesForTournament(slug),
+          supabaseAdmin.from('tournament_matches').select('*').eq('tournament_id', slug).order('match_number', { ascending: true }),
+          getPresentTeamsForTournament(slug),
+        ]);
+
+        const matches = matchesRes.data || [];
+
+        const formattedTeams = presentTeams.map((t: any, idx: number) => {
+          const scores: Record<string, number> = {};
+          rules.forEach((col: any) => {
+            scores[col.id] = 0;
+          });
+          return {
+            ...t,
+            rank: idx + 1,
+            scores,
+            total: 0,
+          };
         });
 
         return NextResponse.json({
           success: true,
           tournament_slug: slug,
           counts: {
-            registered: allRegs.length,
-            present: presentTeams.length
+            registered: registeredCount,
+            present: presentTeams.length,
+            matches: matches.length,
           },
           columns: rules,
           matches: matches,
-          teams: presentTeams
+          teams: formattedTeams,
         }, { status: 200 });
       } catch (err: any) {
         return NextResponse.json({
           success: true,
           tournament_slug: slug,
-          counts: { registered: 0, present: 0 },
+          counts: { registered: 0, present: 0, matches: 0 },
           columns: [],
           matches: [],
-          teams: []
+          teams: [],
         }, { status: 200 });
       }
     }
@@ -1836,6 +2552,10 @@ function isNextJsNativeRoute(segments: string[]): boolean {
   if (main === 'payments') {
     if (sub === 'manual' && sub2 === 'create') return true;
     if (sub === 'user-tournaments-status') return true;
+  }
+
+  if (main === 'leaderboard') {
+    return true;
   }
 
   return false;
