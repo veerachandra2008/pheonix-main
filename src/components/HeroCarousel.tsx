@@ -9,8 +9,6 @@ import {
   Trophy,
   Swords,
   Radio,
-  Volume2,
-  VolumeX,
   Flame,
   ArrowUpRight,
   ArrowRight,
@@ -109,7 +107,6 @@ export default function HeroCarousel({ fullscreen = false }: HeroCarouselProps) 
   const router = useRouter();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
   const [slideKey, setSlideKey] = useState(0);
   const [latestTournament, setLatestTournament] = useState<any | null>(null);
 
@@ -326,15 +323,6 @@ export default function HeroCarousel({ fullscreen = false }: HeroCarouselProps) 
     }
   };
 
-  const toggleMute = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (videoRef.current) {
-      const nextMute = !isMuted;
-      videoRef.current.muted = nextMute;
-      setIsMuted(nextMute);
-    }
-  };
-
   const currentSlide = slides[currentIndex] || slides[0];
   const isCurrentTournament = !!currentSlide.isTournament;
 
@@ -401,7 +389,7 @@ export default function HeroCarousel({ fullscreen = false }: HeroCarouselProps) 
                   ref={videoRef}
                   autoPlay
                   loop
-                  muted={isMuted}
+                  muted
                   playsInline
                   preload="metadata"
                   className="w-full h-full object-cover filter brightness-[0.6] contrast-[1.06] saturate-125 transition-transform duration-1000 ease-out"
@@ -478,40 +466,6 @@ export default function HeroCarousel({ fullscreen = false }: HeroCarouselProps) 
                 <ArrowUpRight className="h-3 w-3" />
               </span>
             )}
-          </div>
-
-          {/* Controls Right: Audio Toggle & Slide Count */}
-          <div className="flex items-center gap-2">
-            {currentSlide.type === 'video' && (
-              <button
-                type="button"
-                onClick={toggleMute}
-                className="px-3.5 py-1.5 sm:py-2 rounded-full bg-black/60 hover:bg-black/80 border border-white/15 text-white hover:text-emerald-400 text-xs font-mono font-bold flex items-center gap-1.5 backdrop-blur-xl transition-all duration-200 shadow-md cursor-pointer"
-                title={isMuted ? 'Unmute video audio' : 'Mute video audio'}
-                aria-label={isMuted ? 'Unmute audio' : 'Mute audio'}
-              >
-                {isMuted ? (
-                  <VolumeX className="h-3.5 w-3.5 text-zinc-400" />
-                ) : (
-                  <Volume2 className="h-3.5 w-3.5 text-emerald-400" />
-                )}
-                <span className="hidden sm:inline text-[11px]">
-                  {isMuted ? 'Muted' : 'Audio On'}
-                </span>
-              </button>
-            )}
-
-            {/* Status & Counter */}
-            <div className="px-3.5 py-1.5 sm:py-2 rounded-full bg-black/60 border border-white/10 text-white/90 text-[11px] sm:text-xs font-mono font-bold backdrop-blur-xl flex items-center gap-1.5">
-              <span className="text-emerald-400 font-extrabold">0{currentIndex + 1}</span>
-              <span className="text-white/25">/</span>
-              <span className="text-white/60">0{slides.length}</span>
-              {isPaused && (
-                <span className="ml-1 text-[9px] px-1.5 py-0.5 rounded bg-white/10 text-zinc-300 uppercase font-sans font-bold">
-                  PAUSED
-                </span>
-              )}
-            </div>
           </div>
         </div>
 
