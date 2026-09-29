@@ -1592,6 +1592,211 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
     }
   }
 
+  // 17. Leaderboard Direct Database Fallback (Resilient offline-safe execution)
+  if (mainSegment === 'leaderboard') {
+    const slug = (segments[1] || '').trim().toLowerCase();
+    const action = segments[2] || '';
+    const subAction = segments[3] || '';
+
+    // Status: GET /api/leaderboard/:slug/status
+    if (action === 'status' && method === 'GET') {
+      try {
+        const { data: statusRows } = await supabaseAdmin
+          .from('tournament_leaderboard_status')
+          .select('*')
+          .eq('tournament_id', slug);
+
+        const statusRecord = statusRows && statusRows.length > 0 ? statusRows[0] : null;
+        const currentStatus = (statusRecord?.status || 'LIVE').toUpperCase();
+        const isLocked = ['FINALIZED', 'SUBMITTED', 'APPROVED', 'PUBLISHED'].includes(currentStatus);
+
+        return NextResponse.json({
+          success: true,
+          status: currentStatus,
+          is_locked: isLocked,
+          finalized_at: statusRecord?.finalized_at || null,
+          finalized_by: statusRecord?.finalized_by || null,
+          submitted_at: statusRecord?.submitted_at || null,
+          submitted_by: statusRecord?.submitted_by || null,
+          approved_at: statusRecord?.approved_at || null,
+          approved_by: statusRecord?.approved_by || null,
+          published_at: statusRecord?.published_at || null,
+          published_by: statusRecord?.published_by || null,
+          change_request_reason: statusRecord?.change_request_reason || null,
+          change_requested_by: statusRecord?.change_requested_by || null,
+          change_requested_at: statusRecord?.change_requested_at || null,
+        }, { status: 200 });
+      } catch (err: any) {
+        return NextResponse.json({
+          success: true,
+          status: 'LIVE',
+          is_locked: false,
+        }, { status: 200 });
+      }
+    }
+
+    // Matches: GET /api/leaderboard/:slug/matches
+    if (action === 'matches' && !subAction && method === 'GET') {
+      try {
+        const { data: matches } = await supabaseAdmin
+          .from('tournament_matches')
+          .select('*')
+          .eq('tournament_id', slug)
+          .order('match_number', { ascending: true });
+
+        return NextResponse.json({
+          success: true,
+          tournament_slug: slug,
+          matches: matches || []
+        }, { status: 200 });
+      } catch (err: any) {
+        return NextResponse.json({ success: true, tournament_slug: slug, matches: [] }, { status: 200 });
+      }
+    }
+
+    // Standings: GET /api/leaderboard/:slug/standings
+    if (action === 'standings' && method === 'GET') {
+      try {
+        const [rulesRes, matchesRes, resultsRes, attRes, regRes] = await Promise.all([
+          supabaseAdmin.from('tournament_scoring_rules').select('*').eq('tournament_id', slug).order('sort_order', { ascending: true }),
+          supabaseAdmin.from('tournament_matches').select('*').eq('tournament_id', slug).order('match_number', { ascending: true }),
+          supabaseAdmin.from('match_team_results').select('*').eq('tournament_id', slug),
+          supabaseAdmin.from('event_attendance').select('*').eq('tournament_slug', slug).eq('attendance_status', 'PRESENT'),
+          supabaseAdmin.from('registrations').select('*').eq('tournament_slug', slug)
+        ]);
+
+        const rules = rulesRes.data || [];
+        const matches = matchesRes.data || [];
+        const results = resultsRes.data || [];
+        const presentAtt = attRes.data || [];
+        const registrations = regRes.data || [];
+
+        const teamMap: Record<string, any> = {};
+        registrations.forEach((r: any) => {
+          const tid = String(r.team_id || r.pass_id || r.id);
+          teamMap[tid] = {
+            team_id: tid,
+            team_name: r.team_name || 'Squad',
+            captain_name: r.captain_name || '',
+            captain_in_game_name: r.captain_in_game_name || r.captain_freefire_username || '',
+            college: r.college || '',
+            pass_id: r.pass_id || '',
+          };
+        });
+
+        presentAtt.forEach((a: any) => {
+          const tid = String(a.team_id || a.pass_id || a.id);
+          if (!teamMap[tid]) {
+            teamMap[tid] = {
+              team_id: tid,
+              team_name: a.team_name || 'Squad',
+              captain_name: a.captain_name || '',
+              captain_in_game_name: a.captain_in_game_name || '',
+              college: a.college || '',
+              pass_id: a.pass_id || '',
+            };
+          }
+        });
+
+        const teamStandings: Record<string, any> = {};
+        Object.keys(teamMap).forEach((tid) => {
+          teamStandings[tid] = {
+            ...teamMap[tid],
+            match_scores: {},
+            match_breakdowns: {},
+            overall_total: 0,
+          };
+        });
+
+        results.forEach((res: any) => {
+          const tid = String(res.team_id);
+          const mid = String(res.match_id);
+          const totalPts = Number(res.total_points) || 0;
+          if (teamStandings[tid]) {
+            teamStandings[tid].match_scores[mid] = totalPts;
+            teamStandings[tid].match_breakdowns[mid] = {
+              raw_scores: res.raw_scores || {},
+              calculated_scores: res.calculated_scores || {},
+              total_points: totalPts
+            };
+            teamStandings[tid].overall_total += totalPts;
+          }
+        });
+
+        const standingsList = Object.values(teamStandings)
+          .sort((a: any, b: any) => b.overall_total - a.overall_total)
+          .map((row: any, idx) => ({ ...row, rank: idx + 1 }));
+
+        return NextResponse.json({
+          success: true,
+          tournament_slug: slug,
+          matches,
+          columns: rules,
+          standings: standingsList
+        }, { status: 200 });
+      } catch (err: any) {
+        return NextResponse.json({ success: true, tournament_slug: slug, matches: [], columns: [], standings: [] }, { status: 200 });
+      }
+    }
+
+    // Main: GET /api/leaderboard/:slug
+    if (!action && method === 'GET') {
+      try {
+        const [rulesRes, matchesRes, attRes, regRes] = await Promise.all([
+          supabaseAdmin.from('tournament_scoring_rules').select('*').eq('tournament_id', slug).order('sort_order', { ascending: true }),
+          supabaseAdmin.from('tournament_matches').select('*').eq('tournament_id', slug).order('match_number', { ascending: true }),
+          supabaseAdmin.from('event_attendance').select('*').eq('tournament_slug', slug).eq('attendance_status', 'PRESENT'),
+          supabaseAdmin.from('registrations').select('*').eq('tournament_slug', slug)
+        ]);
+
+        const rules = rulesRes.data || [];
+        const matches = matchesRes.data || [];
+        const presentAtt = attRes.data || [];
+        const allRegs = regRes.data || [];
+
+        const seenTeamIds = new Set<string>();
+        const presentTeams: any[] = [];
+
+        presentAtt.forEach((a: any) => {
+          const tid = String(a.team_id || a.pass_id || a.id);
+          if (!seenTeamIds.has(tid)) {
+            seenTeamIds.add(tid);
+            presentTeams.push({
+              team_id: tid,
+              team_name: a.team_name || 'Squad',
+              captain_name: a.captain_name || '',
+              captain_in_game_name: a.captain_in_game_name || '',
+              college: a.college || '',
+              pass_id: a.pass_id || '',
+              attended_at: a.attended_at
+            });
+          }
+        });
+
+        return NextResponse.json({
+          success: true,
+          tournament_slug: slug,
+          counts: {
+            registered: allRegs.length,
+            present: presentTeams.length
+          },
+          columns: rules,
+          matches: matches,
+          teams: presentTeams
+        }, { status: 200 });
+      } catch (err: any) {
+        return NextResponse.json({
+          success: true,
+          tournament_slug: slug,
+          counts: { registered: 0, present: 0 },
+          columns: [],
+          matches: [],
+          teams: []
+        }, { status: 200 });
+      }
+    }
+  }
+
   // Default fallback response: strict 404 instead of fake 200 OK
   return NextResponse.json({
     success: false,
@@ -1648,7 +1853,7 @@ async function handleRequest(req: NextRequest, { params }: { params: Promise<{ p
 
   // 2. All Flask-backed endpoints are proxied to Render Flask backend
   const proxyRes = await tryProxyToBackend(req, pathStr);
-  if (proxyRes) {
+  if (proxyRes && proxyRes.status !== 404 && proxyRes.status !== 502) {
     try {
       const responseData = await proxyRes.text();
       const contentType = proxyRes.headers.get('content-type') || 'application/json';
@@ -1666,8 +1871,28 @@ async function handleRequest(req: NextRequest, { params }: { params: Promise<{ p
     }
   }
 
-  // 3. If Render is offline or unreachable for a Flask-backed route, return 502 Bad Gateway
-  // Never silently fall back to an inconsistent implementation.
+  // 3. Fallback to direct database execution if Render is offline, sleeping, or route not found on Render
+  const fallbackRes = await handleDirectDatabase(req, pathSegments);
+  if (fallbackRes.status !== 404) {
+    return fallbackRes;
+  }
+
+  // If proxyRes had a response (e.g. 400 validation error from Flask), return that
+  if (proxyRes) {
+    const responseData = await proxyRes.text();
+    const contentType = proxyRes.headers.get('content-type') || 'application/json';
+    return new NextResponse(responseData, {
+      status: proxyRes.status,
+      headers: {
+        'Content-Type': contentType,
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      },
+    });
+  }
+
+  // 4. If Render is offline or unreachable and no fallback matches, return 502 Bad Gateway
   return NextResponse.json({
     success: false,
     message: 'Backend service unavailable. Please try again shortly.'

@@ -280,7 +280,7 @@ export default function HostEventPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <img src="/logo.svg" alt="Phoenix" className="h-7 w-7 object-contain" />
+          <img src="/logo.png?v=20260929" alt="XENOVA" className="h-7 w-7 object-contain" />
           <span className="font-black italic uppercase tracking-tighter text-sm text-white">XENOVA <span className="text-emerald-400">HOST</span></span>
         </div>
         <div className="flex items-center gap-3">

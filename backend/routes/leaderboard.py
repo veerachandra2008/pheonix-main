@@ -9,9 +9,14 @@ from routes.tournaments import IN_MEMORY_TOURNAMENTS
 from routes.attendance import IN_MEMORY_EVENT_ATTENDANCE
 from routes.auth import get_authenticated_user
 
-import openpyxl
-from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+try:
+    import openpyxl
+    from openpyxl.utils import get_column_letter
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+except ImportError:
+    openpyxl = None
+    get_column_letter = None
+    Font = PatternFill = Alignment = Border = Side = None
 
 leaderboard_bp = Blueprint('leaderboard', __name__)
 admin_submissions_bp = Blueprint('admin_submissions', __name__)
@@ -1422,6 +1427,8 @@ def generate_leaderboard_xlsx(tournament_slug, metadata, standings_data):
     - Sheet 2: Match Breakdown
     - Sheet 3: Tournament Metadata & Rules
     """
+    if not openpyxl:
+        raise RuntimeError("openpyxl is not installed on this server. Please install openpyxl to export Excel files.")
     wb = openpyxl.Workbook()
 
     title = metadata.get('title') or metadata.get('name') or tournament_slug.upper()
