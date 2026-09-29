@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS teams (
     win_rate INTEGER DEFAULT 50,
     streak TEXT DEFAULT 'W1',
     captain TEXT,
+    captain_freefire_username TEXT,
     trophies INTEGER DEFAULT 0,
     members INTEGER DEFAULT 5,
     recent_wins INTEGER DEFAULT 0,
@@ -78,6 +79,9 @@ CREATE TABLE IF NOT EXISTS teams (
     verification_status TEXT DEFAULT 'approved',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure captain_freefire_username exists on existing teams tables
+ALTER TABLE teams ADD COLUMN IF NOT EXISTS captain_freefire_username TEXT;
 
 -- 3. NOTIFICATIONS TABLE
 CREATE TABLE IF NOT EXISTS notifications (
@@ -163,6 +167,7 @@ CREATE TABLE IF NOT EXISTS registrations (
     team_name TEXT NOT NULL,
     college TEXT NOT NULL,
     captain_name TEXT NOT NULL,
+    captain_freefire_username TEXT,
     email TEXT NOT NULL,
     players JSONB DEFAULT '[]'::jsonb,
     player_emails TEXT[] DEFAULT ARRAY[]::TEXT[],
@@ -174,6 +179,9 @@ CREATE TABLE IF NOT EXISTS registrations (
     attended_by TEXT,
     registered_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure captain_freefire_username exists on existing registrations tables
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS captain_freefire_username TEXT;
 
 -- 6. ORGANIZER APPLICATIONS TABLE
 CREATE TABLE IF NOT EXISTS organizer_applications (

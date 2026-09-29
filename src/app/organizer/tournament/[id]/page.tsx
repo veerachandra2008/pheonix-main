@@ -226,13 +226,14 @@ export default function TournamentManagePage() {
       return;
     }
 
-    const headers = ['Pass ID', 'Tournament', 'Team Name', 'College', 'Captain Name', 'Captain Email', 'Payment Status', 'Registered At'];
+    const headers = ['Pass ID', 'Tournament', 'Team Name', 'College', 'Captain Name', 'Captain In-Game Name', 'Captain Email', 'Payment Status', 'Registered At'];
     const rows = registrations.map((r) => [
       `"${r.pass_id || r.passId || ''}"`,
       `"${tournament?.title || ''}"`,
       `"${r.team_name || r.teamName || ''}"`,
       `"${r.college || ''}"`,
       `"${r.captain_name || r.captainName || ''}"`,
+      `"${r.captain_in_game_name || r.captainInGameName || r.captain_freefire_username || r.captainFreeFireUsername || ''}"`,
       `"${r.email || r.captainEmail || ''}"`,
       `"${r.payment_status || r.paymentStatus || 'SUCCESS'}"`,
       `"${r.registered_at || r.registeredAt || ''}"`,
@@ -378,6 +379,14 @@ export default function TournamentManagePage() {
                 Attendance Desk
               </Link>
 
+              <Link
+                href={`/organizer/tournament/${rawId}/leaderboard`}
+                className="inline-flex items-center gap-1.5 px-4 py-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 transition text-xs font-black uppercase tracking-wider text-white rounded-xl shadow-lg shadow-amber-600/20 cursor-pointer"
+              >
+                <Trophy className="h-4 w-4" />
+                Leaderboard
+              </Link>
+
               <button
                 onClick={handleExportCSV}
                 className="inline-flex items-center gap-1.5 px-3.5 py-3 bg-white/10 hover:bg-white/15 transition text-xs font-bold uppercase tracking-wider text-white rounded-xl cursor-pointer"
@@ -465,6 +474,14 @@ export default function TournamentManagePage() {
                           <span className="text-slate-200 flex items-center gap-1">
                             <Users className="h-3.5 w-3.5 text-slate-400" /> Captain: {captainName}
                           </span>
+                          {(reg.captain_in_game_name || reg.captainInGameName || reg.captain_freefire_username || reg.captainFreeFireUsername) && (
+                            <>
+                              <span>•</span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/25 text-amber-300 font-mono text-[11px] font-bold">
+                                🎮 IGN: {reg.captain_in_game_name || reg.captainInGameName || reg.captain_freefire_username || reg.captainFreeFireUsername}
+                              </span>
+                            </>
+                          )}
                           <span>•</span>
                           <span className="flex items-center gap-1">
                             <Mail className="h-3.5 w-3.5 text-slate-400" /> {email}

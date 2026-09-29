@@ -41,6 +41,10 @@ interface TeamRoster {
   team_name: string;
   college: string;
   captain_name?: string;
+  captain_in_game_name?: string;
+  captainInGameName?: string;
+  captain_freefire_username?: string;
+  captainFreeFireUsername?: string;
   email?: string;
   registered_at?: string;
   players: Player[];
@@ -207,6 +211,8 @@ export default function OrganizerRostersHubPage() {
                 team_name: reg.team_name || 'Squad Entry',
                 college: reg.college || 'Collegiate Campus',
                 captain_name: reg.captain_name || p1.player_name || p1.name || 'Captain',
+                captain_freefire_username: reg.captain_freefire_username || null,
+                captainFreeFireUsername: reg.captain_freefire_username || null,
                 email: reg.email,
                 registered_at: reg.registered_at || new Date().toISOString(),
                 players: playersList,
@@ -330,10 +336,12 @@ export default function OrganizerRostersHubPage() {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase().trim();
 
+    const ffMatch = (team.captain_freefire_username || team.captainFreeFireUsername || '').toLowerCase().includes(q);
     const teamMatch =
       (team.team_name || '').toLowerCase().includes(q) ||
       (team.college || '').toLowerCase().includes(q) ||
-      (team.pass_id || '').toLowerCase().includes(q);
+      (team.pass_id || '').toLowerCase().includes(q) ||
+      ffMatch;
 
     const playerMatch = team.players?.some(
       (p) =>
@@ -550,8 +558,16 @@ export default function OrganizerRostersHubPage() {
                           {team.college || 'University'}
                         </span>
                       </div>
-                      <div className="text-xs text-slate-400 font-medium flex items-center gap-2 mt-0.5">
+                      <div className="text-xs text-slate-400 font-medium flex flex-wrap items-center gap-2 mt-0.5">
                         <span className="font-mono text-slate-500">Pass: {team.pass_id}</span>
+                        {(team.captain_in_game_name || team.captainInGameName || team.captain_freefire_username || team.captainFreeFireUsername) && (
+                          <>
+                            <span>•</span>
+                            <span className="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/25 text-amber-300 font-mono text-[11px] font-bold">
+                              🎮 IGN: {team.captain_in_game_name || team.captainInGameName || team.captain_freefire_username || team.captainFreeFireUsername}
+                            </span>
+                          </>
+                        )}
                         <span>•</span>
                         <span className="text-emerald-400 font-bold uppercase text-[11px]">{team.tournament_slug}</span>
                       </div>
@@ -604,7 +620,9 @@ export default function OrganizerRostersHubPage() {
                           </div>
                           <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[11px] font-mono text-indigo-300 font-bold truncate max-w-full">
                             <Gamepad2 className="h-3 w-3 shrink-0 text-indigo-400" />
-                            {p.in_game_tag}
+                            {isCap && (team.captain_freefire_username || team.captainFreeFireUsername)
+                              ? (team.captain_freefire_username || team.captainFreeFireUsername)
+                              : p.in_game_tag}
                           </div>
                           <div className="flex items-center gap-1 text-[11px] text-slate-400 pt-1 truncate" title={p.email}>
                             <Mail className="h-3 w-3 shrink-0 text-slate-500" />

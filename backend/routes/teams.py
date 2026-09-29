@@ -151,7 +151,7 @@ def get_teams():
 
 VALID_TEAM_COLUMNS = {
     'slug', 'name', 'college', 'game', 'rank', 'win_rate', 'streak',
-    'captain', 'captain_email', 'created_by', 'trophies', 'members',
+    'captain', 'captain_email', 'captain_freefire_username', 'created_by', 'trophies', 'members',
     'recent_wins', 'form', 'active_score', 'joined', 'accent', 'verified',
     'verification_status'
 }
@@ -169,6 +169,8 @@ def sanitize_team_payload(data):
             sanitized['verification_status'] = v
         elif k == 'captainEmail':
             sanitized['captain_email'] = v
+        elif k == 'captainFreeFireUsername' or k == 'captain_freefire_username':
+            sanitized['captain_freefire_username'] = str(v).strip() if v else None
         elif k == 'createdBy':
             sanitized['created_by'] = v
         elif k in VALID_TEAM_COLUMNS:

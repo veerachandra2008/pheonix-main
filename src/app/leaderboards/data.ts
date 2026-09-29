@@ -11,7 +11,7 @@ export type LeaderboardEntry = {
   detail: string;
 };
 
-export const leaderboardTabs = ['Colleges', 'Players'] as const;
+export const leaderboardTabs = ['Colleges', 'Players', 'Tournaments'] as const;
 
 export const collegeStandings: LeaderboardEntry[] = [
   { rank: 1, name: 'IIT Bombay', tag: 'TECH', points: 12480, wins: 28, change: '+120', accent: '#FBBF24', detail: 'Top college with the strongest season momentum.' },

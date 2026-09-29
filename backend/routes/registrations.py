@@ -32,7 +32,31 @@ def create_registration():
         tournament_date = data.get('tournamentDate', 'TBD')
         tournament_format = data.get('tournamentFormat', 'Tournament')
         tournament_region = data.get('tournamentRegion', 'Pan India')
-        team_id = data.get('teamId') or data.get('team_id') or f"team-{int(time.time())}"
+        team_id = data.get('teamId') or data.get('team_id') or f"XNV-{uuid.uuid4().hex[:6].upper()}"
+
+        # ─── CAPTAIN IN-GAME NAME IDENTIFICATION SYSTEM VALIDATION ───
+        captain_ff_raw = (
+            data.get('captain_in_game_name') or data.get('captainInGameName') or
+            data.get('captain_freefire_username') or data.get('captainFreeFireUsername') or ''
+        )
+        captain_ff_username = str(captain_ff_raw).strip()
+
+        if not captain_ff_username:
+            return jsonify({'success': False, 'message': "Captain's In-Game Name is required."}), 400
+
+        # Preserve exact case, spaces, symbols, and Unicode. Reject numeric Free Fire UID.
+        if captain_ff_username.isdigit():
+            return jsonify({
+                'success': False,
+                'message': "Enter your in-game name (e.g. 亗PHOENIX亗), not your numeric UID."
+            }), 400
+
+        # Length validation
+        if len(captain_ff_username) < 2 or len(captain_ff_username) > 30:
+            return jsonify({
+                'success': False,
+                'message': "Captain's In-Game Name must be between 2 and 30 characters."
+            }), 400
 
         if not tournament_slug or not team_name or not email:
             return jsonify({'success': False, 'message': 'tournamentSlug, teamName, and email are required.'}), 400
@@ -111,6 +135,10 @@ def create_registration():
             'college': college,
             'captain_name': captain_name,
             'captainName': captain_name,
+            'captain_in_game_name': captain_ff_username,
+            'captainInGameName': captain_ff_username,
+            'captain_freefire_username': captain_ff_username,
+            'captainFreeFireUsername': captain_ff_username,
             'email': email,
             'players': players,
             'player_emails': player_emails,
@@ -142,6 +170,8 @@ def create_registration():
                 'team_name': team_name,
                 'college': college,
                 'captain_name': captain_name,
+                'captain_freefire_username': captain_ff_username,
+                'captain_in_game_name': captain_ff_username,
                 'email': email,
                 'payment_status': 'FREE ENTRY',
                 'order_id': 'FREE',
@@ -156,7 +186,34 @@ def create_registration():
             try:
                 supabase.table('registrations').insert({**reg_payload, 'attendance_status': 'NOT_MARKED'}).execute()
             except Exception:
-                supabase.table('registrations').insert(reg_payload).execute()
+                try:
+                    supabase.table('registrations').insert(reg_payload).execute()
+                except Exception as ins_err:
+                    # Graceful fallback if database column migration is pending in Supabase
+                    fallback_payload = {k: v for k, v in reg_payload.items() if k not in ['captain_freefire_username', 'captain_in_game_name']}
+                    try:
+                        supabase.table('registrations').insert({**fallback_payload, 'attendance_status': 'NOT_MARKED'}).execute()
+                    except Exception:
+                        supabase.table('registrations').insert(fallback_payload).execute()
+
+            # Sync captain Free Fire username to persistent team record if team exists
+            try:
+                supabase.table('teams').update({'captain_freefire_username': captain_ff_username, 'captain_in_game_name': captain_ff_username}).ilike('name', team_name).execute()
+            except Exception:
+                try:
+                    supabase.table('teams').update({'captain_freefire_username': captain_ff_username}).ilike('name', team_name).execute()
+                except Exception:
+                    pass
+
+            # Sync in-memory team fallback if present
+            try:
+                from routes.teams import IN_MEMORY_TEAMS
+                for t in IN_MEMORY_TEAMS:
+                    if (t.get('name') or '').lower() == team_name.lower():
+                        t['captain_freefire_username'] = captain_ff_username
+                        t['captainFreeFireUsername'] = captain_ff_username
+            except Exception:
+                pass
 
             # Insert initial event_attendance row
             att_payload = {
@@ -192,6 +249,10 @@ def create_registration():
             'success': True,
             'message': 'Registration created successfully!',
             'passId': pass_id,
+            'captain_in_game_name': captain_ff_username,
+            'captainInGameName': captain_ff_username,
+            'captain_freefire_username': captain_ff_username,
+            'captainFreeFireUsername': captain_ff_username,
             'data': record
         }), 201
 
@@ -371,6 +432,10 @@ def get_all_registrations():
                 'college': r.get('college'),
                 'captain_name': r.get('captain_name') or r.get('captainName'),
                 'captainName': r.get('captain_name') or r.get('captainName'),
+                'captain_in_game_name': r.get('captain_in_game_name') or r.get('captainInGameName') or r.get('captain_freefire_username') or r.get('captainFreeFireUsername') or None,
+                'captainInGameName': r.get('captain_in_game_name') or r.get('captainInGameName') or r.get('captain_freefire_username') or r.get('captainFreeFireUsername') or None,
+                'captain_freefire_username': r.get('captain_freefire_username') or r.get('captainFreeFireUsername') or None,
+                'captainFreeFireUsername': r.get('captain_freefire_username') or r.get('captainFreeFireUsername') or None,
                 'email': rec_email,
                 'payment_status': r.get('payment_status') or r.get('paymentStatus', 'SUCCESS'),
                 'paymentStatus': r.get('payment_status') or r.get('paymentStatus', 'SUCCESS'),
@@ -451,6 +516,10 @@ def get_registration_by_pass_id(pass_id):
                 'teamName': item.get('team_name') or item.get('teamName'),
                 'college': item.get('college'),
                 'captainName': item.get('captain_name') or item.get('captainName'),
+                'captain_in_game_name': item.get('captain_in_game_name') or item.get('captainInGameName') or item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                'captainInGameName': item.get('captain_in_game_name') or item.get('captainInGameName') or item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                'captain_freefire_username': item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                'captainFreeFireUsername': item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
                 'email': item.get('email'),
                 'paymentStatus': item.get('payment_status', 'SUCCESS'),
                 'attendanceStatus': att_status,
@@ -499,6 +568,10 @@ def get_registration_by_pass_id(pass_id):
                     'teamName': item.get('team_name'),
                     'college': item.get('college'),
                     'captainName': item.get('captain_name'),
+                    'captain_in_game_name': item.get('captain_in_game_name') or item.get('captainInGameName') or item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                    'captainInGameName': item.get('captain_in_game_name') or item.get('captainInGameName') or item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                    'captain_freefire_username': item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                    'captainFreeFireUsername': item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
                     'email': item.get('email'),
                     'orderId': item.get('order_id', ''),
                     'paymentId': item.get('payment_id', ''),
@@ -556,7 +629,7 @@ def update_attendance_status(pass_id):
     """
     try:
         data = request.get_json(silent=True) or {}
-        new_status = (data.get('attendance_status') or data.get('attendanceStatus') or '').strip().upper()
+        new_status = (data.get('attendance_status') or data.get('attendanceStatus') or data.get('status') or '').strip().upper()
         attended_by = data.get('attended_by') or data.get('attendedBy') or 'Organizer'
         attended_at = data.get('attended_at') or data.get('attendedAt')
 
@@ -833,6 +906,14 @@ def verify_registration_pass(pass_id):
             IN_MEMORY_REGISTRATIONS[clean_id] = sb_item
 
         if matched_mem_reg:
+            ign_val = (
+                matched_mem_reg.get('captain_in_game_name') or matched_mem_reg.get('captainInGameName') or
+                matched_mem_reg.get('captain_freefire_username') or matched_mem_reg.get('captainFreeFireUsername') or None
+            )
+            matched_mem_reg['captain_in_game_name'] = ign_val
+            matched_mem_reg['captainInGameName'] = ign_val
+            matched_mem_reg['captain_freefire_username'] = ign_val
+            matched_mem_reg['captainFreeFireUsername'] = ign_val
             tourn_slug = matched_mem_reg.get('tournament_slug') or matched_mem_reg.get('tournamentSlug') or ''
             tourn_date = matched_mem_reg.get('tournament_date') or matched_mem_reg.get('date') or ''
             tourn_status = matched_mem_reg.get('tournament_status') or matched_mem_reg.get('status') or ''
@@ -987,6 +1068,10 @@ def verify_registration_pass(pass_id):
                             'team_name': item.get('team_name') or 'Squad Entry',
                             'captainName': item.get('captain_name') or 'Squad Captain',
                             'captain_name': item.get('captain_name') or 'Squad Captain',
+                            'captain_in_game_name': item.get('captain_in_game_name') or item.get('captainInGameName') or item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                            'captainInGameName': item.get('captain_in_game_name') or item.get('captainInGameName') or item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                            'captain_freefire_username': item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                            'captainFreeFireUsername': item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
                             'college': item.get('college') or 'Collegiate Campus',
                             'email': item.get('email') or '',
                             'paymentStatus': item.get('payment_status', 'SUCCESS'),
@@ -1058,6 +1143,10 @@ def verify_registration_pass(pass_id):
                             'team_name': item.get('team_name') or 'Squad Entry',
                             'captainName': item.get('captain_name') or 'Squad Captain',
                             'captain_name': item.get('captain_name') or 'Squad Captain',
+                            'captain_in_game_name': item.get('captain_in_game_name') or item.get('captainInGameName') or item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                            'captainInGameName': item.get('captain_in_game_name') or item.get('captainInGameName') or item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                            'captain_freefire_username': item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                            'captainFreeFireUsername': item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
                             'college': item.get('college') or 'Collegiate Campus',
                             'email': item.get('email') or '',
                             'paymentStatus': item.get('payment_status', 'SUCCESS'),
@@ -1092,6 +1181,10 @@ def verify_registration_pass(pass_id):
                         'tournament_fee': item.get('tournament_fee', 'Free'),
                         'teamName': item.get('team_name'),
                         'captainName': item.get('captain_name'),
+                        'captain_in_game_name': item.get('captain_in_game_name') or item.get('captainInGameName') or item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                        'captainInGameName': item.get('captain_in_game_name') or item.get('captainInGameName') or item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                        'captain_freefire_username': item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
+                        'captainFreeFireUsername': item.get('captain_freefire_username') or item.get('captainFreeFireUsername') or None,
                         'college': item.get('college'),
                         'email': item.get('email'),
                         'paymentStatus': item.get('payment_status', 'SUCCESS'),
@@ -1128,6 +1221,61 @@ def delete_registration(pass_id):
     except Exception as e:
         print(f"Supabase delete registration warning: {e}")
         return jsonify({'success': True, 'message': f'Registration {pass_id} removed from memory.'}), 200
+
+@registrations_bp.route('/<pass_id>', methods=['PATCH', 'PUT'])
+def update_registration(pass_id):
+    """
+    Allow updating captain's Free Fire username before tournament operations.
+    Preserves exact casing and validates against numeric UID and length constraints.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        captain_ff_raw = (
+            data.get('captain_in_game_name') or data.get('captainInGameName') or
+            data.get('captain_freefire_username') or data.get('captainFreeFireUsername')
+        )
+        if captain_ff_raw is not None:
+            clean_ff = str(captain_ff_raw).strip()
+            if not clean_ff:
+                return jsonify({'success': False, 'message': "Captain's In-Game Name cannot be empty."}), 400
+            if clean_ff.isdigit():
+                return jsonify({'success': False, 'message': "Enter your in-game name (e.g. 亗PHOENIX亗), not your numeric UID."}), 400
+            if len(clean_ff) < 2 or len(clean_ff) > 30:
+                return jsonify({'success': False, 'message': "Captain's In-Game Name must be between 2 and 30 characters."}), 400
+            
+            # Update memory
+            if pass_id in IN_MEMORY_REGISTRATIONS:
+                IN_MEMORY_REGISTRATIONS[pass_id]['captain_in_game_name'] = clean_ff
+                IN_MEMORY_REGISTRATIONS[pass_id]['captainInGameName'] = clean_ff
+                IN_MEMORY_REGISTRATIONS[pass_id]['captain_freefire_username'] = clean_ff
+                IN_MEMORY_REGISTRATIONS[pass_id]['captainFreeFireUsername'] = clean_ff
+            
+            # Update Supabase
+            try:
+                supabase = get_supabase_client()
+                try:
+                    supabase.table('registrations').update({'captain_freefire_username': clean_ff, 'captain_in_game_name': clean_ff}).eq('pass_id', pass_id).execute()
+                except Exception:
+                    try:
+                        supabase.table('registrations').update({'captain_freefire_username': clean_ff}).eq('pass_id', pass_id).execute()
+                    except Exception:
+                        supabase.table('registrations').update({'captain_in_game_name': clean_ff}).eq('pass_id', pass_id).execute()
+            except Exception as sb_err:
+                print(f"Supabase update registration notice: {sb_err}")
+            
+            return jsonify({
+                'success': True,
+                'message': "Captain's In-Game Name updated successfully.",
+                'passId': pass_id,
+                'captain_in_game_name': clean_ff,
+                'captainInGameName': clean_ff,
+                'captain_freefire_username': clean_ff,
+                'captainFreeFireUsername': clean_ff
+            }), 200
+
+        return jsonify({'success': False, 'message': 'No valid fields provided for update.'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 @registrations_bp.route('/attendance/update', methods=['POST'])
 def update_registration_attendance():

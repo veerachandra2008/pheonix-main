@@ -14,7 +14,8 @@ import {
   Users,
   ShieldCheck,
   Ticket,
-  MessageSquare
+  MessageSquare,
+  Trophy
 } from 'lucide-react';
 import { flaskApi } from '@/lib/flask-api';
 import { getXenovaSession, clearXenovaSession } from '@/lib/auth-session';
@@ -97,6 +98,7 @@ export default function AdminLayout({
 
   const navItems = [
     { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { href: '/admin/tournament-submissions', label: 'Results Review', icon: Trophy },
     { href: '/admin/contact-messages', label: 'Support & Inquiries', icon: MessageSquare },
     { href: '/admin/organizer-applications', label: 'Applications', icon: Users },
     { href: '/admin/organizer-management', label: 'Organizers', icon: Users },

@@ -212,6 +212,11 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
             teamName: selection.teamName,
             college: selection.college,
             captainName: selection.captainName,
+            captainPhone: selection.captainPhone,
+            captainInGameName: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username,
+            captain_in_game_name: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username,
+            captainFreeFireUsername: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username,
+            captain_freefire_username: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username,
             email,
             players: selection.players || [],
             playerEmails: selection.playerEmails || [email],
@@ -301,6 +306,11 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
             teamName: selection.teamName,
             tournamentSlug: selection.tournamentSlug,
             college: selection.college,
+            captainPhone: selection.captainPhone,
+            captainInGameName: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username,
+            captain_in_game_name: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username,
+            captainFreeFireUsername: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username,
+            captain_freefire_username: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username,
             players: selection.players || [],
           }),
         });
@@ -378,6 +388,11 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
                 teamName: selection.teamName,
                 college: selection.college,
                 captainName: selection.captainName,
+                captainPhone: selection.captainPhone,
+                captainInGameName: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username,
+                captain_in_game_name: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username,
+                captainFreeFireUsername: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username,
+                captain_freefire_username: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username,
                 email,
                 players: selection.players || [],
                 playerEmails: selection.playerEmails || [email],
@@ -608,7 +623,13 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
                       {p.isCaptain || p.slot === 1 ? '👑 Captain' : `P${p.slot}`}
                     </span>
                     <span className="text-xs font-bold text-white">{p.name}</span>
-                    <span className="text-[11px] font-mono font-bold text-emerald-400">({p.inGameTag || 'IGN'})</span>
+                    {(p.isCaptain || p.slot === 1) && (selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username) ? (
+                      <span className="text-[11px] font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        IGN: {selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-mono font-bold text-emerald-400">({p.inGameTag || 'IGN'})</span>
+                    )}
                   </div>
                   <span className="text-xs font-mono text-slate-400 sm:text-right truncate">{p.email}</span>
                 </div>
@@ -698,10 +719,15 @@ export default function RegistrationStep2({ params: paramsPromise }: PageProps) 
             {[
               { label: 'Tournament', value: selection.tournamentTitle },
               { label: 'Team', value: selection.teamName },
+              { label: 'Captain', value: selection.captainName },
+              ...(selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username ? [{
+                label: "Captain's In-Game Name",
+                value: selection.captainInGameName || selection.captain_in_game_name || selection.captainFreeFireUsername || selection.captain_freefire_username
+              }] : []),
               { label: 'Format', value: selection.tournamentFormat },
               { label: 'Date', value: selection.tournamentDate },
               { label: 'Entry Fee', value: selection.tournamentFee, highlight: true },
-            ].map(({ label, value, highlight }) => (
+            ].map(({ label, value, highlight }: any) => (
               <div key={label} className="flex items-center justify-between">
                 <span className="text-xs text-zinc-500">{label}</span>
                 <span className={`text-xs font-semibold ${highlight ? 'text-emerald-400' : 'text-white'}`}>{value}</span>

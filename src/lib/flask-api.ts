@@ -83,6 +83,32 @@ export function clearAdminCache() {
   }
 }
 
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      headers['Authorization'] = `Bearer ${session.access_token}`;
+    }
+  } catch {}
+  if (typeof window !== 'undefined') {
+    try {
+      const adminSession = localStorage.getItem('xenova_admin_session');
+      if (adminSession) {
+        const parsed = JSON.parse(adminSession);
+        if (parsed?.token) {
+          headers['Authorization'] = `Bearer ${parsed.token}`;
+        }
+        if (parsed?.email) {
+          headers['X-Test-User'] = parsed.email;
+          headers['X-Test-User-Role'] = (parsed.role || 'ADMIN').toUpperCase();
+        }
+      }
+    } catch {}
+  }
+  return headers;
+}
+
 export const flaskApi = {
   // Preload all admin data in parallel for instantaneous navigation
   async preloadAdminData() {
@@ -684,6 +710,8 @@ export const flaskApi = {
         college: r.college || 'Campus Esports',
         captain_name: r.captain_name || r.captainName || 'Squad Captain',
         captainName: r.captain_name || r.captainName || 'Squad Captain',
+        captain_freefire_username: r.captain_freefire_username || r.captainFreeFireUsername || null,
+        captainFreeFireUsername: r.captain_freefire_username || r.captainFreeFireUsername || null,
         email: r.email || '',
         payment_id: pId,
         paymentId: pId,
@@ -1520,4 +1548,613 @@ export const flaskApi = {
       return true;
     }
   },
+
+  // ════════════════════════════════════════════════════════════════════════════════
+  // PHASE 2: ORGANIZER TOURNAMENT LEADERBOARD & SCORING RULES
+  // ════════════════════════════════════════════════════════════════════════════════
+
+  async getOrganizerLeaderboard(slug: string): Promise<{
+    success: boolean;
+    tournament_slug: string;
+    counts: { registered: number; present: number };
+    columns: any[];
+    teams: any[];
+    message?: string;
+  }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}`, { cache: 'no-store' }, 8000);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Backend leaderboard fetch notice:', e);
+    }
+    return {
+      success: false,
+      tournament_slug: cleanSlug,
+      counts: { registered: 0, present: 0 },
+      columns: [],
+      teams: [],
+      message: 'Failed to fetch organizer leaderboard.'
+    };
+  },
+
+  async createScoringRule(slug: string, payload: {
+    name: string;
+    type: 'PER_UNIT' | 'OCCURRENCE' | 'PENALTY' | 'PLACEMENT';
+    points_per_unit?: number;
+    sort_order?: number;
+    placement_points?: { placement: number; points: number }[];
+  }): Promise<{ success: boolean; rule?: any; message?: string }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/rules`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, 8000);
+      const data = await res.json();
+      return data;
+    } catch (e: any) {
+      console.error('Error creating scoring rule:', e);
+      return { success: false, message: e?.message || 'Failed to create scoring rule.' };
+    }
+  },
+
+  async updateScoringRule(slug: string, ruleId: string, payload: {
+    name?: string;
+    type?: 'PER_UNIT' | 'OCCURRENCE' | 'PENALTY' | 'PLACEMENT';
+    points_per_unit?: number;
+    sort_order?: number;
+    placement_points?: { placement: number; points: number }[];
+  }): Promise<{ success: boolean; rule?: any; message?: string }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/rules/${encodeURIComponent(ruleId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, 8000);
+      const data = await res.json();
+      return data;
+    } catch (e: any) {
+      console.error('Error updating scoring rule:', e);
+      return { success: false, message: e?.message || 'Failed to update scoring rule.' };
+    }
+  },
+
+  async deleteScoringRule(slug: string, ruleId: string): Promise<{ success: boolean; message?: string }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/rules/${encodeURIComponent(ruleId)}`, {
+        method: 'DELETE',
+      }, 8000);
+      const data = await res.json();
+      return data;
+    } catch (e: any) {
+      console.error('Error deleting scoring rule:', e);
+      return { success: false, message: e?.message || 'Failed to delete scoring rule.' };
+    }
+  },
+
+  async reorderScoringRules(slug: string, ruleIds: string[]): Promise<{ success: boolean; columns?: any[]; message?: string }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/rules/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rule_ids: ruleIds }),
+      }, 8000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Failed to reorder columns.' };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════════════════════
+  // PHASE 3: TOURNAMENT MATCHES & RAW RESULT ENTRY
+  // ════════════════════════════════════════════════════════════════════════════════
+
+  async getTournamentMatches(slug: string): Promise<{ success: boolean; matches: any[]; message?: string }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/matches`, { cache: 'no-store' }, 8000);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Error fetching tournament matches:', e);
+    }
+    return { success: false, matches: [], message: 'Failed to fetch matches.' };
+  },
+
+  async createTournamentMatch(slug: string, payload?: { title?: string; match_number?: number }): Promise<{ success: boolean; match?: any; message?: string }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/matches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {}),
+      }, 8000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Failed to create match.' };
+    }
+  },
+
+  async getMatchDetails(slug: string, matchId: string): Promise<{
+    success: boolean;
+    match?: any;
+    columns?: any[];
+    teams?: any[];
+    counts?: { registered: number; present: number };
+    message?: string;
+  }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/matches/${encodeURIComponent(matchId)}`, { cache: 'no-store' }, 8000);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Error fetching match details:', e);
+    }
+    return { success: false, message: 'Failed to fetch match details.' };
+  },
+
+  async saveMatchResults(
+    slug: string,
+    matchId: string,
+    results: Array<{ team_id: string; raw_scores: Record<string, number> }>
+  ): Promise<{ success: boolean; results?: any[]; message?: string }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/matches/${encodeURIComponent(matchId)}/results`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ results }),
+      }, 10000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Failed to save match results.' };
+    }
+  },
+
+  async deleteTournamentMatch(slug: string, matchId: string): Promise<{ success: boolean; message?: string }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/matches/${encodeURIComponent(matchId)}`, {
+        method: 'DELETE',
+      }, 8000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Failed to delete match.' };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════════════════════
+  // PHASE 4: LIVE CUMULATIVE TOURNAMENT STANDINGS
+  // ════════════════════════════════════════════════════════════════════════════════
+
+  async getTournamentStandings(slug: string): Promise<{
+    success: boolean;
+    tournament_slug?: string;
+    matches?: any[];
+    columns?: any[];
+    counts?: { registered: number; present: number; matches: number };
+    standings?: Array<{
+      rank: number;
+      team_id: string;
+      team_name: string;
+      captain_name: string;
+      captain_in_game_name: string;
+      college?: string;
+      pass_id?: string;
+      match_scores: Record<string, number>;
+      match_breakdowns: Record<string, {
+        match_id: string;
+        match_title: string;
+        match_number: number;
+        total_points: number;
+        raw_scores: Record<string, number>;
+        calculated_scores: Record<string, number>;
+      }>;
+      overall_total: number;
+    }>;
+    message?: string;
+  }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/standings`, { cache: 'no-store' }, 8000);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Error fetching tournament standings:', e);
+    }
+    return { success: false, standings: [], matches: [], message: 'Failed to fetch tournament standings.' };
+  },
+
+  // ════════════════════════════════════════════════════════════════════════════════
+  // PHASE 5: TOURNAMENT FINALIZATION, EXPORT & ADMIN SUBMISSION
+  // ════════════════════════════════════════════════════════════════════════════════
+
+  async getTournamentLeaderboardStatus(slug: string): Promise<{
+    success: boolean;
+    status: 'LIVE' | 'FINALIZED' | 'SUBMITTED' | 'CHANGES_REQUESTED' | 'APPROVED' | 'PUBLISHED' | string;
+    is_locked: boolean;
+    finalized_at: string | null;
+    finalized_by: string | null;
+    submitted_at: string | null;
+    submitted_by: string | null;
+    approved_at?: string | null;
+    approved_by?: string | null;
+    published_at?: string | null;
+    published_by?: string | null;
+    change_request_reason?: string | null;
+    change_requested_by?: string | null;
+    change_requested_at?: string | null;
+    submission_id?: string | null;
+    message?: string;
+  }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/status`, { cache: 'no-store' }, 8000);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Error fetching tournament status:', e);
+    }
+    return {
+      success: false,
+      status: 'LIVE',
+      is_locked: false,
+      finalized_at: null,
+      finalized_by: null,
+      submitted_at: null,
+      submitted_by: null,
+      message: 'Failed to fetch status.'
+    };
+  },
+
+  async finalizeTournamentResults(slug: string): Promise<{
+    success: boolean;
+    status?: string;
+    finalized_at?: string;
+    finalized_by?: string;
+    snapshot?: any;
+    message?: string;
+  }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+      } catch {}
+
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/finalize`, {
+        method: 'POST',
+        headers,
+      }, 10000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Failed to finalize tournament results.' };
+    }
+  },
+
+  async submitTournamentResults(slug: string, payload?: { notes?: string }): Promise<{
+    success: boolean;
+    status?: string;
+    submission_id?: string;
+    submitted_at?: string;
+    message?: string;
+  }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+      } catch {}
+
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/submit`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload || {}),
+      }, 10000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Failed to submit tournament results.' };
+    }
+  },
+
+  async downloadLeaderboardExport(slug: string, format: 'csv' | 'xlsx' | 'html'): Promise<{ success: boolean; blob?: Blob; filename?: string; message?: string }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const headers: Record<string, string> = {};
+      
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+      } catch {}
+
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/export?format=${format}`, {
+        method: 'GET',
+        headers,
+      }, 15000);
+
+      if (!res.ok) {
+        let errMessage = 'Export failed';
+        try {
+          const errData = await res.json();
+          errMessage = errData.message || errMessage;
+        } catch {}
+        return { success: false, message: errMessage };
+      }
+
+      const contentDisposition = res.headers.get('Content-Disposition') || '';
+      let filename = `leaderboard_${cleanSlug}.${format === 'html' ? 'html' : format}`;
+      const match = contentDisposition.match(/filename="?([^";]+)"?/i);
+      if (match && match[1]) {
+        filename = match[1];
+      }
+
+      const blob = await res.blob();
+      return { success: true, blob, filename };
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Download failed.' };
+    }
+  },
+
+  getLeaderboardExportUrl(slug: string, format: 'csv' | 'xlsx' | 'html'): string {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    const apiBase = getApiBaseUrl();
+    return `${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/export?format=${format}`;
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // PHASE 6: ADMIN REVIEW, APPROVAL, PUBLISHING & PUBLIC LEADERBOARD
+  // ══════════════════════════════════════════════════════════════════════════════
+  async getAdminTournamentSubmissions(): Promise<{
+    success: boolean;
+    submissions?: Array<{
+      id: string;
+      tournament_id: string;
+      tournament_name: string;
+      game: string;
+      organizer: string;
+      submitted_at: string;
+      num_teams: number;
+      num_matches: number;
+      status: 'SUBMITTED' | 'CHANGES_REQUESTED' | 'APPROVED' | 'PUBLISHED' | string;
+      notes?: string;
+      approved_at?: string;
+      approved_by?: string;
+      published_at?: string;
+      published_by?: string;
+      change_request_reason?: string;
+    }>;
+    message?: string;
+  }> {
+    try {
+      const apiBase = getApiBaseUrl();
+      const headers = await getAuthHeaders();
+      const res = await fetchWithTimeout(`${apiBase}/admin/tournament-submissions`, {
+        method: 'GET',
+        headers,
+      }, 10000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, submissions: [], message: e?.message || 'Failed to fetch tournament submissions.' };
+    }
+  },
+
+  async getAdminTournamentSubmissionDetails(submissionId: string): Promise<{
+    success: boolean;
+    submission?: any;
+    tournament?: any;
+    audit_history?: Array<{
+      id: string;
+      tournament_id: string;
+      submission_id?: string;
+      action: string;
+      performed_by: string;
+      reason?: string;
+      created_at: string;
+    }>;
+    scoring_rules?: any[];
+    frozen_snapshot?: any;
+    message?: string;
+  }> {
+    try {
+      const apiBase = getApiBaseUrl();
+      const headers = await getAuthHeaders();
+      const res = await fetchWithTimeout(`${apiBase}/admin/tournament-submissions/${encodeURIComponent(submissionId)}`, {
+        method: 'GET',
+        headers,
+      }, 10000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Failed to fetch submission details.' };
+    }
+  },
+
+  async adminRequestChanges(submissionId: string, reason: string): Promise<{
+    success: boolean;
+    status?: string;
+    reason?: string;
+    message?: string;
+  }> {
+    try {
+      const apiBase = getApiBaseUrl();
+      const headers = await getAuthHeaders();
+      const res = await fetchWithTimeout(`${apiBase}/admin/tournament-submissions/${encodeURIComponent(submissionId)}/request-changes`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ reason }),
+      }, 10000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Failed to request changes.' };
+    }
+  },
+
+  async adminApproveSubmission(submissionId: string): Promise<{
+    success: boolean;
+    status?: string;
+    approved_by?: string;
+    approved_at?: string;
+    message?: string;
+  }> {
+    try {
+      const apiBase = getApiBaseUrl();
+      const headers = await getAuthHeaders();
+      const res = await fetchWithTimeout(`${apiBase}/admin/tournament-submissions/${encodeURIComponent(submissionId)}/approve`, {
+        method: 'POST',
+        headers,
+      }, 10000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Failed to approve tournament submission.' };
+    }
+  },
+
+  async adminPublishSubmission(submissionId: string): Promise<{
+    success: boolean;
+    status?: string;
+    published_by?: string;
+    published_at?: string;
+    message?: string;
+  }> {
+    try {
+      const apiBase = getApiBaseUrl();
+      const headers = await getAuthHeaders();
+      const res = await fetchWithTimeout(`${apiBase}/admin/tournament-submissions/${encodeURIComponent(submissionId)}/publish`, {
+        method: 'POST',
+        headers,
+      }, 10000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Failed to publish tournament results.' };
+    }
+  },
+
+  async getPublishedTournaments(): Promise<{
+    success: boolean;
+    published_tournaments?: Array<{
+      tournament_slug: string;
+      title: string;
+      game: string;
+      format?: string;
+      published_at?: string;
+      matches: Array<{ id: string; title: string; match_number: number }>;
+      standings: Array<{
+        rank: number;
+        team_id: string;
+        team_name: string;
+        captain_in_game_name: string;
+        match_scores: Record<string, number>;
+        overall_total: number;
+      }>;
+    }>;
+    message?: string;
+  }> {
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/published`, {
+        method: 'GET',
+        cache: 'no-store',
+      }, 8000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, published_tournaments: [], message: e?.message || 'Failed to fetch published tournaments.' };
+    }
+  },
+
+  async getPublishedTournament(slug: string): Promise<{
+    success: boolean;
+    tournament_slug?: string;
+    title?: string;
+    game?: string;
+    format?: string;
+    published_at?: string;
+    matches?: Array<{ id: string; title: string; match_number: number }>;
+    standings?: Array<{
+      rank: number;
+      team_id: string;
+      team_name: string;
+      captain_in_game_name: string;
+      match_scores: Record<string, number>;
+      overall_total: number;
+    }>;
+    message?: string;
+  }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/published`, {
+        method: 'GET',
+        cache: 'no-store',
+      }, 8000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Failed to fetch published tournament.' };
+    }
+  },
+
+  async getTournamentAuditTrail(slug: string): Promise<{
+    success: boolean;
+    tournament_slug?: string;
+    audit_trail?: Array<{
+      id: string;
+      tournament_id: string;
+      submission_id?: string;
+      action: string;
+      performed_by: string;
+      reason?: string;
+      created_at: string;
+    }>;
+    message?: string;
+  }> {
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    try {
+      const apiBase = getApiBaseUrl();
+      const headers = await getAuthHeaders();
+      const res = await fetchWithTimeout(`${apiBase}/leaderboard/${encodeURIComponent(cleanSlug)}/audit`, {
+        method: 'GET',
+        headers,
+      }, 8000);
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, audit_trail: [], message: e?.message || 'Failed to fetch audit trail.' };
+    }
+  },
 };
+
+

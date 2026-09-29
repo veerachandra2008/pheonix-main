@@ -25,6 +25,7 @@ from routes.applications import applications_bp
 from routes.attendance import attendance_bp
 from routes.rosters import rosters_bp
 from routes.contact import contact_bp
+from routes.leaderboard import leaderboard_bp, admin_submissions_bp
 
 def create_app():
     app = Flask(__name__)
@@ -39,6 +40,8 @@ def create_app():
     app.register_blueprint(registrations_bp, url_prefix='/api/registrations')
     app.register_blueprint(attendance_bp, url_prefix='/api/attendance')
     app.register_blueprint(rosters_bp, url_prefix='/api/rosters')
+    app.register_blueprint(leaderboard_bp, url_prefix='/api/leaderboard')
+    app.register_blueprint(admin_submissions_bp, url_prefix='/api/admin/tournament-submissions')
     app.register_blueprint(colleges_bp, url_prefix='/api/colleges')
     app.register_blueprint(teams_bp, url_prefix='/api/teams')
     app.register_blueprint(tournaments_bp, url_prefix='/api/tournaments')

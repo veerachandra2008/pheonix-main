@@ -36,6 +36,12 @@ export interface XenovaSessionData {
   team?: string;
   hostName?: string;
   phone?: string;
+  captain_freefire_username?: string;
+  captainFreeFireUsername?: string;
+  captain_in_game_name?: string;
+  captainInGameName?: string;
+  freefire_username?: string;
+  in_game_name?: string;
 }
 
 /**

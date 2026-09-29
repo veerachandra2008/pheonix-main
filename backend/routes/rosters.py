@@ -191,6 +191,47 @@ def get_rosters():
                 }
             teams_map[pid]['players'].append(row)
 
+        # Enrich teams_map with captain_freefire_username, captain_name, and team_id from registrations
+        try:
+            from routes.payments import IN_MEMORY_REGISTRATIONS
+            pids_to_lookup = list(teams_map.keys())
+            reg_info = {}
+            if pids_to_lookup:
+                for pid in pids_to_lookup:
+                    if pid in IN_MEMORY_REGISTRATIONS:
+                        reg_info[pid] = IN_MEMORY_REGISTRATIONS[pid]
+                try:
+                    supabase = get_supabase_client()
+                    if len(pids_to_lookup) <= 30:
+                        or_clause = ','.join([f"pass_id.eq.{p}" for p in pids_to_lookup])
+                        s_res = supabase.table('registrations').select('*').or_(or_clause).execute()
+                    else:
+                        s_res = supabase.table('registrations').select('*').execute()
+                    if s_res.data:
+                        for r in s_res.data:
+                            r_pid = r.get('pass_id')
+                            if r_pid and r_pid not in reg_info:
+                                reg_info[r_pid] = r
+                except Exception:
+                    pass
+
+            for pid, t in teams_map.items():
+                r = reg_info.get(pid, {})
+                t['team_id'] = r.get('team_id') or r.get('teamId') or pid
+                t['captain_name'] = r.get('captain_name') or r.get('captainName') or (t['players'][0].get('player_name') if t['players'] else 'Captain')
+                captain_ign = (
+                    r.get('captain_in_game_name') or r.get('captainInGameName') or
+                    r.get('captain_freefire_username') or r.get('captainFreeFireUsername') or None
+                )
+                t['captain_in_game_name'] = captain_ign
+                t['captainInGameName'] = captain_ign
+                t['captain_freefire_username'] = captain_ign
+                t['captainFreeFireUsername'] = captain_ign
+                t['registration_status'] = r.get('payment_status') or r.get('paymentStatus', 'SUCCESS')
+                t['attendance_status'] = r.get('attendance_status') or r.get('attendanceStatus', 'NOT_MARKED')
+        except Exception as enrich_err:
+            print(f"Notice enriching rosters teams_map: {enrich_err}")
+
         # Sort each team's players by slot (1..4)
         for pid in teams_map:
             teams_map[pid]['players'].sort(key=lambda x: int(x.get('slot', 1)))

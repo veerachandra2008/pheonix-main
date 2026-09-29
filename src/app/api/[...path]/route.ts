@@ -562,6 +562,8 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
             team_name: reg.team_name || 'Squad Entry',
             college: reg.college || 'Collegiate Campus',
             captain_name: reg.captain_name || (regPlayers[0]?.name) || 'Captain',
+            captain_freefire_username: reg.captain_freefire_username || reg.captainFreeFireUsername || null,
+            captainFreeFireUsername: reg.captain_freefire_username || reg.captainFreeFireUsername || null,
             email: reg.email,
             registered_at: reg.registered_at || new Date().toISOString(),
             players: regPlayers.length > 0 ? regPlayers.map((p: any, idx: number) => ({

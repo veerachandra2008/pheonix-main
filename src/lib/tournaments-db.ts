@@ -19,6 +19,8 @@ export interface TournamentRegistrationRecord {
   teamName: string;
   college: string;
   captainName: string;
+  captainFreeFireUsername?: string;
+  captain_freefire_username?: string;
   email: string;
   passId: string;
   registeredAt: string;
@@ -616,6 +618,10 @@ export async function saveRegistration(record: TournamentRegistrationRecord): Pr
       pass_id: record.passId,
       registered_at: record.registeredAt,
     };
+
+    if (record.captainFreeFireUsername || record.captain_freefire_username) {
+      payload.captain_freefire_username = record.captainFreeFireUsername || record.captain_freefire_username;
+    }
 
     if (record.userId) {
       payload.user_id = record.userId;

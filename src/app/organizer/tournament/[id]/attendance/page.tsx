@@ -64,6 +64,12 @@ interface RegistrationItem {
   registered_at?: string;
   members_count?: number;
   players?: any[];
+  captain_in_game_name?: string | null;
+  captainInGameName?: string | null;
+  captain_freefire_username?: string | null;
+  captainFreeFireUsername?: string | null;
+  team_id?: string | null;
+  teamId?: string | null;
 }
 
 export default function TournamentAttendancePage() {
@@ -255,6 +261,10 @@ export default function TournamentAttendancePage() {
               registered_at: r.registered_at || r.created_at,
               members_count: 5,
               players: r.players || [],
+              captain_freefire_username: r.captain_freefire_username || r.captainFreeFireUsername || null,
+              captainFreeFireUsername: r.captain_freefire_username || r.captainFreeFireUsername || null,
+              team_id: r.team_id || r.teamId || pid,
+              teamId: r.team_id || r.teamId || pid,
             };
           });
         }
@@ -290,6 +300,10 @@ export default function TournamentAttendancePage() {
               registered_at: r.registered_at || r.registeredAt,
               members_count: 5,
               players: r.players || [],
+              captain_freefire_username: r.captain_freefire_username || r.captainFreeFireUsername || null,
+              captainFreeFireUsername: r.captain_freefire_username || r.captainFreeFireUsername || null,
+              team_id: r.team_id || r.teamId || r.id || r.pass_id,
+              teamId: r.team_id || r.teamId || r.id || r.pass_id,
             }));
           }
         } catch {}
@@ -347,7 +361,9 @@ export default function TournamentAttendancePage() {
         const emailMatch = (r.email || '').toLowerCase().includes(q);
         const payIdMatch = ((r.payment_id || r.paymentId || '').toLowerCase()).includes(q);
         const orderIdMatch = ((r.order_id || r.orderId || '').toLowerCase()).includes(q);
-        return passMatch || teamMatch || capMatch || colMatch || emailMatch || payIdMatch || orderIdMatch;
+        const ffMatch = ((r.captain_freefire_username || r.captainFreeFireUsername || '').toLowerCase()).includes(q);
+        const teamIdMatch = ((r.team_id || r.teamId || '').toLowerCase()).includes(q);
+        return passMatch || teamMatch || capMatch || colMatch || emailMatch || payIdMatch || orderIdMatch || ffMatch || teamIdMatch;
       }
 
       return true;
@@ -607,6 +623,12 @@ export default function TournamentAttendancePage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <Link
+              href={`/organizer/tournament/${rawId}/leaderboard`}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-xs font-bold rounded-xl transition shadow-md shadow-amber-950/30"
+            >
+              <Trophy className="h-3.5 w-3.5" /> Leaderboard
+            </Link>
             <button
               type="button"
               onClick={handleExportCSV}
@@ -771,7 +793,7 @@ export default function TournamentAttendancePage() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by Pass ID (XPH-...), Payment ID (pay_...), Team, Captain, or College..."
+                placeholder="Search by Pass ID, Team, Captain, Free Fire Username (亗...), or College..."
                 className="w-full pl-12 pr-10 py-3.5 bg-black/50 border border-white/10 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl text-white text-sm placeholder:text-slate-500 transition outline-none font-medium"
               />
               {searchQuery && (
@@ -993,11 +1015,19 @@ export default function TournamentAttendancePage() {
                           </div>
                         )}
 
-                        {/* Captain & College */}
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 font-medium">
+                        {/* Captain & College & Free Fire Username */}
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-400 font-medium">
                           <span className="text-white font-bold">
                             Captain: {item.captain_name}
                           </span>
+                          {(item.captain_in_game_name || item.captainInGameName || item.captain_freefire_username || item.captainFreeFireUsername) && (
+                            <>
+                              <span>•</span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/25 text-amber-300 font-mono text-[11px] font-bold">
+                                🎮 IGN: {item.captain_in_game_name || item.captainInGameName || item.captain_freefire_username || item.captainFreeFireUsername}
+                              </span>
+                            </>
+                          )}
                           <span>•</span>
                           <span className="flex items-center gap-1 text-slate-300">
                             <Building2 className="h-3 w-3 text-indigo-400" /> {item.college || 'Varsity'}

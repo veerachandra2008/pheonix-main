@@ -23,6 +23,7 @@ import {
   ChevronRight,
   School,
   Clock,
+  Gamepad2,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { getApiBaseUrl } from '@/lib/api-config';
@@ -51,6 +52,7 @@ export default function RegistrationStepOne() {
   // 4-Player Squad Details
   const [teamName, setTeamName] = useState('');
   const [college, setCollege] = useState('');
+  const [captainFreeFireUsername, setCaptainFreeFireUsername] = useState('');
   
   // Exactly 4 Players (Counting Captain as Slot 1)
   const [players, setPlayers] = useState<PlayerSlot[]>([
@@ -76,6 +78,22 @@ export default function RegistrationStepOne() {
     // Prefill Captain (Player 1) & Team from session if available
     setTeamName(user.team || '');
     setCollege(user.college || '');
+    const userAny = user as any;
+    if (userAny.captain_in_game_name || userAny.captainInGameName || userAny.captain_freefire_username || userAny.freefire_username) {
+      setCaptainFreeFireUsername(userAny.captain_in_game_name || userAny.captainInGameName || userAny.captain_freefire_username || userAny.freefire_username || '');
+    }
+
+    // Prefill from existing sessionStorage selection if returning from Step 2
+    try {
+      const storedRaw = sessionStorage.getItem('reg_selection');
+      if (storedRaw) {
+        const stored = JSON.parse(storedRaw);
+        if (stored.captainInGameName || stored.captain_in_game_name || stored.captainFreeFireUsername || stored.captain_freefire_username) {
+          setCaptainFreeFireUsername(stored.captainInGameName || stored.captain_in_game_name || stored.captainFreeFireUsername || stored.captain_freefire_username || '');
+        }
+      }
+    } catch {}
+
     setPlayers((prev) => [
       {
         ...prev[0],
@@ -203,6 +221,21 @@ export default function RegistrationStepOne() {
       emailsUsed.add(lowerEmail);
     }
 
+    // Validate Captain's In-Game Name (Required, Unicode allowed, NOT numeric UID, 2-30 chars)
+    const trimmedIGN = captainFreeFireUsername.trim();
+    if (!trimmedIGN) {
+      setErrorMsg("Please enter Captain's In-Game Name.");
+      return;
+    }
+    if (/^\d+$/.test(trimmedIGN)) {
+      setErrorMsg("Invalid In-Game Name: Enter your in-game username (e.g. 亗PHOENIX亗), NOT your numeric UID.");
+      return;
+    }
+    if (trimmedIGN.length < 2 || trimmedIGN.length > 30) {
+      setErrorMsg("Captain's In-Game Name must be between 2 and 30 characters.");
+      return;
+    }
+
     // Persist full 4-player squad to sessionStorage
     const selectionPayload = {
       tournamentSlug: tournament?.slug || slug,
@@ -220,6 +253,10 @@ export default function RegistrationStepOne() {
       captainEmail: players[0].email.trim(),
       email: players[0].email.trim(),
       captainPhone: players[0].phone?.trim() || '',
+      captainInGameName: trimmedIGN,
+      captain_in_game_name: trimmedIGN,
+      captainFreeFireUsername: trimmedIGN,
+      captain_freefire_username: trimmedIGN,
       players: players.map((p) => ({
         slot: p.slot,
         name: p.name.trim(),
@@ -620,6 +657,33 @@ export default function RegistrationStepOne() {
                           placeholder="+91 9876543210"
                           className="w-full px-3.5 py-2.5 sm:py-3 bg-black/50 border border-white/10 rounded-xl text-white text-base sm:text-xs font-mono outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition"
                         />
+                      </div>
+                    )}
+
+                    {/* Captain's In-Game Name (Captain Only - Required) */}
+                    {isCap && (
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                          <Gamepad2 className="h-3 w-3 text-amber-400 shrink-0" /> Captain&apos;s In-Game Name <span className="text-rose-400">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={captainFreeFireUsername}
+                          onChange={(e) => {
+                            setCaptainFreeFireUsername(e.target.value);
+                            setErrorMsg('');
+                          }}
+                          placeholder="Enter your exact in-game name"
+                          required
+                          maxLength={30}
+                          className="w-full px-3.5 py-2.5 sm:py-3 bg-black/50 border border-white/10 rounded-xl text-white text-base sm:text-xs font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition"
+                        />
+                        <p className="text-[10px] text-slate-400 leading-tight">
+                          Enter the username exactly as it appears in Free Fire. Do not enter the numeric Free Fire UID.
+                          <span className="block mt-0.5 text-slate-500">
+                            Example: <span className="text-amber-400 font-mono font-bold">亗PHOENIX亗</span>
+                          </span>
+                        </p>
                       </div>
                     )}
                   </motion.div>

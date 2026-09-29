@@ -144,6 +144,9 @@ export default function ManualUpiPaymentModal({
         college: selection?.college || '',
         captain_name: selection?.captainName || '',
         captain_email: captainEmail,
+        captain_phone: selection?.captainPhone || '',
+        captain_freefire_username: selection?.captainFreeFireUsername || selection?.captain_freefire_username || '',
+        captainFreeFireUsername: selection?.captainFreeFireUsername || selection?.captain_freefire_username || '',
         players: selection?.players || [],
         tournament_slug: tournamentSlug,
       };

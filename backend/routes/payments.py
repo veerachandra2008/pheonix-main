@@ -273,6 +273,16 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
         stored_reg.get('captainName') or stored_reg.get('captain_name') or stored_reg.get('name') or 
         order_record.get('captain_name') or 'Captain'
     )
+    captain_freefire_username = (
+        registration_data.get('captain_in_game_name') or registration_data.get('captainInGameName') or
+        registration_data.get('captainFreeFireUsername') or registration_data.get('captain_freefire_username') or
+        stored_reg.get('captain_in_game_name') or stored_reg.get('captainInGameName') or
+        stored_reg.get('captainFreeFireUsername') or stored_reg.get('captain_freefire_username') or
+        order_record.get('captain_in_game_name') or order_record.get('captainInGameName') or
+        order_record.get('captain_freefire_username') or order_record.get('captainFreeFireUsername') or None
+    )
+    if captain_freefire_username:
+        captain_freefire_username = str(captain_freefire_username).strip()
     email = (
         registration_data.get('email') or registration_data.get('captain_email') or 
         stored_reg.get('email') or stored_reg.get('captain_email') or 
@@ -331,6 +341,8 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
         'college': college,
         'captain_name': captain_name,
         'captainName': captain_name,
+        'captain_freefire_username': captain_freefire_username,
+        'captainFreeFireUsername': captain_freefire_username,
         'email': email,
         'players': players,
         'player_emails': player_emails,
@@ -366,6 +378,9 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
             'payment_id': payment_id,
             'payment_status': 'SUCCESS',
         }
+        if captain_freefire_username:
+            reg_payload['captain_freefire_username'] = captain_freefire_username
+            reg_payload['captain_in_game_name'] = captain_freefire_username
         if user_id:
             try:
                 uuid.UUID(str(user_id))
@@ -388,7 +403,24 @@ def finalize_successful_payment(order_id, payment_id, registration_data=None, us
                         'already_completed': True,
                         'message': 'Payment already verified.'
                     }
-            supabase.table('registrations').insert(reg_payload).execute()
+            try:
+                supabase.table('registrations').insert(reg_payload).execute()
+            except Exception:
+                fallback_payload = {k: v for k, v in reg_payload.items() if k not in ['captain_freefire_username', 'captain_in_game_name']}
+                try:
+                    supabase.table('registrations').insert(fallback_payload).execute()
+                except Exception:
+                    pass
+
+        # Sync captain in-game name to persistent team record if team exists
+        if captain_freefire_username:
+            try:
+                supabase.table('teams').update({'captain_freefire_username': captain_freefire_username, 'captain_in_game_name': captain_freefire_username}).ilike('name', team_name).execute()
+            except Exception:
+                try:
+                    supabase.table('teams').update({'captain_freefire_username': captain_freefire_username}).ilike('name', team_name).execute()
+                except Exception:
+                    pass
 
         # Insert initial event_attendance row
         att_payload = {
@@ -493,6 +525,11 @@ def create_order():
         email = str(user.get('email') or data.get('email') or '').strip().lower()
         team_name = str(data.get('teamName') or 'Team Alpha').strip()
         college = str(data.get('college') or user.get('college') or 'University').strip()
+        captain_ff_raw = (
+            data.get('captain_in_game_name') or data.get('captainInGameName') or
+            data.get('captain_freefire_username') or data.get('captainFreeFireUsername') or ''
+        )
+        captain_ff_username = str(captain_ff_raw).strip()
         players = data.get('players') or []
 
         if not tournament_slug:
@@ -568,6 +605,7 @@ def create_order():
             'team_name': team_name,
             'college': college,
             'captain_name': name,
+            'captain_freefire_username': captain_ff_username if captain_ff_username else None,
             'players': players,
             'amount_paise': amount_in_paise,
             'currency': 'INR',
@@ -592,6 +630,7 @@ def create_order():
                     'team_name': team_name,
                     'college': college,
                     'captain_name': name,
+                    'captain_freefire_username': captain_ff_username if captain_ff_username else None,
                     'players': players,
                 }
             }).execute()
@@ -936,10 +975,23 @@ def create_manual_upi_order():
         if not team_name or not college:
             return jsonify({'success': False, 'message': 'Team name and college are required in the registration details.'}), 400
 
+        captain_ff = (
+            reg_payload.get('captain_in_game_name') or reg_payload.get('captainInGameName') or
+            reg_payload.get('captain_freefire_username') or reg_payload.get('captainFreeFireUsername') or
+            request.form.get('captainInGameName') or request.form.get('captain_in_game_name') or
+            request.form.get('captainFreeFireUsername') or request.form.get('captain_freefire_username') or
+            data_json.get('captainInGameName') or data_json.get('captain_in_game_name') or
+            data_json.get('captainFreeFireUsername') or data_json.get('captain_freefire_username') or ''
+        ).strip()
+
         full_registration_payload = {
             'team_name': team_name,
             'college': college,
             'captain_name': captain_name,
+            'captain_in_game_name': captain_ff if captain_ff else None,
+            'captainInGameName': captain_ff if captain_ff else None,
+            'captain_freefire_username': captain_ff if captain_ff else None,
+            'captainFreeFireUsername': captain_ff if captain_ff else None,
             'players': players,
             'tournament_slug': tournament_slug,
             'captain_email': user_email,
@@ -1302,20 +1354,20 @@ def load_tournament_for_payment(tournament_slug):
         return None
 
     try:
-        supabase = get_supabase_client()
-        res = supabase.table('tournaments').select('*').ilike('slug', clean_slug).execute()
-        if res.data and len(res.data) > 0:
-            return res.data[0]
-    except Exception as e:
-        print(f"[WARN] Supabase load_tournament notice: {e}")
-
-    try:
         from routes.tournaments import IN_MEMORY_TOURNAMENTS
         for t in IN_MEMORY_TOURNAMENTS:
             if (t.get('slug') or '').strip().lower() == clean_slug:
                 return t
     except Exception:
         pass
+
+    try:
+        supabase = get_supabase_client()
+        res = supabase.table('tournaments').select('*').ilike('slug', clean_slug).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]
+    except Exception as e:
+        print(f"[WARN] Supabase load_tournament notice: {e}")
 
     return None
 

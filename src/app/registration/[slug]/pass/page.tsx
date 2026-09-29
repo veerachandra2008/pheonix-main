@@ -239,8 +239,23 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             }
 
             const expiry = await checkTournamentExpired(result.data.tournamentSlug || slug);
+            let ffUsername = result.data.captainFreeFireUsername || result.data.captain_freefire_username;
+            if (!ffUsername) {
+              try {
+                const rawSession = sessionStorage.getItem('reg_selection');
+                if (rawSession) {
+                  const parsed = JSON.parse(rawSession);
+                  ffUsername = parsed.captainFreeFireUsername || parsed.captain_freefire_username;
+                }
+              } catch {}
+            }
+
             setTicketData({
               ...result.data,
+              captainInGameName: ffUsername || null,
+              captain_in_game_name: ffUsername || null,
+              captainFreeFireUsername: ffUsername || null,
+              captain_freefire_username: ffUsername || null,
               isExpired: expiry.isExpired,
               expiryMessage: expiry.message,
             });
@@ -293,6 +308,17 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             } catch {}
           }
 
+          let ffUsername = item.captain_freefire_username;
+          if (!ffUsername) {
+            try {
+              const rawSession = sessionStorage.getItem('reg_selection');
+              if (rawSession) {
+                const parsed = JSON.parse(rawSession);
+                ffUsername = parsed.captainFreeFireUsername || parsed.captain_freefire_username;
+              }
+            } catch {}
+          }
+
           const expiry = await checkTournamentExpired(item.tournament_slug || slug);
 
           setTicketData({
@@ -303,6 +329,10 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
             teamName: item.team_name,
             college: item.college,
             captainName: item.captain_name,
+            captainInGameName: ffUsername || null,
+            captain_in_game_name: ffUsername || null,
+            captainFreeFireUsername: ffUsername || null,
+            captain_freefire_username: ffUsername || null,
             email: item.email,
             bio: userBio || 'Compete with honor, dominate with strategy. Verified Collegiate Athlete.',
             paymentStatus: item.payment_status || 'SUCCESS',
@@ -450,20 +480,48 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
 
       {/* ─── MAIN CONTENT ─── */}
       <div className="mx-auto max-w-2xl px-3.5 sm:px-6 lg:px-8 py-8 sm:py-12 lg:py-16 space-y-6 sm:space-y-8">
-        {/* Success Header */}
-        <div className="text-center space-y-3 no-print">
-          <div className="relative inline-flex">
-            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-              <CheckCircle2 className="h-8 w-8 sm:h-10 sm:w-10 text-emerald-400" />
+        {/* Success Header with Registration Confirmation Block */}
+        <div className="space-y-4 no-print">
+          <div className="text-center space-y-3">
+            <div className="relative inline-flex">
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                <CheckCircle2 className="h-8 w-8 sm:h-10 sm:w-10 text-emerald-400" />
+              </div>
+              <div className="absolute inset-0 rounded-full border border-emerald-500/20 animate-ping opacity-40" />
             </div>
-            <div className="absolute inset-0 rounded-full border border-emerald-500/20 animate-ping opacity-40" />
+
+            <div className="space-y-1">
+              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight break-words">Registration Successful ✓</h1>
+              <p className="text-xs sm:text-sm text-zinc-400 max-w-sm mx-auto leading-relaxed">
+                Your official esports ticket has been generated and recorded in the database. Present this pass at match lobbies.
+              </p>
+            </div>
           </div>
 
-          <div className="space-y-1">
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight break-words">Registration Complete!</h1>
-            <p className="text-xs sm:text-sm text-zinc-400 max-w-sm mx-auto leading-relaxed">
-              Your official esports ticket has been generated and recorded in the database. Present this pass at match lobbies.
-            </p>
+          {/* Registration Details Confirmation Card */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-white/[0.03] border border-emerald-500/30 backdrop-blur-xl shadow-xl space-y-2.5">
+            <div className="flex items-center justify-between text-xs pb-2 border-b border-white/[0.08]">
+              <span className="font-mono text-zinc-400 uppercase tracking-wider text-[11px]">Official Registration Confirmation</span>
+              <span className="text-emerald-400 font-bold text-xs flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Verified
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
+                <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Team</p>
+                <p className="text-sm font-black text-white truncate mt-0.5">{ticketData?.teamName || ticketData?.team_name || 'Phoenix'}</p>
+              </div>
+              <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
+                <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Captain</p>
+                <p className="text-sm font-black text-white truncate mt-0.5">{ticketData?.captainName || ticketData?.captain_name || 'Rahul'}</p>
+              </div>
+              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                <p className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Captain In-Game Name</p>
+                <p className="text-sm font-mono font-black text-amber-300 truncate mt-0.5">
+                  {ticketData?.captainInGameName || ticketData?.captain_in_game_name || ticketData?.captainFreeFireUsername || ticketData?.captain_freefire_username || '亗PHOENIX亗'}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -626,7 +684,13 @@ export default function RegistrationPass({ params: paramsPromise }: PageProps) {
                           {p.isCaptain || p.slot === 1 ? '👑 Captain' : `P${p.slot}`}
                         </span>
                         <span className="font-bold text-white truncate">{p.name}</span>
-                        <span className="font-mono text-emerald-400 text-[11px] shrink-0">({p.inGameTag || 'IGN'})</span>
+                        {(p.isCaptain || p.slot === 1) && (ticketData?.captainInGameName || ticketData?.captain_in_game_name || ticketData?.captainFreeFireUsername || ticketData?.captain_freefire_username) ? (
+                          <span className="font-mono text-amber-400 font-bold text-[11px] shrink-0 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/25">
+                            IGN: {ticketData?.captainInGameName || ticketData?.captain_in_game_name || ticketData?.captainFreeFireUsername || ticketData?.captain_freefire_username}
+                          </span>
+                        ) : (
+                          <span className="font-mono text-emerald-400 text-[11px] shrink-0">({p.inGameTag || 'IGN'})</span>
+                        )}
                       </div>
                       <span className="font-mono text-zinc-400 text-[11px] truncate sm:max-w-[170px] sm:text-right break-all">{p.email}</span>
                     </div>
