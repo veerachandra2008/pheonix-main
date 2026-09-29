@@ -704,7 +704,7 @@ export default function OrganizerLeaderboardPage() {
   const activeMatchObj = matches.find((m) => m.id === selectedMatchId);
 
   return (
-    <main className="min-h-screen bg-[#070B14] text-white py-8 relative overflow-hidden font-sans">
+    <main className="min-h-screen bg-[#070B14] text-white pt-28 sm:pt-32 pb-16 relative overflow-hidden font-sans">
       {/* Background Glow */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_-20%,rgba(16,185,129,0.12),transparent_60%)] pointer-events-none" />
 
@@ -715,7 +715,7 @@ export default function OrganizerLeaderboardPage() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-xl border shadow-2xl backdrop-blur-md flex items-center gap-3 text-xs font-bold ${
+            className={`fixed top-20 sm:top-24 right-6 z-50 px-4 py-3 rounded-xl border shadow-2xl backdrop-blur-md flex items-center gap-3 text-xs font-bold ${
               toast.type === 'success'
                 ? 'bg-emerald-950/90 border-emerald-500/30 text-emerald-300'
                 : toast.type === 'error'

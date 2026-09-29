@@ -358,7 +358,7 @@ export default function EditTournamentPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#070B14] text-white py-12 relative overflow-hidden font-sans">
+    <main className="min-h-screen bg-[#070B14] text-white pt-28 sm:pt-32 pb-16 relative overflow-hidden font-sans">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_-20%,rgba(99,102,241,0.12),transparent_60%)] pointer-events-none" />
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 relative z-10 space-y-8">

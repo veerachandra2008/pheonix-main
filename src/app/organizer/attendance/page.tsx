@@ -168,7 +168,7 @@ export default function OrganizerAttendanceHubPage() {
 
   return (
     <main className="min-h-screen bg-[#070B14] text-white selection:bg-emerald-500 selection:text-zinc-950 font-sans pb-20">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-8">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-28 sm:pt-32">
 
         {/* Navigation Breadcrumb */}
         <div className="flex items-center gap-2 text-xs font-bold text-slate-400 mb-6">

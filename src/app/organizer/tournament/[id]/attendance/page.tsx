@@ -580,7 +580,7 @@ export default function TournamentAttendancePage() {
             initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className={`fixed top-6 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-2xl border text-sm font-bold backdrop-blur-xl ${
+            className={`fixed top-20 sm:top-24 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-2xl border text-sm font-bold backdrop-blur-xl ${
               toastMessage.type === 'success'
                 ? 'bg-emerald-950/90 border-emerald-500/50 text-emerald-300 shadow-emerald-900/30'
                 : toastMessage.type === 'error'
@@ -600,7 +600,7 @@ export default function TournamentAttendancePage() {
         )}
       </AnimatePresence>
 
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-8">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-28 sm:pt-32">
         
         {/* Navigation Breadcrumb */}
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
