@@ -1812,6 +1812,18 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
         const nowIso = new Date().toISOString();
         for (const row of rows) {
           const rawScores = row.raw_scores || {};
+          const isParticipating = rawScores._participating !== 0 && rawScores._participating !== false;
+          if (!isParticipating) {
+            await supabaseAdmin
+              .from('match_team_results')
+              .update({
+                calculated_scores: {},
+                total_points: 0,
+                updated_at: nowIso,
+              })
+              .eq('id', row.id);
+            continue;
+          }
           const calcScores: Record<string, number> = {};
           rules.forEach((col: any) => {
             const rawVal = rawScores[col.id] !== undefined ? Number(rawScores[col.id]) || 0 : 0;
@@ -1967,17 +1979,26 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
               }, { status: 400 });
             }
 
-            const rawScores: Record<string, number> = {};
+            const isParticipating = item.participating !== false && inputRaw._participating !== 0;
+            const rawScores: Record<string, number> = {
+              _participating: isParticipating ? 1 : 0,
+            };
             const calcScores: Record<string, number> = {};
-            const inputRaw = item.raw_scores || {};
 
-            rules.forEach((col: any) => {
-              const rawVal = inputRaw[col.id] !== undefined ? Number(inputRaw[col.id]) || 0 : 0;
-              rawScores[col.id] = rawVal;
-              calcScores[col.id] = calculateScoreForRule(col, rawVal);
-            });
+            if (isParticipating) {
+              rules.forEach((col: any) => {
+                const rawVal = inputRaw[col.id] !== undefined ? Number(inputRaw[col.id]) || 0 : 0;
+                rawScores[col.id] = rawVal;
+                calcScores[col.id] = calculateScoreForRule(col, rawVal);
+              });
+            } else {
+              rules.forEach((col: any) => {
+                rawScores[col.id] = 0;
+                calcScores[col.id] = 0;
+              });
+            }
 
-            const totalPoints = Object.values(calcScores).reduce((a, b) => a + b, 0);
+            const totalPoints = isParticipating ? Object.values(calcScores).reduce((a, b) => a + b, 0) : 0;
 
             const resultRow = {
               match_id: matchId,
@@ -1995,6 +2016,7 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
               ...resultRow,
               team_name: teamInfo.team_name || 'Squad',
               captain_in_game_name: teamInfo.captain_in_game_name || '',
+              participating: isParticipating,
             });
           }
 
@@ -2054,12 +2076,14 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
             });
 
             const totalPoints = r?.total_points !== undefined ? Number(r.total_points) : Object.values(calcScores).reduce((a, b) => a + b, 0);
+            const isParticipating = r ? (r.raw_scores?._participating !== 0 && r.raw_scores?._participating !== false) : true;
 
             return {
               ...t,
               raw_scores: rawScores,
               calculated_scores: calcScores,
               total_points: totalPoints,
+              participating: isParticipating,
             };
           });
 
@@ -2266,20 +2290,34 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
             const rawScores: Record<string, number> = {};
             const calcScores: Record<string, number> = {};
 
+            let isParticipating = true;
             if (mRes) {
-              const inRaw = mRes.raw_scores || {};
-              rules.forEach((col: any) => {
-                const rVal = inRaw[col.id] !== undefined ? Number(inRaw[col.id]) || 0 : 0;
-                rawScores[col.id] = rVal;
-                calcScores[col.id] = calculateScoreForRule(col, rVal);
-              });
-              pts = mRes.total_points !== undefined ? Number(mRes.total_points) : Object.values(calcScores).reduce((a, b) => a + b, 0);
+              isParticipating = mRes.raw_scores?._participating !== 0 && mRes.raw_scores?._participating !== false;
+              if (isParticipating) {
+                const inRaw = mRes.raw_scores || {};
+                rules.forEach((col: any) => {
+                  const rVal = inRaw[col.id] !== undefined ? Number(inRaw[col.id]) || 0 : 0;
+                  rawScores[col.id] = rVal;
+                  calcScores[col.id] = calculateScoreForRule(col, rVal);
+                });
+                pts = mRes.total_points !== undefined ? Number(mRes.total_points) : Object.values(calcScores).reduce((a, b) => a + b, 0);
+              } else {
+                rules.forEach((col: any) => {
+                  rawScores[col.id] = 0;
+                  calcScores[col.id] = 0;
+                });
+                pts = 0;
+              }
             } else {
               rules.forEach((col: any) => {
                 rawScores[col.id] = 0;
                 calcScores[col.id] = 0;
               });
               pts = 0;
+              const matchResultsList = resultsByMatch[mid] ? Object.values(resultsByMatch[mid]) : [];
+              if (matchResultsList.length > 0) {
+                isParticipating = false;
+              }
             }
 
             matchScores[mid] = pts;
@@ -2290,6 +2328,7 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
               total_points: pts,
               raw_scores: rawScores,
               calculated_scores: calcScores,
+              participating: isParticipating,
             };
             overallTotal += pts;
           });

@@ -66,6 +66,7 @@ interface MatchTeamResult {
   calculated_scores: Record<string, number>;
   total_points: number;
   attended_at?: string;
+  participating?: boolean;
 }
 
 interface TournamentMatch {
@@ -95,6 +96,7 @@ interface StandingsTeamRow {
       total_points: number;
       raw_scores: Record<string, number>;
       calculated_scores: Record<string, number>;
+      participating?: boolean;
     }
   >;
   overall_total: number;
@@ -132,6 +134,10 @@ export default function OrganizerLeaderboardPage() {
 
   // Raw score input state: keyed by team_id -> { rule_id: number | string }
   const [rawInputs, setRawInputs] = useState<Record<string, Record<string, any>>>({});
+
+  // Phase 3 Enhancement: Per-Match Participating Squads & Elimination State
+  const [participatingTeams, setParticipatingTeams] = useState<Record<string, boolean>>({});
+  const [matchSquadFilter, setMatchSquadFilter] = useState<'ALL' | 'ACTIVE' | 'ELIMINATED'>('ALL');
 
   // Match Modals state
   const [showAddMatchModal, setShowAddMatchModal] = useState(false);
@@ -230,16 +236,22 @@ export default function OrganizerLeaderboardPage() {
         const teamsData: MatchTeamResult[] = res.teams || [];
         setMatchTeams(teamsData);
 
-        // Populate rawInputs state
+        // Populate rawInputs state and participating state
         const initialInputs: Record<string, Record<string, any>> = {};
+        const initialParticipating: Record<string, boolean> = {};
+
         teamsData.forEach((t) => {
           initialInputs[t.team_id] = {};
+          initialParticipating[t.team_id] = t.participating !== false;
+
           const activeCols = currentRules || columns;
           activeCols.forEach((col) => {
             initialInputs[t.team_id][col.id] = t.raw_scores?.[col.id] !== undefined ? t.raw_scores[col.id] : 0;
           });
         });
+
         setRawInputs(initialInputs);
+        setParticipatingTeams(initialParticipating);
       } else {
         showToast('error', res?.message || 'Failed to load match details.');
       }
@@ -420,6 +432,69 @@ export default function OrganizerLeaderboardPage() {
     }));
   };
 
+  // ─── Participation Roster Helpers ───
+  const handleToggleTeamParticipation = (teamId: string) => {
+    if (isLocked) return;
+    setParticipatingTeams((prev) => ({
+      ...prev,
+      [teamId]: !(prev[teamId] !== false),
+    }));
+  };
+
+  const handleSelectAllSquads = () => {
+    if (isLocked) return;
+    const updated: Record<string, boolean> = {};
+    matchTeams.forEach((t) => {
+      updated[t.team_id] = true;
+    });
+    setParticipatingTeams(updated);
+    showToast('info', `All ${matchTeams.length} squads marked as active for this match.`);
+  };
+
+  const handleDeselectAllSquads = () => {
+    if (isLocked) return;
+    const updated: Record<string, boolean> = {};
+    matchTeams.forEach((t) => {
+      updated[t.team_id] = false;
+    });
+    setParticipatingTeams(updated);
+    showToast('info', 'All squads marked as eliminated/inactive for this match.');
+  };
+
+  const handleAdvanceTopN = (topCount: number) => {
+    if (isLocked) return;
+    const effectiveStandings = standings && standings.length > 0 ? standings : [];
+    if (effectiveStandings.length > 0) {
+      const topIds = new Set(effectiveStandings.slice(0, topCount).map((s) => s.team_id));
+      const updated: Record<string, boolean> = {};
+      matchTeams.forEach((t) => {
+        updated[t.team_id] = topIds.has(t.team_id);
+      });
+      setParticipatingTeams(updated);
+      showToast('success', `Advanced Top ${Math.min(topCount, effectiveStandings.length)} squads from standings!`);
+    } else {
+      const updated: Record<string, boolean> = {};
+      matchTeams.forEach((t, idx) => {
+        updated[t.team_id] = idx < topCount;
+      });
+      setParticipatingTeams(updated);
+      showToast('success', `Selected first ${Math.min(topCount, matchTeams.length)} squads for this match.`);
+    }
+  };
+
+  const activeCount = matchTeams.filter((t) => participatingTeams[t.team_id] !== false).length;
+  const eliminatedCount = matchTeams.length - activeCount;
+
+  const displayedMatchTeams = React.useMemo(() => {
+    if (matchSquadFilter === 'ACTIVE') {
+      return matchTeams.filter((t) => participatingTeams[t.team_id] !== false);
+    }
+    if (matchSquadFilter === 'ELIMINATED') {
+      return matchTeams.filter((t) => participatingTeams[t.team_id] === false);
+    }
+    return matchTeams;
+  }, [matchTeams, participatingTeams, matchSquadFilter]);
+
   const handleSaveMatchResults = async () => {
     if (!selectedMatchId) {
       showToast('error', 'No match selected.');
@@ -433,24 +508,32 @@ export default function OrganizerLeaderboardPage() {
 
     setSavingResults(true);
     try {
-      // Build results payload with entered RAW scores
+      // Build results payload with entered RAW scores and participation status
       const payloadResults = matchTeams.map((t) => {
+        const isPart = participatingTeams[t.team_id] !== false;
         const teamRaw = rawInputs[t.team_id] || {};
-        const sanitizedRaw: Record<string, number> = {};
+        const sanitizedRaw: Record<string, number> = {
+          _participating: isPart ? 1 : 0,
+        };
         columns.forEach((col) => {
-          const rawVal = teamRaw[col.id];
-          sanitizedRaw[col.id] = rawVal !== undefined && rawVal !== '' ? Number(rawVal) : 0;
+          if (isPart) {
+            const rawVal = teamRaw[col.id];
+            sanitizedRaw[col.id] = rawVal !== undefined && rawVal !== '' ? Number(rawVal) : 0;
+          } else {
+            sanitizedRaw[col.id] = 0;
+          }
         });
 
         return {
           team_id: t.team_id,
           raw_scores: sanitizedRaw,
+          participating: isPart,
         };
       });
 
       const res = await flaskApi.saveMatchResults(rawId, selectedMatchId, payloadResults);
       if (res && res.success) {
-        showToast('success', `Scores automatically calculated and saved by server!`);
+        showToast('success', `Scores and participation roster saved successfully!`);
         // Refresh both match details and cumulative standings
         await loadData(rawId, selectedMatchId);
       } else {
@@ -1190,19 +1273,30 @@ export default function OrganizerLeaderboardPage() {
 
                               {/* Dynamic Match Total Points: M1, M2, M3... */}
                               {matches.map((m) => {
+                                const b = t.match_breakdowns?.[m.id];
+                                const isPart = b?.participating !== false;
                                 const pts = t.match_scores?.[m.id] !== undefined ? t.match_scores[m.id] : 0;
                                 return (
                                   <td
                                     key={m.id}
                                     className="py-4 px-4 text-center font-mono font-bold border-l border-white/5"
                                   >
-                                    <span
-                                      className={`${
-                                        pts > 0 ? 'text-white' : 'text-slate-500 font-normal'
-                                      }`}
-                                    >
-                                      {pts}
-                                    </span>
+                                    {!isPart ? (
+                                      <span
+                                        className="text-[10px] text-zinc-500 font-mono px-1.5 py-0.5 rounded bg-white/5 border border-white/5"
+                                        title="Eliminated / Did not play in this match"
+                                      >
+                                        DNP
+                                      </span>
+                                    ) : (
+                                      <span
+                                        className={`${
+                                          pts > 0 ? 'text-white' : 'text-slate-500 font-normal'
+                                        }`}
+                                      >
+                                        {pts}
+                                      </span>
+                                    )}
                                   </td>
                                 );
                               })}
@@ -1258,6 +1352,7 @@ export default function OrganizerLeaderboardPage() {
                                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                                         {matches.map((m) => {
                                           const b = t.match_breakdowns?.[m.id];
+                                          const isPart = b?.participating !== false;
                                           const matchPts = b?.total_points ?? 0;
                                           const raw = b?.raw_scores || {};
                                           const calc = b?.calculated_scores || {};
@@ -1265,7 +1360,11 @@ export default function OrganizerLeaderboardPage() {
                                           return (
                                             <div
                                               key={m.id}
-                                              className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 space-y-2.5"
+                                              className={`p-3.5 rounded-xl border space-y-2.5 ${
+                                                !isPart
+                                                  ? 'bg-rose-950/10 border-rose-500/20 opacity-80'
+                                                  : 'bg-white/[0.03] border-white/10'
+                                              }`}
                                             >
                                               <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-1.5">
@@ -1275,10 +1374,15 @@ export default function OrganizerLeaderboardPage() {
                                                   <span className="text-xs font-bold text-white truncate max-w-[120px]">
                                                     {m.title}
                                                   </span>
+                                                  {!isPart && (
+                                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-rose-500/20 text-rose-300">
+                                                      DNP
+                                                    </span>
+                                                  )}
                                                 </div>
 
-                                                <span className="text-xs font-mono font-black text-emerald-400">
-                                                  {matchPts} pts
+                                                <span className={`text-xs font-mono font-black ${isPart ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                                  {isPart ? `${matchPts} pts` : '0 pts (Eliminated)'}
                                                 </span>
                                               </div>
 
@@ -1438,11 +1542,11 @@ export default function OrganizerLeaderboardPage() {
                       </span>
                       <span className="text-[11px] text-slate-400">•</span>
                       <span className="text-[11px] font-semibold text-emerald-400">
-                        {matchTeams.length} Verified Present Squads
+                        {activeCount} Active / {matchTeams.length} Total Verified Squads
                       </span>
                     </div>
                     <p className="text-xs text-slate-400">
-                      Enter <span className="text-white font-bold">RAW values</span> only (e.g. actual kills, placement position). The backend calculates points and totals.
+                      Select participating squads below, enter <span className="text-white font-bold">RAW values</span>, and click Save. Eliminated teams retain their overall standing with 0 pts in this match.
                     </p>
                   </div>
 
@@ -1476,12 +1580,122 @@ export default function OrganizerLeaderboardPage() {
                   </div>
                 </div>
 
+                {/* Participation & Squad Selection Toolbar */}
+                <div className="p-3.5 sm:p-4 bg-[#090D17] border-b border-white/10 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Active Squads Badge */}
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold">
+                      <Users className="h-3.5 w-3.5" />
+                      Active: {activeCount} / {matchTeams.length}
+                    </span>
+
+                    {eliminatedCount > 0 && (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-bold">
+                        Eliminated / DNP: {eliminatedCount}
+                      </span>
+                    )}
+
+                    {/* View Filter Pill Switcher */}
+                    <div className="flex items-center bg-black/40 border border-white/10 rounded-xl p-1 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setMatchSquadFilter('ALL')}
+                        className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                          matchSquadFilter === 'ALL'
+                            ? 'bg-white/15 text-white shadow-sm'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        All ({matchTeams.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMatchSquadFilter('ACTIVE')}
+                        className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                          matchSquadFilter === 'ACTIVE'
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'text-slate-400 hover:text-emerald-400'
+                        }`}
+                      >
+                        Active Only ({activeCount})
+                      </button>
+                      {eliminatedCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setMatchSquadFilter('ELIMINATED')}
+                          className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                            matchSquadFilter === 'ELIMINATED'
+                              ? 'bg-rose-600 text-white shadow-sm'
+                              : 'text-slate-400 hover:text-rose-400'
+                          }`}
+                        >
+                          Eliminated ({eliminatedCount})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Quick Selection Actions */}
+                  {!isLocked && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] font-bold text-slate-400 mr-1 hidden md:inline">
+                        Advance Roster:
+                      </span>
+
+                      {/* Advance Top 10 */}
+                      <button
+                        type="button"
+                        onClick={() => handleAdvanceTopN(10)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-600/30 to-amber-500/20 hover:from-amber-600/50 hover:to-amber-500/40 border border-amber-500/40 text-amber-300 text-xs font-black uppercase tracking-wider rounded-xl transition cursor-pointer shadow-sm"
+                        title="Automatically advance Top 10 squads from standings"
+                      >
+                        <Trophy className="h-3 w-3 text-amber-400" />
+                        Advance Top 10
+                      </button>
+
+                      {/* Advance Top 12 */}
+                      {matchTeams.length > 12 && (
+                        <button
+                          type="button"
+                          onClick={() => handleAdvanceTopN(12)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-cyan-600/30 to-cyan-500/20 hover:from-cyan-600/50 hover:to-cyan-500/40 border border-cyan-500/40 text-cyan-300 text-xs font-black uppercase tracking-wider rounded-xl transition cursor-pointer shadow-sm"
+                          title="Automatically advance Top 12 squads from standings"
+                        >
+                          <Trophy className="h-3 w-3 text-cyan-400" />
+                          Advance Top 12
+                        </button>
+                      )}
+
+                      {/* Select All */}
+                      <button
+                        type="button"
+                        onClick={handleSelectAllSquads}
+                        className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white text-xs font-bold rounded-xl transition cursor-pointer"
+                        title="Include all squads in this match"
+                      >
+                        Select All
+                      </button>
+
+                      {/* Clear */}
+                      <button
+                        type="button"
+                        onClick={handleDeselectAllSquads}
+                        className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-400 text-xs font-bold rounded-xl transition cursor-pointer"
+                        title="Deselect all squads for this match"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 {/* Match Result Table */}
                 <div className="overflow-x-auto min-h-[300px]">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
                       <tr className="bg-slate-900/90 border-b border-white/10 text-slate-400 font-bold uppercase tracking-wider">
-                        <th className="py-4 px-4 w-14 text-center shrink-0">#</th>
+                        <th className="py-4 px-3 w-12 text-center shrink-0">#</th>
+                        <th className="py-4 px-3 w-28 text-center shrink-0">Status</th>
                         <th className="py-4 px-4 min-w-[200px]">Team</th>
                         <th className="py-4 px-4 min-w-[180px]">Captain In-Game Name</th>
 
@@ -1509,7 +1723,7 @@ export default function OrganizerLeaderboardPage() {
                     <tbody className="divide-y divide-white/5">
                       {matchTeams.length === 0 ? (
                         <tr>
-                          <td colSpan={4 + columns.length} className="py-16 text-center">
+                          <td colSpan={5 + columns.length} className="py-16 text-center">
                             <div className="flex flex-col items-center justify-center gap-3">
                               <div className="p-4 rounded-full bg-white/5 border border-white/10 text-slate-400">
                                 <ShieldCheck className="h-8 w-8 text-amber-400" />
@@ -1529,20 +1743,84 @@ export default function OrganizerLeaderboardPage() {
                             </div>
                           </td>
                         </tr>
+                      ) : displayedMatchTeams.length === 0 ? (
+                        <tr>
+                          <td colSpan={5 + columns.length} className="py-16 text-center">
+                            <div className="flex flex-col items-center justify-center gap-2">
+                              <p className="text-sm font-bold text-white">No squads match the current filter.</p>
+                              <p className="text-xs text-slate-400">
+                                You currently have "{matchSquadFilter}" filter selected with {displayedMatchTeams.length} squads.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => setMatchSquadFilter('ALL')}
+                                className="mt-2 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-white transition"
+                              >
+                                Show All Squads
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
                       ) : (
-                        matchTeams.map((t, idx) => {
+                        displayedMatchTeams.map((t, idx) => {
+                          const isPart = participatingTeams[t.team_id] !== false;
                           const teamRaw = rawInputs[t.team_id] || {};
                           return (
-                            <tr key={t.team_id} className="hover:bg-white/[0.02] transition">
+                            <tr
+                              key={t.team_id}
+                              className={`transition ${
+                                !isPart ? 'bg-rose-950/15 opacity-70 hover:opacity-90' : 'hover:bg-white/[0.02]'
+                              }`}
+                            >
                               {/* Index */}
-                              <td className="py-4 px-4 text-center font-bold text-slate-400">
+                              <td className="py-4 px-3 text-center font-bold text-slate-400">
                                 {idx + 1}
+                              </td>
+
+                              {/* Participation Status Toggle */}
+                              <td className="py-3 px-3 text-center">
+                                <button
+                                  type="button"
+                                  disabled={isLocked}
+                                  onClick={() => handleToggleTeamParticipation(t.team_id)}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition cursor-pointer ${
+                                    isPart
+                                      ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 shadow-sm'
+                                      : 'bg-rose-500/20 border border-rose-500/40 text-rose-300 hover:bg-rose-500/30 shadow-sm'
+                                  } ${isLocked ? 'cursor-not-allowed opacity-80' : ''}`}
+                                  title={isPart ? 'Click to eliminate squad from this match' : 'Click to include squad in this match'}
+                                >
+                                  {isPart ? (
+                                    <>
+                                      <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                                      Active
+                                    </>
+                                  ) : (
+                                    <>
+                                      <X className="h-3 w-3 text-rose-400" />
+                                      Eliminated
+                                    </>
+                                  )}
+                                </button>
                               </td>
 
                               {/* Team Name */}
                               <td className="py-4 px-4">
                                 <div className="flex flex-col">
-                                  <span className="font-extrabold text-white text-sm tracking-tight">{t.team_name}</span>
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className={`font-extrabold text-sm tracking-tight ${
+                                        isPart ? 'text-white' : 'text-slate-400 line-through'
+                                      }`}
+                                    >
+                                      {t.team_name}
+                                    </span>
+                                    {!isPart && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-400 font-bold uppercase font-mono">
+                                        DNP
+                                      </span>
+                                    )}
+                                  </div>
                                   <span className="text-[11px] text-slate-400 font-medium">
                                     {t.college || 'Collegiate Squad'} • Cap: {t.captain_name}
                                   </span>
@@ -1562,9 +1840,10 @@ export default function OrganizerLeaderboardPage() {
 
                               {/* Dynamic Columns - RAW INPUTS */}
                               {columns.map((col) => {
-                                const currentRawVal = teamRaw[col.id] !== undefined ? teamRaw[col.id] : 0;
-                                const calculatedPts =
-                                  t.calculated_scores?.[col.id] !== undefined ? t.calculated_scores[col.id] : null;
+                                const currentRawVal = isPart ? (teamRaw[col.id] !== undefined ? teamRaw[col.id] : 0) : 0;
+                                const calculatedPts = isPart
+                                  ? (t.calculated_scores?.[col.id] !== undefined ? t.calculated_scores[col.id] : null)
+                                  : 0;
 
                                 return (
                                   <td key={col.id} className="py-3 px-3 text-center border-l border-white/5">
@@ -1572,16 +1851,20 @@ export default function OrganizerLeaderboardPage() {
                                       <input
                                         type="number"
                                         step="any"
-                                        value={currentRawVal}
-                                        disabled={isLocked}
-                                        readOnly={isLocked}
+                                        value={isPart ? currentRawVal : ''}
+                                        disabled={isLocked || !isPart}
+                                        readOnly={isLocked || !isPart}
                                         onChange={(e) => handleRawScoreChange(t.team_id, col.id, e.target.value)}
-                                        className={`w-20 px-2 py-1.5 text-center font-mono font-bold text-xs rounded-lg bg-black/40 border border-white/15 text-white focus:border-emerald-500 focus:bg-black/60 outline-none transition ${
-                                          isLocked ? 'opacity-70 cursor-not-allowed' : ''
+                                        className={`w-20 px-2 py-1.5 text-center font-mono font-bold text-xs rounded-lg border outline-none transition ${
+                                          !isPart
+                                            ? 'bg-white/[0.02] border-white/5 text-slate-600 cursor-not-allowed placeholder:text-slate-600'
+                                            : isLocked
+                                            ? 'bg-black/40 border-white/15 text-white opacity-70 cursor-not-allowed'
+                                            : 'bg-black/40 border-white/15 text-white focus:border-emerald-500 focus:bg-black/60'
                                         }`}
-                                        placeholder="0"
+                                        placeholder={isPart ? '0' : '-'}
                                       />
-                                      {calculatedPts !== null && (
+                                      {isPart && calculatedPts !== null && (
                                         <span
                                           className={`text-[10px] font-mono font-bold ${
                                             col.type === 'PENALTY' && calculatedPts < 0
@@ -1600,8 +1883,12 @@ export default function OrganizerLeaderboardPage() {
                               })}
 
                               {/* Total Points calculated server-side */}
-                              <td className="py-4 px-5 text-right font-black font-mono text-emerald-400 text-sm border-l border-white/10">
-                                {t.total_points ?? 0} pts
+                              <td className="py-4 px-5 text-right font-black font-mono text-sm border-l border-white/10">
+                                {isPart ? (
+                                  <span className="text-emerald-400">{t.total_points ?? 0} pts</span>
+                                ) : (
+                                  <span className="text-slate-500 text-xs italic font-normal">0 pts (DNP)</span>
+                                )}
                               </td>
                             </tr>
                           );

@@ -987,13 +987,15 @@ def get_match_details_and_results(tournament_slug, match_id):
 
             if res_row:
                 raw_scores = res_row.get('raw_scores', {})
+                is_part = raw_scores.get('_participating') != 0
                 # Ensure all active columns have an entry in raw_scores (default 0)
                 full_raw = {col['id']: raw_scores.get(col['id'], 0) for col in columns}
                 calc_scores = {}
                 for col in columns:
                     calc_scores[col['id']] = calculate_score_for_rule(col, full_raw.get(col['id'], 0))
-                total_pts = sum(calc_scores.values())
+                total_pts = sum(calc_scores.values()) if is_part else 0
             else:
+                is_part = True
                 full_raw = {col['id']: 0 for col in columns}
                 calc_scores = {col['id']: 0 for col in columns}
                 total_pts = 0
@@ -1003,7 +1005,8 @@ def get_match_details_and_results(tournament_slug, match_id):
                 'rank': idx,
                 'raw_scores': full_raw,
                 'calculated_scores': calc_scores,
-                'total_points': total_pts
+                'total_points': total_pts,
+                'participating': is_part
             })
 
         return jsonify({
@@ -1087,21 +1090,28 @@ def save_match_results(tournament_slug, match_id):
         for item in submitted_results:
             team_id = item.get('team_id')
             input_raw = item.get('raw_scores') or {}
+            is_participating = item.get('participating', True) is not False and input_raw.get('_participating') != 0
 
             # Build sanitized raw_scores (only for existing rules)
-            raw_scores = {}
+            raw_scores = {'_participating': 1 if is_participating else 0}
             calc_scores = {}
-            for r_id, rule in rules_dict.items():
-                raw_val = input_raw.get(r_id, 0)
-                try:
-                    raw_scores[r_id] = float(raw_val)
-                except (ValueError, TypeError):
-                    raw_scores[r_id] = 0.0
-                
-                # Server calculation
-                calc_scores[r_id] = calculate_score_for_rule(rule, raw_scores[r_id])
 
-            total_points = sum(calc_scores.values())
+            if is_participating:
+                for r_id, rule in rules_dict.items():
+                    raw_val = input_raw.get(r_id, 0)
+                    try:
+                        raw_scores[r_id] = float(raw_val)
+                    except (ValueError, TypeError):
+                        raw_scores[r_id] = 0.0
+                    
+                    # Server calculation
+                    calc_scores[r_id] = calculate_score_for_rule(rule, raw_scores[r_id])
+                total_points = sum(calc_scores.values())
+            else:
+                for r_id, rule in rules_dict.items():
+                    raw_scores[r_id] = 0.0
+                    calc_scores[r_id] = 0.0
+                total_points = 0.0
 
             result_id = str(uuid.uuid4())
             result_record = {
@@ -1131,7 +1141,8 @@ def save_match_results(tournament_slug, match_id):
             processed_results.append({
                 **result_record,
                 'team_name': team_info.get('team_name', 'Squad'),
-                'captain_in_game_name': team_info.get('captain_in_game_name', '')
+                'captain_in_game_name': team_info.get('captain_in_game_name', ''),
+                'participating': is_participating
             })
 
         return jsonify({
@@ -1252,18 +1263,27 @@ def get_standings_for_tournament(tournament_slug):
             mid = str(m['id'])
             m_res = match_results_by_match.get(mid, {}).get(tid)
 
+            is_participating = True
             if m_res:
                 raw_scores = m_res.get('raw_scores', {})
-                # Recalculate accurately using current rules to ensure rule changes flow through immediately
-                calc_scores = {}
-                for r_id, rule in rules_dict.items():
-                    raw_val = raw_scores.get(r_id, 0)
-                    calc_scores[r_id] = calculate_score_for_rule(rule, raw_val)
-                pts = sum(calc_scores.values())
+                is_participating = raw_scores.get('_participating') != 0
+                if is_participating:
+                    # Recalculate accurately using current rules to ensure rule changes flow through immediately
+                    calc_scores = {}
+                    for r_id, rule in rules_dict.items():
+                        raw_val = raw_scores.get(r_id, 0)
+                        calc_scores[r_id] = calculate_score_for_rule(rule, raw_val)
+                    pts = sum(calc_scores.values())
+                else:
+                    pts = 0.0
+                    raw_scores = {col['id']: 0 for col in columns}
+                    calc_scores = {col['id']: 0 for col in columns}
             else:
                 pts = 0.0
                 raw_scores = {col['id']: 0 for col in columns}
                 calc_scores = {col['id']: 0 for col in columns}
+                if len(match_results_by_match.get(mid, {})) > 0:
+                    is_participating = False
 
             clean_pts = int(pts) if isinstance(pts, float) and pts.is_integer() else pts
             match_scores[mid] = clean_pts
@@ -1273,7 +1293,8 @@ def get_standings_for_tournament(tournament_slug):
                 'match_number': m.get('match_number', 1),
                 'total_points': clean_pts,
                 'raw_scores': raw_scores,
-                'calculated_scores': calc_scores
+                'calculated_scores': calc_scores,
+                'participating': is_participating
             }
             overall_total += pts
 
