@@ -1979,6 +1979,7 @@ async function handleDirectDatabase(req: NextRequest, segments: string[]) {
               }, { status: 400 });
             }
 
+            const inputRaw = item.raw_scores || {};
             const isParticipating = item.participating !== false && inputRaw._participating !== 0;
             const rawScores: Record<string, number> = {
               _participating: isParticipating ? 1 : 0,
