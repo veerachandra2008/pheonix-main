@@ -1,4 +1,4 @@
-# 🔥 Phoenix Esports & Gaming Tournament Platform
+# 🔥 Xenova Esports & Gaming Tournament Platform
 
 A next-generation, high-performance esports platform designed for competitive gaming communities, tournament organizers, and pro players. Built with Next.js 16 App Router, TypeScript, Tailwind CSS 4, Framer Motion, and WebGL shader animations.
 
